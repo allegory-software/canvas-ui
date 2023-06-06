@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body {
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	overflow: hidden;
+}
+body {
+	display: flex;
+	position: relative;
+	background: black;
+}
+canvas {
+	position: absolute;
+	border: 1px solid blue;
+}
+</style>
+</head>
+<body>
+<canvas id=canvas></canvas>
+<script>
+
+/*
+
+- drag & drop UI designer with anchors
+- reusable UI modules with controlled variations
+- IMGUI with layers and layouting
+
+*/
+
+pr = (...args) => console.log(...args)
+floor = Math.floor
+Document.prototype.on    = Document.prototype.addEventListener
+EventTarget.prototype.on = EventTarget.prototype.addEventListener
+
+// ---------------------------------------------------------------------------
+
+let dpr, w, h
+function resize_canvas() {
+	dpr = devicePixelRatio
+	w = window.innerWidth  - 2
+	h = window.innerHeight - 2
+	canvas.style.width  = w + 'px'
+	canvas.style.height = h + 'px'
+	w = floor(w * dpr)
+	h = floor(h * dpr)
+	canvas.width  = w
+	canvas.height = h
+}
+let cx = canvas.getContext('2d')
+function raf_redraw() {
+	cx.save()
+	cx.clearRect(0, 0, canvas.width, canvas.height)
+	cx.beginPath()
+	redraw_all()
+	cx.restore()
+}
+function redraw() {
+	requestAnimationFrame(raf_redraw)
+}
+resize_canvas()
+redraw()
+window.on('resize', resize_canvas)
+
+// ---------------------------------------------------------------------------
+
+let mx, my, left, right
+canvas.on('pointerdown', function(ev) {
+	mx = ev.clientX * dpr
+	my = ev.clientY * dpr
+	if (ev.which == 1) left  = true
+	if (ev.which == 2) right = true
+	this.setPointerCapture(ev.pointerId)
+	hit_test_all()
+	redraw()
+})
+canvas.on('pointerup', function(ev) {
+	mx = ev.clientX * dpr
+	my = ev.clientY * dpr
+	if (ev.which == 1) left  = false
+	if (ev.which == 2) right = false
+	this.releasePointerCapture(ev.pointerId)
+	hit_test_all()
+	redraw()
+})
+canvas.on('pointermove', function(ev) {
+	mx = ev.clientX * dpr
+	my = ev.clientY * dpr
+	hit_test_all()
+	redraw()
+})
+
+// ---------------------------------------------------------------------------
+
+function make_layer() {
+	let e = []
+	return e
+}
+let layer_base = make_layer()
+let layer_popup = make_layer()
+let layers = [layer_base, layer_popup]
+let layer = layer_base
+
+let stage = 'measure'
+
+function push_cmd(cmd, ...args) {
+	let argc = args.length + 3
+	layer.push(cmd, argc, ...args, argc)
+}
+
+function rect(id, x, y, w, h) {
+	push_cmd('rect', id, x, y, w, h)
+}
+
+let hit_rect
+
+function hit_test_all() {
+	hit_rect = null
+	for (let j = layers.length-1; j >= 0; j--) {
+		let layer = layers[j]
+		let i = layer.length-1
+		while (i >= 0) {
+			let argc = layer[i]
+			i -= argc-1
+			let cmd = layer[i]
+			if (cmd == 'rect') {
+				let id = layer[i+2]
+				let x  = layer[i+3]
+				let y  = layer[i+4]
+				let w  = layer[i+5]
+				let h  = layer[i+6]
+				if (mx >= x && mx < x + w) {
+					if (my >= y && my < y + h) {
+						hit_rect = id
+						return
+					}
+				}
+			}
+			i--
+		}
+	}
+}
+
+function redraw_all() {
+	for (layer of layers)
+		layer.length = 0
+	draw_all()
+	for (layer of layers) {
+		let i = 0
+		let n = layer.length
+		while (i < n) {
+			let cmd  = layer[i]
+			let argc = layer[i+1]
+			if (cmd == 'rect') {
+				let id = layer[i+2]
+				let x  = layer[i+3]
+				let y  = layer[i+4]
+				let w  = layer[i+5]
+				let h  = layer[i+6]
+				cx.beginPath()
+				cx.rect(x, y, w, h)
+				cx.fillStyle = hit_rect == id ? 'red' : 'blue'
+				cx.fill()
+				i += argc
+			}
+		}
+	}
+	cx.beginPath()
+	cx.rect(mx, my, 10, 10)
+	cx.fillStyle = 'white'
+	cx.fill()
+}
+
+function draw_all() {
+	layer = layer_popup
+	rect('r1', 10, 10, 200, 200)
+	layer = layer_base
+	rect('r2', 50, 50, 200, 200)
+}
+
+let modules = {
+	main: {
+		type: 'tabs',
+		tabs: [
+			{type: 'module', name: 'module1'},
+			{type: 'module', name: 'module2'},
+		],
+	},
+	module1: {
+		type: 'text',
+		text: 'Hello!',
+	},
+}
+
+let module = {}
+
+module.tabs = function() {
+
+
+	return tabs
+}
+
+module.module2 = function() {
+
+
+}
+
+</script>
+</body>
+</html>
