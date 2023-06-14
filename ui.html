@@ -297,7 +297,7 @@ function layer_clear(e) {
 let layer_base  = layer_make()
 let layer_popup = layer_make()
 let layers = [layer_base, layer_popup]
-let layer = layer_base
+let a = layer_base
 
 function map_freelist() {
 	let fl = []
@@ -369,12 +369,6 @@ function pcmd(code, name) {
 	return cmd(CMD_MAX + code, name)
 }
 
-function CMD(cmd_name) {
-	let cmd = cmd_name_map.get(cmd_name)
-	assert(cmd, 'unknown command {0}', cmd_name)
-	return cmd
-}
-
 ui.widget = function(e) {
 	cmd(e.code, e.name)
 	measure  [code] = e.measure
@@ -391,6 +385,17 @@ function reset() {
 	font_size = null
 }
 
+function do_cmd(cmd, ...args) {
+	let i0 = a.length+2   // index of this cmd's arg#1
+	let i1 = i0+args.length+3 // index of next cmd's arg#1
+	a.push(i1, cmd, ...args, i0)
+	return i0
+}
+
+ui.cmd = do_cmd
+
+let ct_stack = [] // [ct_i1,...]
+
 const FR         = 4 // children of v,h: fraction from main-axis size.
 const ALIGN      = 5 // all children: align v,h.
 const NEXT_EXT_I = 7 // all containers: next command after this one's `end`.
@@ -398,16 +403,33 @@ const NEXT_EXT_I = 7 // all containers: next command after this one's `end`.
 const FLEX_GAP        = 8
 const FLEX_TOTAL_FR   = 9
 
-function do_cmd(cmd, ...args) {
-	let i0 = layer.length+2   // index of this cmd's arg#1
-	let i1 = i0+args.length+3 // index of next cmd's arg#1
-	layer.push(i1, cmd, ...args, i0)
+const ALIGN_STRETCH = 0
+const ALIGN_START   = 1
+const ALIGN_END     = 2
+const ALIGN_CENTER  = 3
+
+function parse_align(s) {
+	if (s == 's') return ALIGN_STRETCH
+	if (s == 'c') return ALIGN_CENTER
+	if (s == 'l') return ALIGN_START
+	if (s == 'r') return ALIGN_END
+	if (s == '[') return ALIGN_START
+	if (s == ']') return ALIGN_END
+	assert(false, 'invalid align {0}', s)
 }
 
-ui.cmd = do_cmd
+function parse_valign(s) {
+	if (s == 's') return ALIGN_STRETCH
+	if (s == 'c') return ALIGN_CENTER
+	if (s == 't') return ALIGN_START
+	if (s == 'b') return ALIGN_END
+	if (s == '[') return ALIGN_START
+	if (s == ']') return ALIGN_END
+	assert(false, 'invalid valign {0}', s)
+}
 
 function do_hv(cmd, fr, gap, align, valign, min_w, min_h) {
-	do_cmd(cmd,
+	let i = do_cmd(cmd,
 
 		// cell struct: positions 0..6
 		0, // x
@@ -415,14 +437,15 @@ function do_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 		min_w ?? 0,
 		min_h ?? 0,
 		fr ?? 1,
-		align  ?? 'S',
-		valign ?? 'S',
+		parse_align  (align  ?? 's'),
+		parse_valign (valign ?? 's'),
 
 		0, // next_ext_i
 
 		gap ?? 0,
 		0, // total_fr
 	)
+	ct_stack.push(i)
 }
 
 const CMD_H = cmd(1, 'h')
@@ -436,7 +459,7 @@ ui.v = do_v
 
 let CMD_STACK = cmd(3, 'stack')
 function do_stack(fr, min_w, min_h, align, valign) {
-	do_cmd(CMD_STACK,
+	let i = do_cmd(CMD_STACK,
 
 		// cell struct: positions 0..6
 		0, // x
@@ -444,11 +467,12 @@ function do_stack(fr, min_w, min_h, align, valign) {
 		min_w ?? 0, // min_w
 		min_h ?? 0, // min_h
 		fr ?? 1,
-		align  ?? 'S',
-		valign ?? 'S',
+		parse_align  (align  ?? 's'),
+		parse_valign (valign ?? 's'),
 
 		0, // next_ext_i
 	)
+	ct_stack.push(i)
 }
 
 const SB_OVERFLOW =  8 // overflow x,y
@@ -463,7 +487,7 @@ function do_scrollbox(id, sx, sy, fr, overflow_x, overflow_y, min_w, min_h, alig
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
 
-	do_cmd(CMD_SCROLLBOX,
+	let i = do_cmd(CMD_SCROLLBOX,
 
 		// cell struct: positions 0..6
 		0, // x
@@ -471,8 +495,8 @@ function do_scrollbox(id, sx, sy, fr, overflow_x, overflow_y, min_w, min_h, alig
 		0, // content w swapped with min_w on `end`
 		0, // content h swapped with min_h on `end`
 		fr ?? 1,
-		align  ?? 'S',
-		valign ?? 'S',
+		parse_align  (align  ?? 's'),
+		parse_valign (valign ?? 's'),
 
 		0, // next_ext_i
 
@@ -484,6 +508,7 @@ function do_scrollbox(id, sx, sy, fr, overflow_x, overflow_y, min_w, min_h, alig
 		sx ?? 0, // scroll x
 		sy ?? 0, // scroll y
 	)
+	ct_stack.push(i)
 
 	if (ss) {
 		ss.set('scroll_x', sx)
@@ -492,8 +517,15 @@ function do_scrollbox(id, sx, sy, fr, overflow_x, overflow_y, min_w, min_h, alig
 }
 
 const CMD_END = cmd(5, 'end')
-function do_end() {
-	do_cmd(CMD_END, 0 /*start_i*/ )
+function do_end(cmd_name) {
+	let i = assert(ct_stack.pop(), 'end command outside container')
+	if (cmd_name) {
+		let cmd1 = assert(cmd_name_map.get(cmd_name))
+		let cmd0 = a[i-1]
+		assert(cmd0 == cmd1)
+	}
+	let end_i = do_cmd(CMD_END, i)
+	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
 }
 
 const CMD_BG = pcmd(1, 'bg')
@@ -501,12 +533,12 @@ function do_bg(bg) {
 	do_cmd(CMD_BG, bg)
 }
 
-const CMD_BORDER = pcmd(2, 'border')
 const BORDER_SIDE_TOP    = 0
 const BORDER_SIDE_BOTTOM = 1
 const BORDER_SIDE_LEFT   = 2
 const BORDER_SIDE_RIGHT  = 4
-function border_sides(s) {
+
+function parse_border_sides(s) {
 	if (s == false) return 0
 	if (s == true ) return 7
 	return (
@@ -516,8 +548,10 @@ function border_sides(s) {
 		s.includes('b') ? BORDER_SIDE_BOTTOM : 0
 	)
 }
+
+const CMD_BORDER = pcmd(2, 'border')
 function do_border(sides, color, radius) {
-	do_cmd(CMD_BORDER, border_sides(sides), color, radius)
+	do_cmd(CMD_BORDER, parse_border_sides(sides), color, radius)
 }
 
 const TEXT_ASC = 7
@@ -534,8 +568,8 @@ function do_text(id, s, align, valign, fr) {
 		0, // min_w
 		0, // min_h
 		fr ?? 0,
-		align  ?? '>',
-		valign ?? 'c',
+		parse_align  (align  ?? '['),
+		parse_valign (valign ?? 'c'),
 
 		0, // ascent
 		id,
@@ -576,14 +610,12 @@ function set_font_size(a, i) {
 
 function get_next_ext_i(a, i) {
 	let cmd = a[i-1]
-	if (cmd == CMD_H || cmd == CMD_V || cmd == CMD_SCROLLBOX)
+	if (cmd < CMD_END)
 		return a[i+NEXT_EXT_I]
 	return a[i-2] // next_i
 }
 
 // ---------------------------------------------------------------------------
-
-let ct_stack = [] // [ct_i1,...]
 
 function is_main_axis(cmd, axis) {
 	return (
@@ -631,10 +663,8 @@ measure[CMD_V] = ct_stack_push
 measure[CMD_STACK] = ct_stack_push
 measure[CMD_SCROLLBOX] = ct_stack_push
 
-measure[CMD_END] = function(a, end_i, axis) {
+measure[CMD_END] = function(a, _, axis) {
 	let i = assert(ct_stack.pop(), 'end command outside a container')
-	a[end_i] = i // start_i
-	a[i+NEXT_EXT_I] = a[end_i-2]
 	if (!ct_stack.length)
 		return
 	let cmd = a[i-1]
@@ -695,24 +725,27 @@ position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
 	}
 }
 
-function position_flex(a, i, axis, ct_x, ct_w) {
+function position_flex(a, i, axis, ct_x, ct_w, depth) {
 
 	a[i+0+axis] = ct_x
 	a[i+2+axis] = ct_w
 
 	let main_axis = is_main_axis(a[i-1], axis)
-	let next_i    = a[i-2]
+	let next_i = a[i-2]
+	let i0 = i
+
+	let cmd0 = a[i-1]
 
 	if (main_axis) {
 
-		let gap      = a[i+FLEX_GAP]
-		let total_fr = a[i+FLEX_TOTAL_FR]
+		let gap      = a[i0+FLEX_GAP]
+		let total_fr = a[i0+FLEX_TOTAL_FR]
 
 		// compute total gap.
 		let gap_w = 0
 		if (gap) {
 			let n = 0
-			i = next_i
+			let i = next_i
 			while (a[i-1] != CMD_END) {
 				if (position[a[i-1]])
 					n++
@@ -724,10 +757,11 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 		// compute total overflow width and total free width.
 		let total_overflow_w = 0
 		let total_free_w     = 0
-		i = next_i
+		let i = next_i
 		while (a[i-1] != CMD_END) {
 
-			if (position[a[i-1]]) {
+			let cmd = a[i-1]
+			if (position[cmd]) {
 
 				let min_w = a[i+2+axis]
 				let fr    = a[i+FR]
@@ -775,16 +809,14 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 
 				// align the item inside the stretched segment defined by (sx, sw).
 				let x = sx
-				let w = align == 'S' ? sw : min_w
-				if (align == '>')
+				let w = align == ALIGN_STRETCH ? sw : min_w
+				if (align == ALIGN_END)
 					x = sx + sw - w
-				else if (align == 'c')
+				else if (align == ALIGN_CENTER)
 					x = sx + (sw - w) / 2
-				else
-					assert(align == 'S' || align == '<', 'invalid align {0}', align)
 
 				// position item's children recursively.
-				position_f(a, i, axis, x, w)
+				position_f(a, i, axis, x, w, depth+1)
 
 				sx = sx + sw + gap
 
@@ -810,16 +842,14 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 
 				// stretch or align the item on the cross-axis.
 				let x = sx
-				let w = align == 'S' ? sw : min_w
-				if (align == '>')
+				let w = align == ALIGN_STRETCH ? sw : min_w
+				if (align == ALIGN_END)
 					x = sx + sw - w
-				else if (align == 'c')
+				else if (align == ALIGN_CENTER)
 					x = sx + (sw - w) / 2
-				else
-					assert(align == 'S' || align == '<', 'invalid align {0}', align)
 
 				// position item's children recursively.
-				position_f(a, i, axis, x, w)
+				position_f(a, i, axis, x, w, depth+1)
 
 			}
 
@@ -845,7 +875,7 @@ function position_all(axis) {
 			let position_f = position[cmd]
 			if (position_f) {
 				let min_w = a[i+2+axis]
-				position_f(a, i, axis, 0, max(min_w, s_w))
+				position_f(a, i, axis, 0, max(min_w, s_w), 0)
 			}
 			i = get_next_ext_i(a, i)
 		}
@@ -978,7 +1008,9 @@ function hit_test_all() {
 // ---------------------------------------------------------------------------
 
 draw[CMD_H] = function(a, i) {
+
 	ct_stack.push(i)
+
 	if (DEBUG) {
 		let x = a[i+0]
 		let y = a[i+1]
@@ -994,18 +1026,21 @@ draw[CMD_V    ] = draw[CMD_H]
 draw[CMD_STACK] = draw[CMD_H]
 
 draw[CMD_TEXT] = function(a, i) {
+
 	let x = a[i+0]
 	let y = a[i+1]
 	let w = a[i+2]
 	let h = a[i+3]
 	let s = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
+
 	if (DEBUG) {
 		cx.strokeStyle = color
 		cx.beginPath()
 		cx.rect(x, y, w, h)
 		cx.stroke()
 	}
+
 	cx.textAlign = 'left'
 	cx.fillStyle = color
 	cx.fillText(s, x, y+asc)
@@ -1056,8 +1091,8 @@ scrollbar_rect = function(a, i, axis) {
 		}
 	}
 	r[0] = visible
-	r[1] = tx
-	r[2] = ty
+	r[1] = x + tx
+	r[2] = y + ty
 	r[3] = tw
 	r[4] = th
 	return r
@@ -1065,6 +1100,9 @@ scrollbar_rect = function(a, i, axis) {
 }
 
 draw[CMD_SCROLLBOX] = function(a, i) {
+
+	ct_stack.push(i)
+
 	let x  = a[i+0]
 	let y  = a[i+1]
 	let w  = a[i+2]
@@ -1121,19 +1159,21 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 	}
 
 	cx.save()
-	cx.translate(x, y)
+
 	cx.beginPath()
-	cx.rect(0, 0, w, h)
-	cx.strokeStyle = color
-	cx.stroke()
+	cx.rect(x, y, w, h)
 	cx.clip()
-	ct_stack.push(i)
-	cx.save()
+	if (DEBUG) {
+		cx.strokeStyle = color
+		cx.stroke()
+	}
 	cx.translate(-sx, -sy)
 }
 
 draw[CMD_END] = function(a, end_i) {
+
 	let i = ct_stack.pop()
+
 	let cmd = a[i-1]
 	if (cmd == CMD_SCROLLBOX) {
 		cx.restore()
@@ -1154,12 +1194,18 @@ draw[CMD_END] = function(a, end_i) {
 			cx.fill()
 
 		}
-		cx.restore()
 	}
 }
 
 draw[CMD_BG] = function(a, i) {
 	cx.fillStyle = a[i]
+	let ct_i = ct_stack.at(-1)
+	let x = a[ct_i+0]
+	let y = a[ct_i+1]
+	let w = a[ct_i+2]
+	let h = a[ct_i+3]
+	cx.beginPath()
+	cx.rect(x, y, w, h)
 	cx.fill()
 }
 
@@ -1167,8 +1213,19 @@ draw[CMD_BORDER] = function(a, i) {
 	let sides  = a[i]
 	let color  = a[i+1]
 	let radius = a[i+2]
+	let ct_i = ct_stack.at(-1)
+	let x = a[ct_i+0]
+	let y = a[ct_i+1]
+	let w = a[ct_i+2]
+	let h = a[ct_i+3]
 	cx.strokeStyle = color
 	cx.lineWidth = 1
+	cx.beginPath()
+	if (!radius) {
+		cx.rect(x, y, w, h)
+	} else {
+		//
+	}
 	cx.stroke()
 }
 
@@ -1193,7 +1250,8 @@ function redraw_all() {
 	for (let a of layers)
 		layer_clear(a)
 	reset()
-	draw_frame()
+	make_frame()
+	assert(!ct_stack.length, 'container not closed')
 	id_state_gc()
 	measure_all(0)
 	position_all(0)
@@ -1202,9 +1260,35 @@ function redraw_all() {
 	draw_all()
 }
 
+function pr_layer(a) {
+	let i = 2
+	let depth = 0
+	let n = a.length
+	while (i < n) {
+		let cmd = a[i-1]
+		if (cmd == CMD_END)
+			depth--
+		let indent = (' ').repeat(depth)
+		let cmd_s = cmd_names[cmd]
+		if (cmd < CMD_END) {
+			let next_ext_i = a[i+NEXT_EXT_I]
+			let next_ext_cmd_s = cmd_names[a[next_ext_i-1]]
+			pr(indent + '(' + cmd_s + (next_ext_cmd_s ? ' > ' + next_ext_cmd_s : ''))
+			depth++
+		} else if (cmd == CMD_END) {
+			pr(indent + ')')
+		} else {
+			pr(indent + cmd_s)
+		}
+		let next_i = a[i-2]
+		i = next_i
+	}
+	assert(depth == 0)
+}
+
 // ---------------------------------------------------------------------------
 
-function draw_frame() {
+function make_frame() {
 
 	do_color('white')
 	do_font('Arial')
@@ -1219,20 +1303,20 @@ function draw_frame() {
 
 	do_h(1)
 		do_text('t1', 'Hello!')
-		//do_stack(1)
-			// do_bg('hsl(0deg 0% 16%)')
+		do_stack(1)
+			do_bg('hsl(0deg 0% 16%)')
 			do_scrollbox('sb1', null, null, 1, 'auto', 'auto')
-				do_v(1, 10, 'S', 'c')
-					do_bg('hsl(0deg 0% 16%)')
+				do_v(1, 10, 's', 'c')
+					// do_bg('hsl(0deg 0% 16%)')
 					do_border(1, 'red')
-					do_text('t2', '[Hello Hello Hello Hello Hello Hello Hello]', '<', 'c', 1)
-					do_text('t3', (max_frame_duration * 1000).dec(1), '<', 'c', 1)
-				do_end()
+					do_text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
+					do_text('t3', (max_frame_duration * 1000).dec(1), '[', 'c', 1)
+				do_end('v')
 			do_end()
-		//do_end()
+		do_end('stack')
 		do_text('t4', 'Hello Again!', 'c', 'c', 1)
 		do_text('t3', '...and again.', 'c', 'c', 1)
-	do_end()
+	do_end('h')
 
 	//	do_v()
 	//
