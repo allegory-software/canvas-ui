@@ -1,0 +1,41 @@
+
+function do_bg(id, bg) {
+	layer.push('bg', 2, id, bg, 2)
+}
+
+function do_border(sides, color, radius) {
+	layer.push('border', 3, sides, color, radius, 3)
+}
+
+position.table = function(a, i, axis, x, table_w) {
+	let argc  = a[i-1]
+	let min_w = a[i+axis+2]
+	let cols  = a[i+4]
+	let fr    = a[i+5]
+	a[i+axis+0] = x
+	a[i+axis+2] = table_w
+	i += argc+1
+	let child_i = 0
+	while (1) {
+		let cmd_s = layer[i]
+		let argc  = layer[i+1]
+		assert(cmd_s)
+		let position_f = position[cmd_s]
+		if (position_f) {
+			w = table_w / fr
+			i = position_f(layer, i+2, axis, x, w)
+			x += w
+		} else {
+			i += argc+3
+		}
+		child_i++
+		if (!axis)
+			if (child_i == cols) // new row
+				x = 0
+		if (cmd_s == 'table_end')
+			break
+	}
+	return i
+}
+
+

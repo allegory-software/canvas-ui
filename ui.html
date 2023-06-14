@@ -2,6 +2,9 @@
 <html>
 <head>
 <style>
+* {
+	box-sizing: border-box;
+}
 html, body {
 	width: 100%;
 	height: 100%;
@@ -15,53 +18,196 @@ body {
 	position: relative;
 	background: black;
 }
-canvas {
+.ui_canvas {
 	position: absolute;
-	border: 1px solid blue;
 }
 </style>
 </head>
 <body>
-<canvas id=canvas></canvas>
+<canvas class=ui_canvas id=canvas></canvas>
 <script>
 
+(function () {
+"use strict"
+
 /*
+
+GOALS
 
 - drag & drop UI designer with anchors
 - reusable UI modules with controlled variations
 - IMGUI with layers and layouting
+- remote screen sharing with input routing
+
+IMGUI
+
+- drawing
+	- z-index
+	* text
+	* bg-color
+	- border
+	- box-shadow
+	- images (incl. svg?)
+- layouting
+	* min width & height
+	* flexbox fr stretch
+	* flexbox min-w/h grow
+	* flexbox align
+	* flexbox gap
+	- stack
+	- margin
+	- padding
+	* text min-w/h
+	- word-wrapping
+	- grid fr stretch
+	- grid min-w/h grow
+	- grid align
+	- grid gap
+- mouse
+	* hit-test rect
+	* hit state
+	* hit parents
+	* capturing
+	* capture state
+	- drag & drop
+- keyboard
+	- event bubbling
+	- focused widget
+- text selection
+	- drag-select with mouse
+- text(area) input
+	- put it behind the canvas with correct width & height
+		- route keyboard events to it
+		- redraw it on canvas with offset and selection
+
+CHALLENGES
+
+- input on a canvas
+- textarea on a canvas
+- word wrapping
+- rich text on a canvas (inline box model)
 
 */
 
-pr = (...args) => console.log(...args)
-floor = Math.floor
-Document.prototype.on    = Document.prototype.addEventListener
-EventTarget.prototype.on = EventTarget.prototype.addEventListener
+let G = window
+G.DEBUG = false
+
+G.isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
+G.isarray = Array.isArray
+G.isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
+G.isstr = s => typeof s == 'string'
+G.isnum = n => typeof n == 'number'
+G.isbool = b => typeof b == 'boolean'
+G.isfunc = f => typeof f == 'function'
+
+G.assert = function(ret, err, ...args) {
+	if (ret == null || ret === false) {
+		throw ((err && err.subst(...args) || 'assertion failed'))
+	}
+	return ret
+}
+
+G.pr = console.log
+G.trace = console.trace
+
+G.floor = Math.floor
+G.max   = Math.max
+G.min   = Math.min
+
+// NOTE: returns x1 if x1 < x0, which enables the idiom
+// `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
+G.clamp = function(x, x0, x1) {
+	return min(max(x, x0 ?? -1/0), x1 ?? 1/0)
+}
+
+Number.prototype.dec = Number.prototype.toFixed
+
+G.num = function(s) {
+	let x = parseFloat(s)
+	return x != x ? undefined : x
+}
+
+// usage:
+//	 '{1} of {0}'.subst(total, current)
+//	 '{1} of {0}'.subst([total, current])
+//	 '{1} of {0:foo:foos}'.subst([total, current])
+//	 '{current} of {total}'.subst({'current': current, 'total': total})
+String.prototype.subst = function(...args) {
+	if (!args.length)
+		return this.valueOf()
+	if (isarray(args[0]))
+		args = args[0]
+	if (isobject(args[0]))
+		args = args[0]
+	return this.replace(/{(\w+)\:(\w+)\:(\w+)}/g, function(match, s, singular, plural) {
+		let v = num(args[s])
+		return v != null ? v + ' ' + (v > 1 ? plural : singular) : s
+	}).replace(/{([\w\:]+)}/g, (match, s) => args[s])
+}
+
+String.prototype.starts = function(s, i) { return this.startsWith(s, i) }
+String.prototype.ends   = function(s, i) { return this.endsWith(s, i) }
+String.prototype.upper  = function() { return this.toUpperCase() }
+String.prototype.lower  = function() { return this.toLowerCase() }
+
+G.obj = () => Object.create(null)
+G.set = (iter) => new Set(iter)
+G.map = (iter) => new Map(iter)
+G.array = (...args) => new Array(...args)
+
+G.noop = function() {}
+
+G.json = JSON.stringify
+
+G.clock = function() { return performance.now() / 1000 }
+
+EventTarget.prototype.on = function(event, f, on) {
+	if (on == null)
+		on = true
+	if (on)
+		this.addEventListener(event, f)
+	else
+		this.removeEventListener(event, f)
+}
+
+G.ui = {}
 
 // ---------------------------------------------------------------------------
 
-let dpr, w, h
+let dpr, screen_w, screen_h
+
 function resize_canvas() {
 	dpr = devicePixelRatio
-	w = window.innerWidth  - 2
-	h = window.innerHeight - 2
-	canvas.style.width  = w + 'px'
-	canvas.style.height = h + 'px'
-	w = floor(w * dpr)
-	h = floor(h * dpr)
-	canvas.width  = w
-	canvas.height = h
+	let window_w = window.innerWidth
+	let window_h = window.innerHeight
+	screen_w = floor(window_w * dpr)
+	screen_h = floor(window_h * dpr)
+	canvas.style.width  = screen_w / dpr + 'px'
+	canvas.style.height = screen_h / dpr + 'px'
+	canvas.width  = screen_w
+	canvas.height = screen_h
+	redraw()
 }
 let cx = canvas.getContext('2d')
+let raf_id
+let max_frame_duration = 0
 function raf_redraw() {
+	raf_id = null
+	let t0 = clock()
 	cx.save()
 	cx.clearRect(0, 0, canvas.width, canvas.height)
 	cx.beginPath()
 	redraw_all()
 	cx.restore()
+	let frame_duration = clock() - t0
+	if (max_frame_duration)
+		max_frame_duration = max(frame_duration, max_frame_duration)
+	else
+		max_frame_duration = 0.000001
 }
 function redraw() {
-	requestAnimationFrame(raf_redraw)
+	if (raf_id) return
+	raf_id = requestAnimationFrame(raf_redraw)
 }
 resize_canvas()
 redraw()
@@ -69,25 +215,31 @@ window.on('resize', resize_canvas)
 
 // ---------------------------------------------------------------------------
 
-let mx, my, left, right
+let mx, my, mx0, my0, down, captured_id
+
 canvas.on('pointerdown', function(ev) {
 	mx = ev.clientX * dpr
 	my = ev.clientY * dpr
-	if (ev.which == 1) left  = true
-	if (ev.which == 2) right = true
-	this.setPointerCapture(ev.pointerId)
-	hit_test_all()
-	redraw()
+	if (ev.which == 1) {
+		down = true
+		this.setPointerCapture(ev.pointerId)
+		hit_test_all()
+		redraw()
+	}
 })
+
 canvas.on('pointerup', function(ev) {
 	mx = ev.clientX * dpr
 	my = ev.clientY * dpr
-	if (ev.which == 1) left  = false
-	if (ev.which == 2) right = false
-	this.releasePointerCapture(ev.pointerId)
-	hit_test_all()
-	redraw()
+	if (ev.which == 1) {
+		down = false
+		captured_id = null
+		this.releasePointerCapture(ev.pointerId)
+		hit_test_all()
+		redraw()
+	}
 })
+
 canvas.on('pointermove', function(ev) {
 	mx = ev.clientX * dpr
 	my = ev.clientY * dpr
@@ -95,93 +247,1018 @@ canvas.on('pointermove', function(ev) {
 	redraw()
 })
 
+canvas.on('pointerleave', function(ev) {
+	mx = null
+	my = null
+	hit_test_all()
+	redraw()
+})
+
+let capture_state = map()
+
+function capture(id) {
+	if (!id)
+		return
+	if (captured_id)
+		return
+	if (!down)
+		return
+	if (!hit_set.has(id))
+		return
+	captured_id = id
+	capture_state.clear()
+	mx0 = mx
+	my0 = my
+	return capture_state
+}
+
+function captured(id) {
+	if (!id)
+		return
+	if (captured_id != id)
+		return
+	return capture_state
+}
+
 // ---------------------------------------------------------------------------
 
-function make_layer() {
+function layer_make() {
 	let e = []
+	layer_clear(e)
 	return e
 }
-let layer_base = make_layer()
-let layer_popup = make_layer()
+
+function layer_clear(e) {
+	e.length = 0
+	e.w = 0
+	e.h = 0
+}
+
+let layer_base  = layer_make()
+let layer_popup = layer_make()
 let layers = [layer_base, layer_popup]
 let layer = layer_base
 
-let stage = 'measure'
-
-function push_cmd(cmd, ...args) {
-	let argc = args.length + 3
-	layer.push(cmd, argc, ...args, argc)
+function map_freelist() {
+	let fl = []
+	return function(m) {
+		if (m) {
+			m.clear()
+			fl.push(m)
+		} else {
+			m = fl.pop()
+			return m || map()
+		}
+	}
 }
 
-function rect(id, x, y, w, h) {
-	push_cmd('rect', id, x, y, w, h)
+// ---------------------------------------------------------------------------
+
+let id_state_map_freelist = map_freelist()
+let id_state_maps = map() // {id->map}
+let id_current_set = set() // {id}
+let id_remove_set  = set() // {id}
+
+function id_touch(id) {
+	id_current_set.add(id)
+	id_remove_set.delete(id)
 }
 
-let hit_rect
+function id_state(id) {
+	if (!id)
+		return
+	id_touch(id)
+	let m = id_state_maps.get(id)
+	if (!m) {
+		m = id_state_map_freelist()
+		id_state_maps.set(id, m)
+	}
+	return m
+}
+
+function id_state_gc() {
+	for (let id of id_remove_set) {
+		let m = id_state_maps.get(id)
+		id_state_maps.delete(id)
+		id_state_map_freelist(m)
+	}
+	id_remove_set.clear()
+	let empty = id_remove_set
+	id_remove_set = id_current_set
+	id_current_set = empty
+}
+
+// ---------------------------------------------------------------------------
+
+let cmd_names = []
+let cmd_name_map = map()
+
+let measure   = []
+let position  = []
+let draw      = []
+let hit       = []
+
+function cmd(code, name) {
+	assert(!cmd_names[code], 'duplicate command code {0} for {1}', code, name)
+	cmd_names[code] = name
+	cmd_name_map.set(name, code)
+	return code
+}
+const CMD_MAX = 63
+function pcmd(code, name) {
+	return cmd(CMD_MAX + code, name)
+}
+
+function CMD(cmd_name) {
+	let cmd = cmd_name_map.get(cmd_name)
+	assert(cmd, 'unknown command {0}', cmd_name)
+	return cmd
+}
+
+ui.widget = function(e) {
+	cmd(e.code, e.name)
+	measure  [code] = e.measure
+	position [code] = e.position
+	draw     [code] = e.draw
+	hit      [code] = e.hit
+}
+
+let color, font, font_size
+
+function reset() {
+	color = null
+	font = null
+	font_size = null
+}
+
+const FR         = 4 // children of v,h: fraction from main-axis size.
+const ALIGN      = 5 // all children: align v,h.
+const NEXT_EXT_I = 7 // all containers: next command after this one's `end`.
+
+const FLEX_GAP        = 8
+const FLEX_TOTAL_FR   = 9
+
+function do_cmd(cmd, ...args) {
+	let i0 = layer.length+2   // index of this cmd's arg#1
+	let i1 = i0+args.length+3 // index of next cmd's arg#1
+	layer.push(i1, cmd, ...args, i0)
+}
+
+ui.cmd = do_cmd
+
+function do_hv(cmd, fr, gap, align, valign, min_w, min_h) {
+	do_cmd(cmd,
+
+		// cell struct: positions 0..6
+		0, // x
+		0, // y
+		min_w ?? 0,
+		min_h ?? 0,
+		fr ?? 1,
+		align  ?? 'S',
+		valign ?? 'S',
+
+		0, // next_ext_i
+
+		gap ?? 0,
+		0, // total_fr
+	)
+}
+
+const CMD_H = cmd(1, 'h')
+const CMD_V = cmd(2, 'v')
+
+function do_h(...args) { do_hv(CMD_H, ...args) }
+function do_v(...args) { do_hv(CMD_V, ...args) }
+
+ui.h = do_h
+ui.v = do_v
+
+let CMD_STACK = cmd(3, 'stack')
+function do_stack(fr, min_w, min_h, align, valign) {
+	do_cmd(CMD_STACK,
+
+		// cell struct: positions 0..6
+		0, // x
+		0, // y
+		min_w ?? 0, // min_w
+		min_h ?? 0, // min_h
+		fr ?? 1,
+		align  ?? 'S',
+		valign ?? 'S',
+
+		0, // next_ext_i
+	)
+}
+
+const SB_OVERFLOW =  8 // overflow x,y
+const SB_CW       = 10 // content w,h
+const SB_ID       = 12
+const SB_SX       = 13 // scroll x,y
+
+const CMD_SCROLLBOX = cmd(4, 'scrollbox')
+function do_scrollbox(id, sx, sy, fr, overflow_x, overflow_y, min_w, min_h, align, valign) {
+
+	let ss = id_state(id)
+	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
+	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
+
+	do_cmd(CMD_SCROLLBOX,
+
+		// cell struct: positions 0..6
+		0, // x
+		0, // y
+		0, // content w swapped with min_w on `end`
+		0, // content h swapped with min_h on `end`
+		fr ?? 1,
+		align  ?? 'S',
+		valign ?? 'S',
+
+		0, // next_ext_i
+
+		overflow_x ?? 'auto',
+		overflow_y ?? 'auto',
+		min_w ?? 0, // swapped with content w on `end`
+		min_h ?? 0, // swapped with content h on `end`
+		id,
+		sx ?? 0, // scroll x
+		sy ?? 0, // scroll y
+	)
+
+	if (ss) {
+		ss.set('scroll_x', sx)
+		ss.set('scroll_y', sy)
+	}
+}
+
+const CMD_END = cmd(5, 'end')
+function do_end() {
+	do_cmd(CMD_END, 0 /*start_i*/ )
+}
+
+const CMD_BG = pcmd(1, 'bg')
+function do_bg(bg) {
+	do_cmd(CMD_BG, bg)
+}
+
+const CMD_BORDER = pcmd(2, 'border')
+const BORDER_SIDE_TOP    = 0
+const BORDER_SIDE_BOTTOM = 1
+const BORDER_SIDE_LEFT   = 2
+const BORDER_SIDE_RIGHT  = 4
+function border_sides(s) {
+	if (s == false) return 0
+	if (s == true ) return 7
+	return (
+		s.includes('l') ? BORDER_SIDE_LEFT   : 0 +
+		s.includes('r') ? BORDER_SIDE_RIGHT  : 0 +
+		s.includes('t') ? BORDER_SIDE_TOP    : 0 +
+		s.includes('b') ? BORDER_SIDE_BOTTOM : 0
+	)
+}
+function do_border(sides, color, radius) {
+	do_cmd(CMD_BORDER, border_sides(sides), color, radius)
+}
+
+const TEXT_ASC = 7
+const TEXT_ID  = 8
+const TEXT_S   = 9
+
+const CMD_TEXT = cmd(6, 'text')
+function do_text(id, s, align, valign, fr) {
+	do_cmd(CMD_TEXT,
+
+		// cell struct: positions 0..6
+		0, // x
+		0, // y
+		0, // min_w
+		0, // min_h
+		fr ?? 0,
+		align  ?? '>',
+		valign ?? 'c',
+
+		0, // ascent
+		id,
+		s,
+	)
+}
+
+const CMD_COLOR = pcmd(3, 'color')
+function do_color(s) {
+	if (color == s) return
+	do_cmd(CMD_COLOR, s)
+	color = s
+}
+
+const CMD_FONT = pcmd(4, 'font')
+function do_font(s) {
+	if (font == s) return
+	do_cmd(CMD_FONT, s)
+	font = s
+}
+
+const CMD_FONT_SIZE = pcmd(5, 'font_size')
+function do_font_size(s) {
+	if (font_size == s) return
+	do_cmd(CMD_FONT_SIZE, s)
+	font_size = s
+}
+
+function set_font(a, i) {
+	font = a[i]
+	cx.font = font_size + 'px ' + font
+}
+
+function set_font_size(a, i) {
+	font_size = a[i]
+	cx.font = font_size + 'px ' + font
+}
+
+function get_next_ext_i(a, i) {
+	let cmd = a[i-1]
+	if (cmd == CMD_H || cmd == CMD_V || cmd == CMD_SCROLLBOX)
+		return a[i+NEXT_EXT_I]
+	return a[i-2] // next_i
+}
+
+// ---------------------------------------------------------------------------
+
+let ct_stack = [] // [ct_i1,...]
+
+function is_main_axis(cmd, axis) {
+	return (
+		(cmd == CMD_V ? 1 : 2) == axis ||
+		(cmd == CMD_H ? 0 : 2) == axis
+	)
+}
+
+function add_ct_min_wh(a, axis, w, fr) {
+	let i = assert(ct_stack.at(-1), 'object with size outside a container')
+	let cmd = a[i-1]
+	let main_axis = is_main_axis(cmd, axis)
+	let min_w = a[i+2+axis]
+	if (main_axis) {
+		a[i+FLEX_TOTAL_FR] += fr
+		let gap = a[i+FLEX_GAP]
+		a[i+2+axis] = min_w + w + gap
+	} else {
+		a[i+2+axis] = max(min_w, w)
+	}
+}
+
+measure[CMD_FONT] = set_font
+measure[CMD_FONT_SIZE] = set_font_size
+
+measure[CMD_TEXT] = function(a, i, axis) {
+	let fr = a[i+FR]
+	if (!axis) {
+		let s = a[i+TEXT_S]
+		let m = cx.measureText(s)
+		let asc = m.fontBoundingBoxAscent
+		let dsc = m.fontBoundingBoxDescent
+		a[i+2] = m.width
+		a[i+3] = asc+dsc
+		a[i+TEXT_ASC] = asc
+	}
+	let w = a[i+2+axis]
+	add_ct_min_wh(a, axis, w, fr)
+}
+
+function ct_stack_push(a, i) { ct_stack.push(i) }
+
+measure[CMD_H] = ct_stack_push
+measure[CMD_V] = ct_stack_push
+measure[CMD_STACK] = ct_stack_push
+measure[CMD_SCROLLBOX] = ct_stack_push
+
+measure[CMD_END] = function(a, end_i, axis) {
+	let i = assert(ct_stack.pop(), 'end command outside a container')
+	a[end_i] = i // start_i
+	a[i+NEXT_EXT_I] = a[end_i-2]
+	if (!ct_stack.length)
+		return
+	let cmd = a[i-1]
+	if (cmd == CMD_SCROLLBOX) {
+		let co_min_w = a[i+2+axis] // content min_w
+		let sb_min_w = a[i+SB_CW+axis] // scrollbox min_w
+		a[i+SB_CW+axis] = co_min_w
+		a[i+2+axis] = sb_min_w
+		let fr = a[i+FR]
+		add_ct_min_wh(a, axis, sb_min_w, fr)
+	} else {
+		let main_axis = is_main_axis(cmd, axis)
+		if (main_axis)
+			a[i+2+axis] = max(0, a[i+2+axis] - a[i+FLEX_GAP]) // remove last element's gap
+		let min_w = a[i+2+axis]
+		let fr    = a[i+FR]
+		add_ct_min_wh(a, axis, min_w, fr)
+	}
+}
+
+function measure_all(axis) {
+	reset()
+	for (let a of layers) {
+		let i = 2
+		let n = a.length
+		while (i < n) {
+			let cmd = a[i-1]
+			let measure_f = measure[cmd]
+			if (measure_f)
+				measure_f(a, i, axis)
+			i = a[i-2] // next_i
+		}
+	}
+	assert(!ct_stack.length)
+}
+
+// ---------------------------------------------------------------------------
+
+position[CMD_TEXT] = function(a, i, axis, ct_x, ct_w) {
+	a[i+0+axis] = ct_x
+	a[i+2+axis] = ct_w
+}
+
+position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
+
+	a[i+0+axis] = ct_x
+	a[i+2+axis] = ct_w
+
+	i = a[i-2]
+	while (a[i-1] != CMD_END) {
+
+		let cmd = a[i-1]
+		let position_f = position[cmd]
+		if (position_f)
+			position_f(a, i, axis, ct_x, ct_w)
+
+		i = get_next_ext_i(a, i)
+	}
+}
+
+function position_flex(a, i, axis, ct_x, ct_w) {
+
+	a[i+0+axis] = ct_x
+	a[i+2+axis] = ct_w
+
+	let main_axis = is_main_axis(a[i-1], axis)
+	let next_i    = a[i-2]
+
+	if (main_axis) {
+
+		let gap      = a[i+FLEX_GAP]
+		let total_fr = a[i+FLEX_TOTAL_FR]
+
+		// compute total gap.
+		let gap_w = 0
+		if (gap) {
+			let n = 0
+			i = next_i
+			while (a[i-1] != CMD_END) {
+				if (position[a[i-1]])
+					n++
+				i = get_next_ext_i(a, i)
+			}
+			gap_w = n * gap
+		}
+
+		// compute total overflow width and total free width.
+		let total_overflow_w = 0
+		let total_free_w     = 0
+		i = next_i
+		while (a[i-1] != CMD_END) {
+
+			if (position[a[i-1]]) {
+
+				let min_w = a[i+2+axis]
+				let fr    = a[i+FR]
+
+				let flex_w = (ct_w - gap_w) * max(0, fr) / total_fr
+				let overflow_w = max(0, min_w - flex_w)
+				let free_w = max(0, flex_w - min_w)
+				total_overflow_w += overflow_w
+				total_free_w     += free_w
+
+			}
+
+			i = get_next_ext_i(a, i)
+		}
+
+		// distribute the overflow to children which have free space to
+		// take it. each child shrinks to take in the percent of the overflow
+		// equal to the child's percent of free space.
+		i = next_i
+		let sx = ct_x
+		while (a[i-1] != CMD_END) {
+
+			let cmd = a[i-1]
+			let position_f = position[cmd]
+
+			if (position_f) {
+
+				let min_w = a[i+2+axis]
+				let fr    = a[i+FR]
+				let align = a[i+ALIGN+axis]
+
+				// compute item's stretched width.
+				let flex_w = (ct_w - gap_w) * fr / total_fr
+				let sw
+				if (min_w > flex_w) { // overflow
+					sw = min_w
+				} else {
+					let free_w = flex_w - min_w
+					let free_p = free_w / total_free_w
+					let shrink_w = total_overflow_w * free_p
+					if (shrink_w != shrink_w) // total_free_w == 0
+						shrink_w = 0
+					sw = flex_w - shrink_w
+				}
+
+				// align the item inside the stretched segment defined by (sx, sw).
+				let x = sx
+				let w = align == 'S' ? sw : min_w
+				if (align == '>')
+					x = sx + sw - w
+				else if (align == 'c')
+					x = sx + (sw - w) / 2
+				else
+					assert(align == 'S' || align == '<', 'invalid align {0}', align)
+
+				// position item's children recursively.
+				position_f(a, i, axis, x, w)
+
+				sx = sx + sw + gap
+
+			}
+
+			i = get_next_ext_i(a, i)
+		}
+
+	} else {
+
+		let i = next_i
+		let sx = ct_x
+		let sw = ct_w
+		while (a[i-1] != CMD_END) {
+
+			let cmd = a[i-1]
+			let position_f = position[cmd]
+
+			if (position_f) {
+
+				let min_w = a[i+2+axis]
+				let align = a[i+ALIGN+axis]
+
+				// stretch or align the item on the cross-axis.
+				let x = sx
+				let w = align == 'S' ? sw : min_w
+				if (align == '>')
+					x = sx + sw - w
+				else if (align == 'c')
+					x = sx + (sw - w) / 2
+				else
+					assert(align == 'S' || align == '<', 'invalid align {0}', align)
+
+				// position item's children recursively.
+				position_f(a, i, axis, x, w)
+
+			}
+
+			i = get_next_ext_i(a, i)
+		}
+
+	}
+
+}
+
+position[CMD_H    ] = position_flex
+position[CMD_V    ] = position_flex
+position[CMD_STACK] = position_flex
+
+function position_all(axis) {
+	reset()
+	let s_w = axis ? screen_h : screen_w
+	for (let a of layers) {
+		let i = 2
+		let n = a.length
+		while (i < n) {
+			let cmd = a[i-1]
+			let position_f = position[cmd]
+			if (position_f) {
+				let min_w = a[i+2+axis]
+				position_f(a, i, axis, 0, max(min_w, s_w))
+			}
+			i = get_next_ext_i(a, i)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+
+let hit_set = set() // {id}
+
+let hit_state_map_freelist = map_freelist()
+let hit_state_maps = map() // {id->map}
+
+function hovers(id) {
+	if (!id)
+		return
+	if (!hit_set.has(id))
+		return
+	let m = hit_state_maps.get(id)
+	if (!m) {
+		m = hit_state_map_freelist()
+		hit_state_maps.set(id, m)
+	}
+	return m
+}
+
+function hit_rect(x, y, w, h) {
+	return (
+		(mx >= x && mx < x + w) &&
+		(my >= y && my < y + h)
+	)
+}
+
+function hit_box(a, i) {
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	return hit_rect(x, y, w, h)
+}
+
+hit[CMD_TEXT] = function(a, i) {
+	if (!hit_box(a, i))
+		return
+	hit_set.add(a[i+TEXT_ID])
+	return true
+}
+
+function hit_ct(a, i) {
+
+	if (!hit_box(a, i))
+		return
+
+	// hit direct children in reverse paint order.
+	let ct_i = i
+	let next_ext_i = get_next_ext_i(a, i)
+	let end_i = a[next_ext_i-3] // prev_i
+	i = a[end_i-3] // prev_i
+	while (i > ct_i) {
+		let cmd = a[i-1]
+		if (cmd == CMD_END) {
+			i = a[i] // start_i
+			cmd = a[i-1]
+		}
+		let hit_f = hit[cmd]
+		if (hit_f)
+			if (hit_f(a, i))
+				return true
+		i = a[i-3] // prev_i
+	}
+
+	return true
+}
+
+hit[CMD_SCROLLBOX] = function(a, i) {
+	let id = a[i+SB_ID]
+	if (!id)
+		return
+	if (!hit_ct(a, i))
+		return
+	for (let axis = 0; axis < 2; axis++) {
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+		if (!visible)
+			continue
+		if (!hit_rect(tx, ty, tw, th))
+			continue
+		let sbar_id = id+'.scrollbar'+axis
+		hit_set.add(sbar_id)
+	}
+	return true
+}
+
+hit[CMD_H    ] = hit_ct
+hit[CMD_V    ] = hit_ct
+hit[CMD_STACK] = hit_ct
 
 function hit_test_all() {
-	hit_rect = null
+
+	for (let m of hit_state_maps.values())
+		hit_state_map_freelist(m)
+	hit_state_maps.clear()
+	hit_set.clear()
+
+	if (mx == null)
+		return
+
 	for (let j = layers.length-1; j >= 0; j--) {
-		let layer = layers[j]
-		let i = layer.length-1
-		while (i >= 0) {
-			let argc = layer[i]
-			i -= argc-1
-			let cmd = layer[i]
-			if (cmd == 'rect') {
-				let id = layer[i+2]
-				let x  = layer[i+3]
-				let y  = layer[i+4]
-				let w  = layer[i+5]
-				let h  = layer[i+6]
-				if (mx >= x && mx < x + w) {
-					if (my >= y && my < y + h) {
-						hit_rect = id
-						return
-					}
-				}
+		let a = layers[j]
+		let prev_i = a.length-1
+		if (prev_i < 0)
+			continue
+		let i = a[prev_i]
+		while (1) {
+			let cmd = a[i-1]
+			if (cmd == CMD_END) {
+				i = a[i] // start_i
+				cmd = a[i-1]
 			}
-			i--
+			let hit_f = hit[cmd]
+			if (hit_f)
+				if (hit_f(a, i))
+					break
+			if (i == 2)
+				break
+			i = a[i-3] // prev_i
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+
+draw[CMD_H] = function(a, i) {
+	ct_stack.push(i)
+	if (DEBUG) {
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
+		cx.strokeStyle = color
+		cx.beginPath()
+		cx.rect(x, y, w, h)
+		cx.stroke()
+	}
+}
+draw[CMD_V    ] = draw[CMD_H]
+draw[CMD_STACK] = draw[CMD_H]
+
+draw[CMD_TEXT] = function(a, i) {
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let s = a[i+TEXT_S]
+	let asc = a[i+TEXT_ASC]
+	if (DEBUG) {
+		cx.strokeStyle = color
+		cx.beginPath()
+		cx.rect(x, y, w, h)
+		cx.stroke()
+	}
+	cx.textAlign = 'left'
+	cx.fillStyle = color
+	cx.fillText(s, x, y+asc)
+}
+
+draw[CMD_COLOR] = function(a, i) {
+	color = a[i]
+}
+
+draw[CMD_FONT] = set_font
+draw[CMD_FONT_SIZE] = set_font_size
+
+let scrollbar_rect
+{
+let r = [false, 0, 0, 0, 0]
+scrollbar_rect = function(a, i, axis) {
+	let x  = a[i+0]
+	let y  = a[i+1]
+	let w  = a[i+2]
+	let h  = a[i+3]
+	let cw = a[i+SB_CW]
+	let ch = a[i+SB_CW+1]
+	let sx = a[i+SB_SX]
+	let sy = a[i+SB_SX+1]
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+	let psx = sx / (cw - w)
+	let psy = sy / (ch - h)
+	let pw = w / cw
+	let ph = h / ch
+	let thickness = 10
+	let visible, tx, ty, tw, th
+	if (!axis) {
+		visible = pw < 1
+		if (visible) {
+			tw = pw * w
+			th = thickness
+			tx = psx * (w - tw)
+			ty = h - th
+		}
+	} else {
+		visible = ph < 1
+		if (visible) {
+			th = ph * h
+			tw = thickness
+			ty = psy * (h - th)
+			tx = w - tw
+		}
+	}
+	r[0] = visible
+	r[1] = tx
+	r[2] = ty
+	r[3] = tw
+	r[4] = th
+	return r
+}
+}
+
+draw[CMD_SCROLLBOX] = function(a, i) {
+	let x  = a[i+0]
+	let y  = a[i+1]
+	let w  = a[i+2]
+	let h  = a[i+3]
+	let cw = a[i+SB_CW]
+	let ch = a[i+SB_CW+1]
+	let sx = a[i+SB_SX]
+	let sy = a[i+SB_SX+1]
+
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+
+	let psx = sx / (cw - w)
+	let psy = sy / (ch - h)
+	let pw = w / cw
+	let ph = h / ch
+	let thickness = 10
+
+	let id = a[i+SB_ID]
+	if (id) {
+		for (let axis = 0; axis < 2; axis++) {
+
+			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+			if (!visible)
+				continue
+
+			let sbar_id = id+'.scrollbar'+axis
+			let cs = captured(sbar_id)
+			if (cs) {
+				if (!axis) {
+					let psx0 = cs.get('ps0')
+					let dpsx = (mx - mx0) / (w - tw)
+					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
+					id_state(id).set('scroll_x', sx)
+					a[i+SB_SX] = sx
+				} else {
+					let psy0 = cs.get('ps0')
+					let dpsy = (my - my0) / (h - th)
+					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
+					id_state(id).set('scroll_y', sy)
+					a[i+SB_SX+1] = sy
+				}
+				break
+			} else {
+				let hs = hovers(sbar_id)
+				if (!hs)
+					continue
+				let cs = capture(sbar_id)
+				if (!cs)
+					continue
+				cs.set('ps0', !axis ? psx : psy)
+			}
+		}
+	}
+
+	cx.save()
+	cx.translate(x, y)
+	cx.beginPath()
+	cx.rect(0, 0, w, h)
+	cx.strokeStyle = color
+	cx.stroke()
+	cx.clip()
+	ct_stack.push(i)
+	cx.save()
+	cx.translate(-sx, -sy)
+}
+
+draw[CMD_END] = function(a, end_i) {
+	let i = ct_stack.pop()
+	let cmd = a[i-1]
+	if (cmd == CMD_SCROLLBOX) {
+		cx.restore()
+		let id = a[i+SB_ID]
+		for (let axis = 0; axis < 2; axis++) {
+
+			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+			if (!visible)
+				continue
+
+			let sbar_id = id+'.scrollbar'+axis
+			let cs = captured(sbar_id)
+			let hs = hovers(sbar_id)
+
+			cx.beginPath()
+			cx.rect(tx, ty, tw, th)
+			cx.fillStyle = cs && 'green' || hs && 'red' || 'gray'
+			cx.fill()
+
+		}
+		cx.restore()
+	}
+}
+
+draw[CMD_BG] = function(a, i) {
+	cx.fillStyle = a[i]
+	cx.fill()
+}
+
+draw[CMD_BORDER] = function(a, i) {
+	let sides  = a[i]
+	let color  = a[i+1]
+	let radius = a[i+2]
+	cx.strokeStyle = color
+	cx.lineWidth = 1
+	cx.stroke()
+}
+
+// ---------------------------------------------------------------------------
+
+function draw_all() {
+	reset()
+	for (let a of layers) {
+		let i = 2
+		let n = a.length
+		while (i < n) {
+			let cmd = a[i-1]
+			let draw_f = draw[cmd]
+			if (draw_f)
+				draw_f(a, i)
+			i = a[i-2] // next_i
 		}
 	}
 }
 
 function redraw_all() {
-	for (layer of layers)
-		layer.length = 0
+	for (let a of layers)
+		layer_clear(a)
+	reset()
+	draw_frame()
+	id_state_gc()
+	measure_all(0)
+	position_all(0)
+	measure_all(1)
+	position_all(1)
 	draw_all()
-	for (layer of layers) {
-		let i = 0
-		let n = layer.length
-		while (i < n) {
-			let cmd  = layer[i]
-			let argc = layer[i+1]
-			if (cmd == 'rect') {
-				let id = layer[i+2]
-				let x  = layer[i+3]
-				let y  = layer[i+4]
-				let w  = layer[i+5]
-				let h  = layer[i+6]
-				cx.beginPath()
-				cx.rect(x, y, w, h)
-				cx.fillStyle = hit_rect == id ? 'red' : 'blue'
-				cx.fill()
-				i += argc
-			}
-		}
-	}
-	cx.beginPath()
-	cx.rect(mx, my, 10, 10)
-	cx.fillStyle = 'white'
-	cx.fill()
 }
 
-function draw_all() {
+// ---------------------------------------------------------------------------
+
+function draw_frame() {
+
+	do_color('white')
+	do_font('Arial')
+	do_font_size(30)
+
+	/*
 	layer = layer_popup
-	rect('r1', 10, 10, 200, 200)
+	do_font_size(30)
+	do_rect('r1',  10,  10, 200, 200, hit_id == 'r1' ? 'red' : 'blue', 'white')
+	do_rect('r2', 230,  10, 200, 200, hit_id == 'r2' ? 'red' : 'blue', 'white')
+	*/
+
+	do_h(1)
+		do_text('t1', 'Hello!')
+		//do_stack(1)
+			// do_bg('hsl(0deg 0% 16%)')
+			do_scrollbox('sb1', null, null, 1, 'auto', 'auto')
+				do_v(1, 10, 'S', 'c')
+					do_bg('hsl(0deg 0% 16%)')
+					do_border(1, 'red')
+					do_text('t2', '[Hello Hello Hello Hello Hello Hello Hello]', '<', 'c', 1)
+					do_text('t3', (max_frame_duration * 1000).dec(1), '<', 'c', 1)
+				do_end()
+			do_end()
+		//do_end()
+		do_text('t4', 'Hello Again!', 'c', 'c', 1)
+		do_text('t3', '...and again.', 'c', 'c', 1)
+	do_end()
+
+	//	do_v()
+	//
+	//	do_text('t4',  50,  50, 'Hello!')
+	//	do_text('t5',  50,  50, 'Hello Again!')
+	//	do_text('t6',  50,  50, '...and again.')
+	//
+	//	do_end()
+
+	/*
 	layer = layer_base
-	rect('r2', 50, 50, 200, 200)
+	let i = 1
+	for (let y = 0; y < 1; y++) {
+		for (let x = 0; x < 1; x++) {
+			do_rect(i, x * 60, y * 15, 50, 10, hit_id == i ? 'red' : 'white', null)
+			i++
+		}
+	}
+	pr(layer_popup.length)
+	*/
+
+	// redraw()
+
 }
+
+// ---------------------------------------------------------------------------
 
 let modules = {
 	main: {
@@ -201,7 +1278,6 @@ let module = {}
 
 module.tabs = function() {
 
-
 	return tabs
 }
 
@@ -210,6 +1286,7 @@ module.module2 = function() {
 
 }
 
+}()) // module function
 </script>
 </body>
 </html>
