@@ -45,8 +45,8 @@ IMGUI
 	- z-index
 	* text
 	* bg-color
-	- border
-	- box-shadow
+	* border
+	* box-shadow
 	- images (incl. svg?)
 - layouting
 	* min width & height
@@ -54,9 +54,9 @@ IMGUI
 	* flexbox min-w/h grow
 	* flexbox align
 	* flexbox gap
-	- stack
-	- margin
+	* stack
 	- padding
+	- margin
 	* text min-w/h
 	- word-wrapping
 	- grid fr stretch
@@ -71,21 +71,49 @@ IMGUI
 	* capture state
 	- drag & drop
 - keyboard
-	- event bubbling
 	- focused widget
+	- event bubbling
 - text selection
 	- drag-select with mouse
 - text(area) input
 	- put it behind the canvas with correct width & height
 		- route keyboard events to it
 		- redraw it on canvas with offset and selection
+- transition animations
+- popup layouting
 
 CHALLENGES
 
 - input on a canvas
 - textarea on a canvas
-- word wrapping
+- webgl2 canvas on a 2d canvas
+- word wrapping (our layout algo supports word-wrapping for horizontal text)
 - rich text on a canvas (inline box model)
+
+PROS vs WEB
+- stateless i.e. reactive / IMGUI (but with layouting and z-index and no frame lag)
+- simpler and far more productive layouting and styling models
+- global z-index, allowing for:
+	- relatively-positioned but painted-last popups
+	- painted-last focus ring
+- transition animations for in-layout objects, allowing for:
+	- animated element moving, drag/drop and selection under/overlays
+- streamable and replayable rendering, for sreen-sharing and remote interaction
+- super-fast and memory-efficient with very low gc pressure between frames.
+- complex widgets built with a combination of box-stacking and custom-drawing.
+
+CONS vs WEB
+- must reimplement:
+	- text selection & clipboard ops
+	- scrollbox
+	- word-wrapping
+	- inline layouting with:
+		- u, b, i, strike, sub, sup, h1..6, p, br, hr, float
+- no fancy typography:
+	- no smart word-wrapping (Thai, auto-hyphenation)
+	- no BiDi
+	- no smart underline (interrupted by letter descenders)
+-
 
 */
 
@@ -364,10 +392,6 @@ function cmd(code, name) {
 	cmd_name_map.set(name, code)
 	return code
 }
-const CMD_MAX = 63
-function pcmd(code, name) {
-	return cmd(CMD_MAX + code, name)
-}
 
 ui.widget = function(e) {
 	cmd(e.code, e.name)
@@ -395,6 +419,8 @@ function do_cmd(cmd, ...args) {
 ui.cmd = do_cmd
 
 let ct_stack = [] // [ct_i1,...]
+let ct_x = 0
+let ct_y = 0
 
 const FR         = 4 // children of v,h: fraction from main-axis size.
 const ALIGN      = 5 // all children: align v,h.
@@ -528,37 +554,40 @@ function do_end(cmd_name) {
 	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
 }
 
-const CMD_BG = pcmd(1, 'bg')
-function do_bg(bg) {
-	do_cmd(CMD_BG, bg)
-}
-
-const BORDER_SIDE_TOP    = 0
-const BORDER_SIDE_BOTTOM = 1
-const BORDER_SIDE_LEFT   = 2
-const BORDER_SIDE_RIGHT  = 4
+const BORDER_SIDE_T = 1
+const BORDER_SIDE_R = 2
+const BORDER_SIDE_B = 4
+const BORDER_SIDE_L = 8
+const BORDER_SIDE_ALL = 15
 
 function parse_border_sides(s) {
-	if (s == false) return 0
-	if (s == true ) return 7
+	if (!s) // 0, null, undefined
+		return 0
+	if (s == true) // true, 1
+		return BORDER_SIDE_ALL
 	return (
-		s.includes('l') ? BORDER_SIDE_LEFT   : 0 +
-		s.includes('r') ? BORDER_SIDE_RIGHT  : 0 +
-		s.includes('t') ? BORDER_SIDE_TOP    : 0 +
-		s.includes('b') ? BORDER_SIDE_BOTTOM : 0
+		(s.includes('l') ? BORDER_SIDE_L : 0) +
+		(s.includes('r') ? BORDER_SIDE_R : 0) +
+		(s.includes('t') ? BORDER_SIDE_T : 0) +
+		(s.includes('b') ? BORDER_SIDE_B : 0)
 	)
 }
 
-const CMD_BORDER = pcmd(2, 'border')
-function do_border(sides, color, radius) {
-	do_cmd(CMD_BORDER, parse_border_sides(sides), color, radius)
+const CMD_RECT = cmd(6, 'rect')
+function do_rect(bg_color, sides, border_color, border_radius) {
+	do_cmd(CMD_RECT, bg_color, parse_border_sides(sides), border_color, border_radius)
+}
+
+const CMD_SHADOW = cmd(8, 'shadow')
+function do_shadow(color, blur, x, y) {
+	do_cmd(CMD_SHADOW, color, blur, x, y)
 }
 
 const TEXT_ASC = 7
 const TEXT_ID  = 8
 const TEXT_S   = 9
 
-const CMD_TEXT = cmd(6, 'text')
+const CMD_TEXT = cmd(9, 'text')
 function do_text(id, s, align, valign, fr) {
 	do_cmd(CMD_TEXT,
 
@@ -577,21 +606,21 @@ function do_text(id, s, align, valign, fr) {
 	)
 }
 
-const CMD_COLOR = pcmd(3, 'color')
+const CMD_COLOR = cmd(10, 'color')
 function do_color(s) {
 	if (color == s) return
 	do_cmd(CMD_COLOR, s)
 	color = s
 }
 
-const CMD_FONT = pcmd(4, 'font')
+const CMD_FONT = cmd(11, 'font')
 function do_font(s) {
 	if (font == s) return
 	do_cmd(CMD_FONT, s)
 	font = s
 }
 
-const CMD_FONT_SIZE = pcmd(5, 'font_size')
+const CMD_FONT_SIZE = cmd(12, 'font_size')
 function do_font_size(s) {
 	if (font_size == s) return
 	do_cmd(CMD_FONT_SIZE, s)
@@ -703,29 +732,36 @@ function measure_all(axis) {
 
 // ---------------------------------------------------------------------------
 
-position[CMD_TEXT] = function(a, i, axis, ct_x, ct_w) {
-	a[i+0+axis] = ct_x
-	a[i+2+axis] = ct_w
-}
+function position_children_cross_axis(a, i, axis, ct_x, ct_w) {
 
-position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
-
-	a[i+0+axis] = ct_x
-	a[i+2+axis] = ct_w
-
-	i = a[i-2]
 	while (a[i-1] != CMD_END) {
 
 		let cmd = a[i-1]
 		let position_f = position[cmd]
-		if (position_f)
-			position_f(a, i, axis, ct_x, ct_w)
+
+		if (position_f) {
+
+			let min_w = a[i+2+axis]
+			let align = a[i+ALIGN+axis]
+
+			// stretch or align the item on the cross-axis.
+			let x = 0
+			let w = align == ALIGN_STRETCH ? ct_w : min_w
+			if (align == ALIGN_END)
+				x = ct_w - w
+			else if (align == ALIGN_CENTER)
+				x = (ct_w - w) / 2
+
+			// position item's children recursively.
+			position_f(a, i, axis, x, w)
+
+		}
 
 		i = get_next_ext_i(a, i)
 	}
 }
 
-function position_flex(a, i, axis, ct_x, ct_w, depth) {
+function position_flex(a, i, axis, ct_x, ct_w) {
 
 	a[i+0+axis] = ct_x
 	a[i+2+axis] = ct_w
@@ -733,8 +769,6 @@ function position_flex(a, i, axis, ct_x, ct_w, depth) {
 	let main_axis = is_main_axis(a[i-1], axis)
 	let next_i = a[i-2]
 	let i0 = i
-
-	let cmd0 = a[i-1]
 
 	if (main_axis) {
 
@@ -781,7 +815,7 @@ function position_flex(a, i, axis, ct_x, ct_w, depth) {
 		// take it. each child shrinks to take in the percent of the overflow
 		// equal to the child's percent of free space.
 		i = next_i
-		let sx = ct_x
+		let sx = 0
 		while (a[i-1] != CMD_END) {
 
 			let cmd = a[i-1]
@@ -816,7 +850,7 @@ function position_flex(a, i, axis, ct_x, ct_w, depth) {
 					x = sx + (sw - w) / 2
 
 				// position item's children recursively.
-				position_f(a, i, axis, x, w, depth+1)
+				position_f(a, i, axis, x, w)
 
 				sx = sx + sw + gap
 
@@ -827,34 +861,7 @@ function position_flex(a, i, axis, ct_x, ct_w, depth) {
 
 	} else {
 
-		let i = next_i
-		let sx = ct_x
-		let sw = ct_w
-		while (a[i-1] != CMD_END) {
-
-			let cmd = a[i-1]
-			let position_f = position[cmd]
-
-			if (position_f) {
-
-				let min_w = a[i+2+axis]
-				let align = a[i+ALIGN+axis]
-
-				// stretch or align the item on the cross-axis.
-				let x = sx
-				let w = align == ALIGN_STRETCH ? sw : min_w
-				if (align == ALIGN_END)
-					x = sx + sw - w
-				else if (align == ALIGN_CENTER)
-					x = sx + (sw - w) / 2
-
-				// position item's children recursively.
-				position_f(a, i, axis, x, w, depth+1)
-
-			}
-
-			i = get_next_ext_i(a, i)
-		}
+		position_children_cross_axis(a, next_i, axis, ct_x, ct_w)
 
 	}
 
@@ -863,6 +870,83 @@ function position_flex(a, i, axis, ct_x, ct_w, depth) {
 position[CMD_H    ] = position_flex
 position[CMD_V    ] = position_flex
 position[CMD_STACK] = position_flex
+
+position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
+
+	let co_w = a[i+SB_CW+axis] // scrollbox content w
+	let next_i = a[i-2]
+
+	a[i+0+axis] = ct_x
+	a[i+2+axis] = ct_w
+
+	position_children_cross_axis(a, next_i, axis, 0, max(co_w, ct_w))
+
+	// update sx,sy once.
+	if (axis) {
+
+		let x  = a[i+0]
+		let y  = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+		let cw = a[i+SB_CW]
+		let ch = a[i+SB_CW+1]
+		let sx = a[i+SB_SX]
+		let sy = a[i+SB_SX+1]
+
+		sx = max(0, min(sx, cw - w))
+		sy = max(0, min(sy, ch - h))
+
+		let psx = sx / (cw - w)
+		let psy = sy / (ch - h)
+		let pw = w / cw
+		let ph = h / ch
+		let thickness = 10
+
+		let id = a[i+SB_ID]
+		if (id) {
+			for (let axis = 0; axis < 2; axis++) {
+
+				let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+				if (!visible)
+					continue
+
+				let sbar_id = id+'.scrollbar'+axis
+				let cs = captured(sbar_id)
+				if (cs) {
+					if (!axis) {
+						let psx0 = cs.get('ps0')
+						let dpsx = (mx - mx0) / (w - tw)
+						sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
+						id_state(id).set('scroll_x', sx)
+						a[i+SB_SX] = sx
+					} else {
+						let psy0 = cs.get('ps0')
+						let dpsy = (my - my0) / (h - th)
+						sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
+						id_state(id).set('scroll_y', sy)
+						a[i+SB_SX+1] = sy
+					}
+					break
+				} else {
+					let hs = hovers(sbar_id)
+					if (!hs)
+						continue
+					let cs = capture(sbar_id)
+					if (!cs)
+						continue
+					cs.set('ps0', !axis ? psx : psy)
+				}
+			}
+		}
+
+	}
+
+}
+
+position[CMD_TEXT] = function(a, i, axis, ct_x, ct_w) {
+	a[i+0+axis] = ct_x
+	a[i+2+axis] = ct_w
+}
 
 function position_all(axis) {
 	reset()
@@ -904,8 +988,8 @@ function hovers(id) {
 
 function hit_rect(x, y, w, h) {
 	return (
-		(mx >= x && mx < x + w) &&
-		(my >= y && my < y + h)
+		(mx >= ct_x + x && mx < ct_x + x + w) &&
+		(my >= ct_y + y && my < ct_y + y + h)
 	)
 }
 
@@ -929,6 +1013,17 @@ function hit_ct(a, i) {
 	if (!hit_box(a, i))
 		return
 
+	let ct_x0 = ct_x
+	let ct_y0 = ct_y
+
+	ct_x += a[i+0]
+	ct_y += a[i+1]
+
+	if (a[i-1] == CMD_SCROLLBOX) {
+		ct_x += a[i+SB_SX+0]
+		ct_y += a[i+SB_SX+1]
+	}
+
 	// hit direct children in reverse paint order.
 	let ct_i = i
 	let next_ext_i = get_next_ext_i(a, i)
@@ -941,11 +1036,14 @@ function hit_ct(a, i) {
 			cmd = a[i-1]
 		}
 		let hit_f = hit[cmd]
-		if (hit_f)
-			if (hit_f(a, i))
-				return true
+		if (hit_f && hit_f(a, i)) {
+			break
+		}
 		i = a[i-3] // prev_i
 	}
+
+	ct_x = ct_x0
+	ct_y = ct_y0
 
 	return true
 }
@@ -974,6 +1072,7 @@ hit[CMD_STACK] = hit_ct
 
 function hit_test_all() {
 
+	reset()
 	for (let m of hit_state_maps.values())
 		hit_state_map_freelist(m)
 	hit_state_maps.clear()
@@ -1011,11 +1110,15 @@ draw[CMD_H] = function(a, i) {
 
 	ct_stack.push(i)
 
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+
+	cx.save()
+	cx.translate(x, y)
+
 	if (DEBUG) {
-		let x = a[i+0]
-		let y = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
 		cx.strokeStyle = color
 		cx.beginPath()
 		cx.rect(x, y, w, h)
@@ -1045,13 +1148,6 @@ draw[CMD_TEXT] = function(a, i) {
 	cx.fillStyle = color
 	cx.fillText(s, x, y+asc)
 }
-
-draw[CMD_COLOR] = function(a, i) {
-	color = a[i]
-}
-
-draw[CMD_FONT] = set_font
-draw[CMD_FONT_SIZE] = set_font_size
 
 let scrollbar_rect
 {
@@ -1112,56 +1208,11 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 	let sx = a[i+SB_SX]
 	let sy = a[i+SB_SX+1]
 
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-
-	let psx = sx / (cw - w)
-	let psy = sy / (ch - h)
-	let pw = w / cw
-	let ph = h / ch
-	let thickness = 10
-
-	let id = a[i+SB_ID]
-	if (id) {
-		for (let axis = 0; axis < 2; axis++) {
-
-			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-			if (!visible)
-				continue
-
-			let sbar_id = id+'.scrollbar'+axis
-			let cs = captured(sbar_id)
-			if (cs) {
-				if (!axis) {
-					let psx0 = cs.get('ps0')
-					let dpsx = (mx - mx0) / (w - tw)
-					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
-					id_state(id).set('scroll_x', sx)
-					a[i+SB_SX] = sx
-				} else {
-					let psy0 = cs.get('ps0')
-					let dpsy = (my - my0) / (h - th)
-					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
-					id_state(id).set('scroll_y', sy)
-					a[i+SB_SX+1] = sy
-				}
-				break
-			} else {
-				let hs = hovers(sbar_id)
-				if (!hs)
-					continue
-				let cs = capture(sbar_id)
-				if (!cs)
-					continue
-				cs.set('ps0', !axis ? psx : psy)
-			}
-		}
-	}
-
 	cx.save()
+	cx.translate(x, y)
 
 	cx.beginPath()
-	cx.rect(x, y, w, h)
+	cx.rect(0, 0, w, h)
 	cx.clip()
 	if (DEBUG) {
 		cx.strokeStyle = color
@@ -1174,9 +1225,10 @@ draw[CMD_END] = function(a, end_i) {
 
 	let i = ct_stack.pop()
 
+	cx.restore()
+
 	let cmd = a[i-1]
 	if (cmd == CMD_SCROLLBOX) {
-		cx.restore()
 		let id = a[i+SB_ID]
 		for (let axis = 0; axis < 2; axis++) {
 
@@ -1197,37 +1249,80 @@ draw[CMD_END] = function(a, end_i) {
 	}
 }
 
-draw[CMD_BG] = function(a, i) {
-	cx.fillStyle = a[i]
-	let ct_i = ct_stack.at(-1)
-	let x = a[ct_i+0]
-	let y = a[ct_i+1]
-	let w = a[ct_i+2]
-	let h = a[ct_i+3]
-	cx.beginPath()
-	cx.rect(x, y, w, h)
-	cx.fill()
+let border_paths; {
+
+function T  (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2, y1) }
+function R  (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2) }
+function B  (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1, y2) }
+function L  (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1) }
+function TB (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2, y1); cx.moveTo(x2, y2); cx.lineTo(x1, y2) }
+function RL (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2); cx.moveTo(x1, y2); cx.lineTo(x1, y1) }
+function TR (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2) }
+function RB (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1, y2) }
+function BL (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1) }
+function LT (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2, y1) }
+function TRB(cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1, y2) }
+function RBL(cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1) }
+function BLT(cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2, y1) }
+function LTR(cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2) }
+
+border_paths = [noop, T, R, TR, B, TB, RB, TRB, L, LT, RL, LTR, BL, BLT, RBL]
 }
 
-draw[CMD_BORDER] = function(a, i) {
-	let sides  = a[i]
-	let color  = a[i+1]
-	let radius = a[i+2]
+function border_path(cx, x1, y1, x2, y2, sides, radius) {
+	cx.beginPath()
+	if (sides == BORDER_SIDE_ALL)
+		if (!radius)
+			cx.rect(x1, y1, x2-x1, y2-y1)
+		else
+			cx.roundRect(x1, y1, x2-x1, y2-y1, radius)
+	else
+		border_paths[sides](cx, x1, y1, x2, y2, radius)
+}
+
+let shadow_set
+draw[CMD_SHADOW] = function(a, i) {
+	cx.shadowColor   = a[i]
+	cx.shadowBlur    = a[i+1]
+	cx.shadowOffsetX = a[i+2]
+	cx.shadowOffsetY = a[i+3]
+	shadow_set = true
+}
+
+draw[CMD_RECT] = function(a, i) {
 	let ct_i = ct_stack.at(-1)
-	let x = a[ct_i+0]
-	let y = a[ct_i+1]
 	let w = a[ct_i+2]
 	let h = a[ct_i+3]
-	cx.strokeStyle = color
-	cx.lineWidth = 1
-	cx.beginPath()
-	if (!radius) {
-		cx.rect(x, y, w, h)
-	} else {
-		//
+	let bg_color     = a[i]
+	let border_sides = a[i+1]
+	let border_color  = a[i+2]
+	let border_radius = a[i+3]
+	if (bg_color != null) {
+		cx.fillStyle = bg_color
+		border_path(cx, 0, 0, w, h, BORDER_SIDE_ALL, border_radius)
+		cx.fill()
 	}
-	cx.stroke()
+	if (border_sides) {
+		cx.strokeStyle = border_color
+		cx.lineWidth = 1
+		cx.lineCap = 'square'
+		border_path(cx, .5, .5, w - .5, h - .5, border_sides, border_radius)
+		cx.stroke()
+	}
+	if (shadow_set) {
+		cx.shadowBlur    = 0
+		cx.shadowOffsetX = 0
+		cx.shadowOffsetY = 0
+		shadow_set = false
+	}
 }
+
+draw[CMD_COLOR] = function(a, i) {
+	color = a[i]
+}
+
+draw[CMD_FONT] = set_font
+draw[CMD_FONT_SIZE] = set_font_size
 
 // ---------------------------------------------------------------------------
 
@@ -1304,17 +1399,21 @@ function make_frame() {
 	do_h(1)
 		do_text('t1', 'Hello!')
 		do_stack(1)
-			do_bg('hsl(0deg 0% 16%)')
+			do_rect('hsl(0deg 0% 16%)')
 			do_scrollbox('sb1', null, null, 1, 'auto', 'auto')
-				do_v(1, 10, 's', 'c')
+				do_v(1, 50, 'c', 'c')
 					// do_bg('hsl(0deg 0% 16%)')
-					do_border(1, 'red')
+					do_shadow('black', 5, 2, 2)
+					do_rect('blue', 1, 'hsl(0 0% 100%)', 20)
 					do_text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
-					do_text('t3', (max_frame_duration * 1000).dec(1), '[', 'c', 1)
+					do_text('t3', (max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
 				do_end('v')
 			do_end()
 		do_end('stack')
+		do_stack(1, 0, 0, 'c', 'c')
+		do_rect(null, 'blt', 'red', 10)
 		do_text('t4', 'Hello Again!', 'c', 'c', 1)
+		do_end('stack')
 		do_text('t3', '...and again.', 'c', 'c', 1)
 	do_end('h')
 
