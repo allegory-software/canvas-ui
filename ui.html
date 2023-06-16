@@ -221,18 +221,22 @@ function map_freelist() {
 
 // ---------------------------------------------------------------------------
 
-let dpr, screen_w, screen_h
+let a = []
+
+let dpr
 
 function resize_canvas() {
 	dpr = devicePixelRatio
 	let window_w = window.innerWidth
 	let window_h = window.innerHeight
-	screen_w = floor(window_w * dpr)
-	screen_h = floor(window_h * dpr)
+	let screen_w = floor(window_w * dpr)
+	let screen_h = floor(window_h * dpr)
 	canvas.style.width  = screen_w / dpr + 'px'
 	canvas.style.height = screen_h / dpr + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
+	a.w = screen_w
+	a.h = screen_h
 	redraw()
 }
 let cx = canvas.getContext('2d')
@@ -341,8 +345,6 @@ function layer_clear(e) {
 
 let layer_base  = layer_make()
 let layer_popup = layer_make()
-
-let a = []
 
 a.layers = [layer_base, layer_popup]
 
@@ -1187,8 +1189,8 @@ position[CMD_POPUP] = function(a, i, axis, ct_x, ct_w) {
 		// or alignment and relayout, and if that doesn't work, its offset.
 
 		let d = 10
-		let bw = screen_w
-		let bh = screen_h
+		let bw = a.w
+		let bh = a.h
 
 		let out_x1 = x < d
 		let out_y1 = y < d
@@ -1246,7 +1248,7 @@ position[CMD_TEXT] = function(a, i, axis, ct_x, ct_w) {
 
 function position_all(axis) {
 	reset_text()
-	let s_w = axis ? screen_h : screen_w
+	let s_w = axis ? a.h : a.w
 	let i = 2
 	let n = a.length
 	while (i < n) {
