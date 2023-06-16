@@ -437,8 +437,6 @@ function ui_cmd(cmd, ...args) {
 	return i0
 }
 
-ui.cmd = ui_cmd
-
 let ct_stack = [] // [ct_i1,...]
 let ct_x = 0
 let ct_y = 0
@@ -467,6 +465,10 @@ function parse_align(s) {
 	if (s == 'r') return ALIGN_END
 	if (s == '[') return ALIGN_START
 	if (s == ']') return ALIGN_END
+	if (s == 'stretch') return ALIGN_STRETCH
+	if (s == 'center' ) return ALIGN_CENTER
+	if (s == 'left'   ) return ALIGN_START
+	if (s == 'right'  ) return ALIGN_END
 	assert(false, 'invalid align {0}', s)
 }
 
@@ -477,6 +479,10 @@ function parse_valign(s) {
 	if (s == 'b') return ALIGN_END
 	if (s == '[') return ALIGN_START
 	if (s == ']') return ALIGN_END
+	if (s == 'stretch') return ALIGN_STRETCH
+	if (s == 'center' ) return ALIGN_CENTER
+	if (s == 'top'    ) return ALIGN_START
+	if (s == 'bottom' ) return ALIGN_END
 	assert(false, 'invalid valign {0}', s)
 }
 
@@ -515,7 +521,7 @@ reset_paddings()
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 	let i = ui_cmd(cmd,
 
-		// cell struct: positions 0..6
+		// cell struct
 		0, // x
 		0, // y
 		min_w ?? 0,
@@ -545,7 +551,7 @@ let CMD_STACK = cmd(3, 'stack')
 ui.stack = function(fr, align, valign, min_w, min_h) {
 	let i = ui_cmd(CMD_STACK,
 
-		// cell struct: positions 0..6
+		// cell struct
 		0, // x
 		0, // y
 		min_w ?? 0, // min_w
@@ -576,7 +582,7 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 
 	let i = ui_cmd(CMD_SCROLLBOX,
 
-		// cell struct: positions 0..6
+		// cell struct
 		0, // x
 		0, // y
 		0, // content w swapped with min_w on `end`
@@ -606,7 +612,79 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 	}
 }
 
-const CMD_END = cmd(5, 'end')
+const POPUP_SIDE_CENTER       = 0 // only POPUP_SIDE_INNER_CENTER is valid!
+const POPUP_SIDE_LEFT         = 1
+const POPUP_SIDE_RIGHT        = 2
+const POPUP_SIDE_TOP          = 3
+const POPUP_SIDE_BOTTOM       = 4
+const POPUP_INNER             = 8 // own bit!
+const POPUP_SIDE_INNER_CENTER = POPUP_INNER + POPUP_SIDE_CENTER
+const POPUP_SIDE_INNER_LEFT   = POPUP_INNER + POPUP_SIDE_LEFT
+const POPUP_SIDE_INNER_RIGHT  = POPUP_INNER + POPUP_SIDE_RIGHT
+const POPUP_SIDE_INNER_TOP    = POPUP_INNER + POPUP_SIDE_TOP
+const POPUP_SIDE_INNER_BOTTOM = POPUP_INNER + POPUP_SIDE_BOTTOM
+
+const POPUP_ALIGN_CENTER = 0
+const POPUP_ALIGN_START  = 1
+const POPUP_ALIGN_END    = 2
+
+function popup_parse_side(s) {
+	if (s == 'c'           ) return POPUP_SIDE_CENTER
+	if (s == '['           ) return POPUP_SIDE_LEFT
+	if (s == ']'           ) return POPUP_SIDE_RIGHT
+	if (s == 'l'           ) return POPUP_SIDE_LEFT
+	if (s == 'r'           ) return POPUP_SIDE_RIGHT
+	if (s == 't'           ) return POPUP_SIDE_TOP
+	if (s == 'b'           ) return POPUP_SIDE_BOTTOM
+	if (s == 'ic'          ) return POPUP_SIDE_INNER_CENTER
+	if (s == 'il'          ) return POPUP_SIDE_INNER_LEFT
+	if (s == 'ir'          ) return POPUP_SIDE_INNER_RIGHT
+	if (s == 'it'          ) return POPUP_SIDE_INNER_TOP
+	if (s == 'ib'          ) return POPUP_SIDE_INNER_BOTTOM
+	if (s == 'center'      ) return POPUP_SIDE_CENTER
+	if (s == 'left'        ) return POPUP_SIDE_LEFT
+	if (s == 'right'       ) return POPUP_SIDE_RIGHT
+	if (s == 'top'         ) return POPUP_SIDE_TOP
+	if (s == 'bottom'      ) return POPUP_SIDE_BOTTOM
+	if (s == 'inner-center') return POPUP_SIDE_INNER_CENTER
+	if (s == 'inner-left'  ) return POPUP_SIDE_INNER_LEFT
+	if (s == 'inner-right' ) return POPUP_SIDE_INNER_RIGHT
+	if (s == 'inner-top'   ) return POPUP_SIDE_INNER_TOP
+	if (s == 'inner-bottom') return POPUP_SIDE_INNER_BOTTOM
+	assert(false, 'invalid popup side {0}', s)
+}
+
+function popup_parse_align(s) {
+	if (s == 'c'     ) return POPUP_ALIGN_CENTER
+	if (s == '['     ) return POPUP_ALIGN_START
+	if (s == ']'     ) return POPUP_ALIGN_END
+	if (s == 'center') return POPUP_ALIGN_CENTER
+	if (s == 'start' ) return POPUP_ALIGN_START
+	if (s == 'end'   ) return POPUP_ALIGN_END
+	assert(false, 'invalid align {0}', s)
+}
+
+const CMD_POPUP = cmd(5, 'popup')
+ui.popup = function(id, side, align, min_w, min_h) {
+	let i = ui_cmd(CMD_POPUP,
+
+		// cell struct but out-of-layout (no fr or align)
+		0, // x
+		0, // y
+		min_w ?? 0, // min_w
+		min_h ?? 0, // min_h
+		px1, py1, px2, py2,
+		mx1, my1, mx2, my2,
+		0, 0, 0, // TODO: not used
+
+		popup_parse_side(side ?? 'c'),
+		popup_parse_align(align ?? 'c'),
+	)
+	ct_stack.push(i)
+	reset_paddings()
+}
+
+const CMD_END = cmd(19, 'end')
 ui.end = function(cmd_name) {
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd_name) {
@@ -637,12 +715,12 @@ function parse_border_sides(s) {
 	)
 }
 
-const CMD_RECT = cmd(6, 'rect')
+const CMD_RECT = cmd(20, 'rect')
 ui.rect = function(bg_color, sides, border_color, border_radius) {
 	ui_cmd(CMD_RECT, bg_color, parse_border_sides(sides), border_color, border_radius)
 }
 
-const CMD_SHADOW = cmd(8, 'shadow')
+const CMD_SHADOW = cmd(21, 'shadow')
 ui.shadow = function(color, blur, x, y) {
 	ui_cmd(CMD_SHADOW, color, blur, x, y)
 }
@@ -651,11 +729,11 @@ const TEXT_ASC = 7+8
 const TEXT_ID  = 8+8
 const TEXT_S   = 9+8
 
-const CMD_TEXT = cmd(9, 'text')
+const CMD_TEXT = cmd(22, 'text')
 ui.text = function(id, s, align, valign, fr) {
 	ui_cmd(CMD_TEXT,
 
-		// cell struct: positions 0..6
+		// cell struct
 		0, // x
 		0, // y
 		0, // min_w, measured
@@ -673,21 +751,21 @@ ui.text = function(id, s, align, valign, fr) {
 	reset_paddings()
 }
 
-const CMD_COLOR = cmd(10, 'color')
+const CMD_COLOR = cmd(23, 'color')
 ui.color = function(s) {
 	if (color == s) return
 	ui_cmd(CMD_COLOR, s)
 	color = s
 }
 
-const CMD_FONT = cmd(11, 'font')
+const CMD_FONT = cmd(24, 'font')
 ui.font = function(s) {
 	if (font == s) return
 	ui_cmd(CMD_FONT, s)
 	font = s
 }
 
-const CMD_FONT_SIZE = cmd(12, 'font_size')
+const CMD_FONT_SIZE = cmd(25, 'font_size')
 ui.font_size = function(s) {
 	if (font_size == s) return
 	ui_cmd(CMD_FONT_SIZE, s)
@@ -725,7 +803,7 @@ function paddings(a, i, axis) {
 }
 
 function add_ct_min_wh(a, axis, w, fr) {
-	let i = assert(ct_stack.at(-1), 'object with size outside a container')
+	let i = assert(ct_stack.at(-1), 'object outside container')
 	let cmd = a[i-1]
 	let main_axis = is_main_axis(cmd, axis)
 	let min_w = a[i+2+axis]
@@ -756,11 +834,14 @@ measure[CMD_TEXT] = function(a, i, axis) {
 	add_ct_min_wh(a, axis, w, fr)
 }
 
-function ct_stack_push(a, i) { ct_stack.push(i) }
+function ct_stack_push(a, i) {
+	ct_stack.push(i)
+}
 
-measure[CMD_H] = ct_stack_push
-measure[CMD_V] = ct_stack_push
-measure[CMD_STACK] = ct_stack_push
+measure[CMD_H        ] = ct_stack_push
+measure[CMD_V        ] = ct_stack_push
+measure[CMD_STACK    ] = ct_stack_push
+measure[CMD_POPUP    ] = ct_stack_push
 measure[CMD_SCROLLBOX] = ct_stack_push
 
 measure[CMD_END] = function(a, _, axis) {
@@ -775,6 +856,8 @@ measure[CMD_END] = function(a, _, axis) {
 		a[i+2+axis] = sb_min_w + paddings(a, i, axis)
 		let fr = a[i+FR]
 		add_ct_min_wh(a, axis, sb_min_w, fr)
+	} else if (cmd == CMD_POPUP) {
+		// popups don't affect their target's layout.
 	} else {
 		let main_axis = is_main_axis(cmd, axis)
 		if (main_axis)
@@ -1016,6 +1099,10 @@ position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
 
 	}
 
+}
+
+position[CMD_POPUP] = function(a, i, axis, ct_x, ct_w) {
+	//
 }
 
 position[CMD_TEXT] = function(a, i, axis, ct_x, ct_w) {
@@ -1486,13 +1573,6 @@ function make_frame() {
 	ui.font('Arial')
 	ui.font_size(30)
 
-	/*
-	layer = layer_popup
-	ui.font_size(30)
-	ui.rect('r1',  10,  10, 200, 200, hit_id == 'r1' ? 'red' : 'blue', 'white')
-	ui.rect('r2', 230,  10, 200, 200, hit_id == 'r2' ? 'red' : 'blue', 'white')
-	*/
-
 	ui.h(1, 20)
 		ui.text('t1', 'Hello!')
 		ui.stack(1)
@@ -1508,37 +1588,21 @@ function make_frame() {
 					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
 					// ui.padding(10, 10, 10, 10)
 					ui.text('t3', (max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
+					ui.popup()
+						// ui.rect('red', 1, 'hsl(0 0% 100%)', 5)
+						ui.text('tp1', 'Wasup?')
+					ui.end('popup')
 				ui.end('v')
-			ui.end()
+			ui.end('scrollbox')
 		ui.end('stack')
 		ui.stack(1, 'c', 'c')
-		ui.rect(null, 'blt', 'red', 10)
-		// ui.margin (10, 10, 10, 10)
-		// ui.padding(10, 10, 10, 10)
-		ui.text('t4', 'Hello Again!', 'c', 'c', 1)
+			ui.rect(null, 'blt', 'red', 10)
+			// ui.margin (10, 10, 10, 10)
+			// ui.padding(10, 10, 10, 10)
+			ui.text('t4', 'Hello Again!', 'c', 'c', 1)
 		ui.end('stack')
 		ui.text('t3', '...and again.', 'c', 'c', 1)
 	ui.end('h')
-
-	//	ui.v()
-	//
-	//	ui.text('t4',  50,  50, 'Hello!')
-	//	ui.text('t5',  50,  50, 'Hello Again!')
-	//	ui.text('t6',  50,  50, '...and again.')
-	//
-	//	ui.end()
-
-	/*
-	layer = layer_base
-	let i = 1
-	for (let y = 0; y < 1; y++) {
-		for (let x = 0; x < 1; x++) {
-			ui.rect(i, x * 60, y * 15, 50, 10, hit_id == i ? 'red' : 'white', null)
-			i++
-		}
-	}
-	pr(layer_popup.length)
-	*/
 
 	// redraw()
 
