@@ -630,7 +630,6 @@ const POPUP_ALIGN_START  = 1
 const POPUP_ALIGN_END    = 2
 
 function popup_parse_side(s) {
-	if (s == 'c'           ) return POPUP_SIDE_CENTER
 	if (s == '['           ) return POPUP_SIDE_LEFT
 	if (s == ']'           ) return POPUP_SIDE_RIGHT
 	if (s == 'l'           ) return POPUP_SIDE_LEFT
@@ -642,7 +641,6 @@ function popup_parse_side(s) {
 	if (s == 'ir'          ) return POPUP_SIDE_INNER_RIGHT
 	if (s == 'it'          ) return POPUP_SIDE_INNER_TOP
 	if (s == 'ib'          ) return POPUP_SIDE_INNER_BOTTOM
-	if (s == 'center'      ) return POPUP_SIDE_CENTER
 	if (s == 'left'        ) return POPUP_SIDE_LEFT
 	if (s == 'right'       ) return POPUP_SIDE_RIGHT
 	if (s == 'top'         ) return POPUP_SIDE_TOP
@@ -665,10 +663,12 @@ function popup_parse_align(s) {
 	assert(false, 'invalid align {0}', s)
 }
 
-const POPUP_SIDE = 15
+const POPUP_SIDE  = S+0
+const POPUP_ALIGN = S+1
+const POPUP_FIXED = S+2
 
 const CMD_POPUP = cmd(5, 'popup')
-ui.popup = function(id, side, align, min_w, min_h) {
+ui.popup = function(id, side, align, fixed, min_w, min_h) {
 	let i = ui_cmd(CMD_POPUP,
 
 		// cell struct but out-of-layout (no fr or align)
@@ -680,8 +680,9 @@ ui.popup = function(id, side, align, min_w, min_h) {
 		mx1, my1, mx2, my2,
 		0, 0, 0, 0, // TODO: not used but written to, remove it!
 
-		popup_parse_side(side ?? 'c'),
+		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
+		fixed,
 	)
 	ct_stack.push(i)
 	reset_paddings()
@@ -919,6 +920,8 @@ function position_children_cross_axis(a, i, axis, ct_w) {
 
 function position_flex(a, i, axis, ct_x, ct_w) {
 
+	ct_stack.push(i)
+
 	a[i+0+axis] = ct_x
 	a[i+2+axis] = ct_w
 
@@ -1026,6 +1029,8 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 
 	}
 
+	ct_stack.pop()
+
 }
 
 position[CMD_H    ] = position_flex
@@ -1033,6 +1038,8 @@ position[CMD_V    ] = position_flex
 position[CMD_STACK] = position_flex
 
 position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
+
+	ct_stack.push(i)
 
 	let co_w = a[i+SB_CW+axis] // scrollbox content w
 	let next_i = a[i-2]
@@ -1102,39 +1109,34 @@ position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
 
 	}
 
+	ct_stack.pop()
+
 }
 
 {
-let px, py
+let x, y
 function position_popup(w, h, side, align, tx1, ty1, tx2, ty2) {
-/*
 
-	let tx1 = tr.x + (e.popup_x1 ?? 0)
-	let ty1 = tr.y + (e.popup_y1 ?? 0)
-	let tx2 = tr.x + (e.popup_x2 ?? tr.w)
-	let ty2 = tr.y + (e.popup_y2 ?? tr.h)
 	let tw = tx2 - tx1
 	let th = ty2 - ty1
 
-	let x, y
-	if (side == 'right') {
+	if (side == POPUP_SIDE_RIGHT) {
 		;[x, y] = [tx2, ty1]
-	} else if (side == 'left') {
+	} else if (side == POPUP_SIDE_LEFT) {
 		;[x, y] = [tx1 - w, ty1]
-	} else if (side == 'top') {
+	} else if (side == POPUP_SIDE_TOP) {
 		;[x, y] = [tx1, ty1 - h]
-	} else if (side == 'bottom') {
-		side = 'bottom'
+	} else if (side == POPUP_SIDE_BOTTOM) {
 		;[x, y] = [tx1, ty2]
-	} else if (side == 'inner-right') {
+	} else if (side == POPUP_SIDE_INNER_RIGHT) {
 		;[x, y] = [tx2 - w, ty1]
-	} else if (side == 'inner-left') {
+	} else if (side == POPUP_SIDE_INNER_LEFT) {
 		;[x, y] = [tx1, ty1]
-	} else if (side == 'inner-top') {
+	} else if (side == POPUP_SIDE_INNER_TOP) {
 		;[x, y] = [tx1, ty1]
-	} else if (side == 'inner-bottom') {
+	} else if (side == POPUP_SIDE_INNER_BOTTOM) {
 		;[x, y] = [tx1, ty2 - h]
-	} else if (side == 'inner-center') {
+	} else if (side == POPUP_SIDE_INNER_CENTER) {
 		;[x, y] = [
 			tx1 + (tw - w) / 2,
 			ty1 + (th - h) / 2
@@ -1143,34 +1145,96 @@ function position_popup(w, h, side, align, tx1, ty1, tx2, ty2) {
 		assert(false)
 	}
 
-	let sd = side.replace('inner-', '')
-	let sdx = sd == 'left' || sd == 'right'
-	let sdy = sd == 'top'  || sd == 'bottom'
-	if (align == 'center' && sdy)
+	let sd = side & ~POPUP_INNER
+	let sdx = sd == POPUP_SIDE_LEFT || sd == POPUP_SIDE_RIGHT
+	let sdy = sd == POPUP_SIDE_TOP  || sd == POPUP_SIDE_BOTTOM
+	if (align == POPUP_ALIGN_CENTER && sdy)
 		x = x + (tw - w) / 2
-	else if (align == 'center' && sdx)
+	else if (align == POPUP_ALIGN_CENTER && sdx)
 		y = y + (th - h) / 2
-	else if (align == 'end' && sdy)
+	else if (align == POPUP_ALIGN_END && sdy)
 		x = x + tw - w
-	else if (align == 'end' && sdx)
+	else if (align == POPUP_ALIGN_END && sdx)
 		y = y + th - h
-	return [x, y]
-*/
 }
 
 position[CMD_POPUP] = function(a, i, axis, ct_x, ct_w) {
 
+	ct_stack.push(i)
+
 	let min_w = a[i+2+axis]
-
 	let next_i = a[i-2]
-
 	position_children_cross_axis(a, next_i, axis, min_w)
 
 	if (axis) {
-		position_popup()
+
+		let ct_i = assert(ct_stack.at(-2), 'popup outside container')
+		let tx1 = a[ct_i+0]
+		let ty1 = a[ct_i+1]
+		let tx2 = a[ct_i+2] + tx1
+		let ty2 = a[ct_i+3] + ty1
+
+		let w     = a[i+2]
+		let h     = a[i+3]
+		let side  = a[i+POPUP_SIDE]
+		let align = a[i+POPUP_ALIGN]
+		let fixed = a[i+POPUP_FIXED]
+
+		position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
+		pr(tx1, tx2, side, align, x, y)
+
+		// if popup doesn't fit the screen, first try to change its side
+		// or alignment and relayout, and if that doesn't work, its offset.
+
+		let d = 10
+		let bw = screen_w
+		let bh = screen_h
+
+		let out_x1 = x < d
+		let out_y1 = y < d
+		let out_x2 = x + w > (bw - d)
+		let out_y2 = y + h > (bh - d)
+
+		let re
+		if (side == POPUP_SIDE_BOTTOM && out_y2) {
+			re = 1; side = POPUP_SIDE_TOP
+		} else if (side == POPUP_SIDE_TOP && out_y1) {
+			re = 1; side = POPUP_SIDE_BOTTOM
+		} else if (side == POPUP_SIDE_RIGHT && out_x2) {
+			re = 1; side = POPUP_SIDE_LEFT
+		} else if (side == POPUP_SIDE_TOP && out_x1) {
+			re = 1; side = POPUP_SIDE_BOTTOM
+		}
+
+		let vert =
+			   side == POPUP_SIDE_BOTTOM
+			|| side == POPUP_SIDE_TOP
+			|| side == POPUP_SIDE_INNER_BOTTOM
+			|| side == POPUP_SIDE_INNER_TOP
+
+		if (align == POPUP_ALIGN_END && ((vert && out_x2) || (!vert && out_y2))) {
+			re = 1; align = POPUP_ALIGN_START
+		} else if (align == POPUP_ALIGN_START && ((vert && out_x1) || (!vert && out_y1))) {
+			re = 1; align = POPUP_ALIGN_END
+		}
+
+		if (re)
+			position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
+
+		// if nothing else works, adjust the offset to fit the screen.
+		let ox2 = max(0, x + w - (bw - d))
+		let ox1 = min(0, x)
+		let oy2 = max(0, y + h - (bh - d))
+		let oy1 = min(0, y)
+		x -= ox1 ? ox1 : ox2
+		y -= oy1 ? oy1 : oy2
+
+		a[i+0] = x // + (fixed ? sx : 0) - spx
+		a[i+1] = y // + (fixed ? sy : 0) - spy
+
 	}
-	// a[i+0+axis] = x
-	// a[i+2+axis] = w
+
+	ct_stack.pop()
 
 }
 }
@@ -1534,7 +1598,7 @@ function border_path(cx, x1, y1, x2, y2, sides, radius) {
 
 let shadow_set
 draw[CMD_SHADOW] = function(a, i) {
-	cx.shadowColor   = a[i]
+	cx.shadowColor   = a[i+0]
 	cx.shadowBlur    = a[i+1]
 	cx.shadowOffsetX = a[i+2]
 	cx.shadowOffsetY = a[i+3]
@@ -1674,10 +1738,13 @@ function make_frame() {
 					// ui.padding(10, 10, 10, 10)
 					ui.text('t3', (max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
 					ui.text('t4', (last_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
-					ui.popup()
+					ui.push_layer_popup()
+					ui.m(0, 0, 20, 0)
+					ui.popup('p1', 'b')
 						ui.rect('red', 1, 'hsl(0 0% 100%)', 5)
 						ui.text('tp1', 'Wasup?')
 					ui.end('popup')
+					ui.pop_layer()
 				ui.end('v')
 			ui.end('scrollbox')
 		ui.end('stack')
