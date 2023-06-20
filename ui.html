@@ -332,14 +332,12 @@ function captured(id) {
 // ---------------------------------------------------------------------------
 
 function layer_make(name) {
-	let e = [] // [i1,n1,...]
-	layer_clear(e)
-	e.name = name
-	return e
+	return {name: name}
 }
 
-function layer_clear(e) {
-	e.length = 0
+function layer_clear(layer) {
+	layer.i0 = null
+	layer.i1 = null
 }
 
 let layer_base  = layer_make('b')
@@ -350,12 +348,9 @@ a.layers = [layer_base, layer_popup]
 let layer_stack = []
 
 function push_layer(layer) {
-	// interrupt current layer
-	let cur_layer = layer_stack.at(-1)
-	if (cur_layer)
-		cur_layer.push(a.length)
 	layer_stack.push(layer)
-	layer.push(a.length, ct_x, ct_y)
+	if (layer.i0 == null)
+		layer.i0 = a.length
 }
 
 ui.push_layer_base  = function() { push_layer(layer_base ) }
@@ -363,11 +358,7 @@ ui.push_layer_popup = function() { push_layer(layer_popup) }
 
 ui.pop_layer = function() {
 	let layer = assert(layer_stack.pop(), 'no layer')
-	layer.push(a.length)
-	// resume current layer
-	let cur_layer = layer_stack.at(-1)
-	if (cur_layer)
-		cur_layer.push(a.length, ct_x, ct_y)
+	layer.i1 = a.length
 }
 
 // ---------------------------------------------------------------------------
@@ -447,8 +438,8 @@ function ui_cmd(cmd, ...args) {
 }
 
 let ct_stack = [] // [ct_i1,...]
-let ct_x = 0
-let ct_y = 0
+let ct_x
+let ct_y
 
 const PX1        =  4
 const PX2        =  6
@@ -672,12 +663,14 @@ function popup_parse_align(s) {
 	assert(false, 'invalid align {0}', s)
 }
 
-const POPUP_SIDE  = S+0
-const POPUP_ALIGN = S+1
-const POPUP_FIXED = S+2
+const POPUP_LAYER = S+0
+const POPUP_SIDE  = S+1
+const POPUP_ALIGN = S+2
+const POPUP_FIXED = S+3
 
 const CMD_POPUP = cmd(5, 'popup')
 ui.popup = function(id, side, align, fixed, min_w, min_h) {
+	let layer = layer_stack.at(-1)
 	let i = ui_cmd(CMD_POPUP,
 
 		// cell struct but out-of-layout (no fr or align)
@@ -689,6 +682,7 @@ ui.popup = function(id, side, align, fixed, min_w, min_h) {
 		mx1, my1, mx2, my2,
 		0, 0, 0, 0, // TODO: not used but written to, remove it!
 
+		layer,
 		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
 		fixed,
@@ -1058,16 +1052,16 @@ position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
 	let total_w = ct_w - paddings(a, i, axis)
 	position_children_cross_axis(a, next_i, axis, max(co_w, total_w))
 
-	// update sx,sy once.
+	// update sx,sy once on the y-axis positioning.
 	if (axis) {
 
 		let x  = a[i+0]
 		let y  = a[i+1]
 		let w  = a[i+2]
 		let h  = a[i+3]
-		let cw = a[i+SB_CW]
+		let cw = a[i+SB_CW+0]
 		let ch = a[i+SB_CW+1]
-		let sx = a[i+SB_SX]
+		let sx = a[i+SB_SX+1]
 		let sy = a[i+SB_SX+1]
 
 		sx = max(0, min(sx, cw - w))
@@ -1075,9 +1069,6 @@ position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
 
 		let psx = sx / (cw - w)
 		let psy = sy / (ch - h)
-		let pw = w / cw
-		let ph = h / ch
-		let thickness = 10
 
 		let id = a[i+SB_ID]
 		if (id) {
@@ -1273,6 +1264,7 @@ function position_all(axis) {
 // ---------------------------------------------------------------------------
 
 let hit_set = set() // {id}
+let layer
 
 let hit_state_map_freelist = map_freelist()
 let hit_state_maps = map() // {id->map}
@@ -1292,8 +1284,8 @@ function hovers(id) {
 
 function hit_rect(x, y, w, h) {
 	return (
-		(mx >= ct_x + x && mx < ct_x + x + w) &&
-		(my >= ct_y + y && my < ct_y + y + h)
+		(mx >= x && mx < x + w) &&
+		(my >= y && my < y + h)
 	)
 }
 
@@ -1302,13 +1294,20 @@ function hit_box(a, i) {
 	let y = a[i+1]
 	let w = a[i+2]
 	let h = a[i+3]
-	return hit_rect(x, y, w, h)
+	return hit_rect(ct_x + x, ct_y + y, w, h)
 }
 
 hit[CMD_TEXT] = function(a, i) {
 	if (!hit_box(a, i))
 		return
 	hit_set.add(a[i+TEXT_ID])
+	return true
+}
+
+function same_layer(a, i) {
+	if (a[i-1] == CMD_POPUP)
+		if (a[i+POPUP_LAYER] != layer)
+			return false
 	return true
 }
 
@@ -1334,14 +1333,12 @@ function hit_ct(a, i) {
 	let end_i = a[next_ext_i-3] // prev_i
 	i = a[end_i-3] // prev_i
 	while (i > ct_i) {
-		let cmd = a[i-1]
-		if (cmd == CMD_END) {
+		if (a[i-1] == CMD_END)
 			i = a[i] // start_i
-			cmd = a[i-1]
-		}
-		let hit_f = hit[cmd]
-		if (hit_f && hit_f(a, i)) {
-			break
+		if (same_layer(a, i)) {
+			let hit_f = hit[a[i-1]]
+			if (hit_f && hit_f(a, i))
+				break
 		}
 		i = a[i-3] // prev_i
 	}
@@ -1385,46 +1382,31 @@ function hit_test_all() {
 	if (mx == null)
 		return
 
-	// iterate layers in reverse order
+	// iterate layers in reverse order.
 	for (let j = a.layers.length-1; j >= 0; j--) {
-		let layer = a.layers[j]
-		// iterate layer ranges in reverse order
-		for (let k = layer.length-4; k >= 0; k -= 4) {
-			// layer cmd range: a[i0..i1-1]
-			let i0 = layer[k+0]
-			let x  = layer[k+1]
-			let y  = layer[k+2]
-			let i1 = layer[k+3]
-			// iterate commands in current range in reverse order.
-			let prev_i = i1-1
-			if (prev_i < i0)
-				continue
-			// cx.save()
-			// cx.translate(x, y)
-			let i = a[prev_i]
-			pr(layer.name, i0, i1, i)
-			while (1) {
-				let cmd = a[i-1]
-				if (cmd == undefined) {
-					pr('BREAK')
+		layer = a.layers[j]
+		let i0 = layer.i0
+		let i1 = layer.i1
+		if (i0 == null)
+			continue
+		// iterate commands in layer's range in reverse order.
+		let prev_i = i1-1
+		if (prev_i < i0)
+			continue
+		let i = a[prev_i]
+		ct_x = 0
+		ct_y = 0
+		while (1) {
+			if (a[i-1] == CMD_END)
+				i = a[i] // start_i
+			if (same_layer(a, i)) {
+				let hit_f = hit[a[i-1]]
+				if (hit_f && hit_f(a, i))
 					break
-				}
-				if (cmd == CMD_END) {
-					i = a[i] // start_i
-					cmd = a[i-1]
-					pr('<<', i, cmd_names[cmd])
-				} else
-					pr('.', cmd_names[cmd])
-				let hit_f = hit[cmd]
-				if (hit_f)
-					if (hit_f(a, i))
-						break
-				if (i == i0+2)
-					break
-				pr('<', i, a[i-3], i0)
-				i = a[i-3] // prev_i
 			}
-			// cx.restore()
+			if (i == i0+2)
+				break
+			i = a[i-3] // prev_i
 		}
 	}
 }
@@ -1467,8 +1449,6 @@ draw[CMD_H] = function(a, i) {
 	let x = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
 	let y = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
 
-	cx.save()
-	cx.translate(x, y)
 	ct_x += x
 	ct_y += y
 }
@@ -1478,8 +1458,8 @@ draw[CMD_POPUP] = draw[CMD_H]
 
 draw[CMD_TEXT] = function(a, i) {
 
-	let x = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
+	let x = ct_x + a[i+0] + a[i+MX1+0] + a[i+PX1+0]
+	let y = ct_y + a[i+1] + a[i+MX1+1] + a[i+PX1+1]
 	let s   = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
 
@@ -1494,13 +1474,13 @@ let scrollbar_rect
 {
 let r = [false, 0, 0, 0, 0]
 scrollbar_rect = function(a, i, axis) {
-	let x  = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y  = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
+	let x  = ct_x + a[i+0] + a[i+MX1+0] + a[i+PX1+0]
+	let y  = ct_y + a[i+1] + a[i+MX1+1] + a[i+PX1+1]
 	let w  = a[i+2]
 	let h  = a[i+3]
-	let cw = a[i+SB_CW]
+	let cw = a[i+SB_CW+0]
 	let ch = a[i+SB_CW+1]
-	let sx = a[i+SB_SX]
+	let sx = a[i+SB_SX+0]
 	let sy = a[i+SB_SX+1]
 	sx = max(0, min(sx, cw - w))
 	sy = max(0, min(sy, ch - h))
@@ -1540,38 +1520,44 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 
 	ct_stack.push(i)
 
-	let x  = a[i+0] + a[i+MX1+1] + a[i+PX1+1]
+	let x  = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
 	let y  = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
 	let w  = a[i+2]
 	let h  = a[i+3]
-	let cw = a[i+SB_CW]
+	let cw = a[i+SB_CW+0]
 	let ch = a[i+SB_CW+1]
-	let sx = a[i+SB_SX]
+	let sx = a[i+SB_SX+0]
 	let sy = a[i+SB_SX+1]
 
-	cx.save()
-	cx.translate(x, y)
 	ct_x += x
 	ct_y += y
 
+	cx.save()
 	cx.beginPath()
-	cx.rect(0, 0, w, h)
+	cx.rect(ct_x, ct_y, w, h)
 	cx.clip()
-	cx.translate(-sx, -sy)
+	ct_x -= sx
+	ct_y -= sy
 }
 
 draw[CMD_END] = function(a, end_i) {
 
 	let i = ct_stack.pop()
-	let x = a[i+0]
-	let y = a[i+1]
+	let x = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
+	let y = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
 
-	cx.restore()
+	if (a[i-1] == CMD_SCROLLBOX) {
+		cx.restore()
+		let sx = a[i+SB_SX+0]
+		let sy = a[i+SB_SX+1]
+		ct_x += sx
+		ct_y += sy
+	}
+
 	ct_x -= x
 	ct_y -= y
 
-	let cmd = a[i-1]
-	if (cmd == CMD_SCROLLBOX) {
+	if (a[i-1] == CMD_SCROLLBOX) {
 		let id = a[i+SB_ID]
 		for (let axis = 0; axis < 2; axis++) {
 
@@ -1657,8 +1643,8 @@ draw[CMD_RECT] = function(a, i) {
 	let my1 = a[ct_i+MX1+1]
 	let mx2 = a[ct_i+MX2+0]
 	let my2 = a[ct_i+MX2+1]
-	let x = -px1
-	let y = -py1
+	let x = ct_x + -px1
+	let y = ct_y + -py1
 	let w = a[ct_i+2] - mx1 - mx2
 	let h = a[ct_i+3] - my1 - my2
 	let bg_color      = a[i]
@@ -1696,23 +1682,23 @@ draw[CMD_FONT_SIZE] = set_font_size
 
 function draw_all() {
 	reset_text()
-	for (let layer of a.layers) {
-		for (let k = 0, k_last = layer.length-4; k <= k_last; k += 4) {
-			let i0 = layer[k+0]
-			let x  = layer[k+1]
-			let y  = layer[k+2]
-			let i1 = layer[k+3]
-			//cx.save()
-			//cx.translate(x, y)
-			let i = i0 + 2
-			while (i < i1) {
-				let cmd = a[i-1]
-				let draw_f = draw[cmd]
+	for (layer of a.layers) {
+		let i0 = layer.i0
+		let i1 = layer.i1
+		if (i0 == null)
+			continue
+		ct_x = 0
+		ct_y = 0
+		let i = i0 + 2
+		while (i < i1) {
+			if (same_layer(a, i)) {
+				let draw_f = draw[a[i-1]]
 				if (draw_f)
 					draw_f(a, i)
 				i = a[i-2] // next_i
+			} else {
+				i = get_next_ext_i(a, i)
 			}
-			//cx.restore()
 		}
 	}
 }
