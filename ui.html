@@ -293,7 +293,10 @@ window.on('resize', resize_canvas)
 
 // input event handling ------------------------------------------------------
 
-let mx, my, mx0, my0, down, clicked, captured_id
+let mx, my, mx0, my0, down, captured_id
+let clicked = false
+let wheel_dy = 0
+let trackpad = false
 
 canvas.on('pointerdown', function(ev) {
 	mx = ev.clientX * dpr
@@ -316,7 +319,6 @@ canvas.on('pointerup', function(ev) {
 		this.releasePointerCapture(ev.pointerId)
 		hit_all()
 		redraw()
-		clicked = null
 	}
 })
 
@@ -330,6 +332,17 @@ canvas.on('pointermove', function(ev) {
 canvas.on('pointerleave', function(ev) {
 	mx = null
 	my = null
+	hit_all()
+	redraw()
+})
+
+canvas.on('wheel', function(ev) {
+	wheel_dy = ev.wheelDeltaY
+	if (!wheel_dy)
+		return
+	trackpad = ev.wheelDeltaY === -ev.deltaY * 3
+	mx = ev.clientX * dpr
+	my = ev.clientY * dpr
 	hit_all()
 	redraw()
 })
@@ -460,7 +473,16 @@ ui.widget = function(cmd_name, t, is_ct) {
 	translate [_cmd] = t.translate
 	draw      [_cmd] = t.draw
 	hit       [_cmd] = t.hit
-	return _cmd
+	let create = t.create
+	if (create) {
+		function wrapper(...args) {
+			return create(_cmd, ...args)
+		}
+		ui[cmd_name] = wrapper
+		return wrapper
+	} else {
+		return _cmd
+	}
 }
 ui.widget_ct = function(cmd_name, t) { return ui.widget(cmd_name, t, true) }
 
@@ -546,18 +568,18 @@ let px1, px2, py1, py2
 let mx1, mx2, my1, my2
 
 ui.padding = function(_px1, _px2, _py1, _py2) {
-	px1 = _px1 || 0
-	px2 = _px2 || _px1 || 0
-	py1 = _py1 || _px1 || 0
-	py2 = _py2 || _py1 || _px1 || 0
+	px1 = _px1 ?? 0
+	px2 = _px2 ?? _px1 ?? 0
+	py1 = _py1 ?? _px1 ?? 0
+	py2 = _py2 ?? _py1 ?? _px1 ?? 0
 }
 ui.p = ui.padding
 
 ui.margin = function(_mx1, _mx2, _my1, _my2) {
-	mx1 = _mx1 || 0
-	mx2 = _mx2 || _mx1 || 0
-	my1 = _my1 || _mx1 || 0
-	my2 = _my2 || _my1 || _mx1 || 0
+	mx1 = _mx1 ?? 0
+	mx2 = _mx2 ?? _mx1 ?? 0
+	my1 = _my1 ?? _mx1 ?? 0
+	my2 = _my2 ?? _my1 ?? _mx1 ?? 0
 }
 ui.m = ui.margin
 
@@ -573,7 +595,7 @@ function reset_paddings() {
 }
 
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
-	return ui_cmd(cmd,
+	let i = ui_cmd(cmd,
 		0, // x
 		0, // y
 		min_w ?? 0,
@@ -585,6 +607,8 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		parse_valign (valign ?? 's'),
 		...args
 	)
+	reset_paddings()
+	return i
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
@@ -594,7 +618,6 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 		...args
 	)
 	ct_stack.push(i)
-	reset_paddings()
 	return i
 }
 
@@ -782,7 +805,6 @@ ui.text = function(id, s, align, valign, fr) {
 		id,
 		s,
 	)
-	reset_paddings()
 }
 
 const CMD_COLOR = cmd('color')
@@ -1177,6 +1199,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
 			if (!visible)
 				continue
+
+			if (axis && wheel_dy) {
+				let sy0 = id_state(id).get('scroll_y') ?? 0
+				sy = clamp(sy - wheel_dy, 0, h - th)
+				id_state(id).set('scroll_y', sy)
+				a[i+SB_SX+1] = sy
+			}
 
 			let sbar_id = id+'.scrollbar'+axis
 			let cs = captured(sbar_id)
@@ -1764,7 +1793,6 @@ function redraw_all() {
 	for (let layer of a.layers)
 		layer_clear(layer)
 	check_stacks()
-	reset_all()
 
 	let i = ui.stack()
 	push_layer(layer_base, i)
@@ -1777,7 +1805,10 @@ function redraw_all() {
 	measure_all(1); position_all(1) // y-axis
 	translate_all()
 	draw_all()
+	reset_all()
 }
+
+reset_all()
 
 // template widget -----------------------------------------------------------
 
@@ -1916,24 +1947,52 @@ draw[CMD_TEMPLATE_OVERLAY] = function(a, i) {
 	}
 }
 
+function draw_node(t, depth) {
+	ui.font_size(15)
+	ui.m(depth * 20, 0, 0, 0)
+	//ui.stack('', 1)
+		//ui.bb('', 'blue')
+		ui.text('', t.t, 'l', 'c', 1)
+	//ui.end()
+	if (t.e)
+		for (let ct of t.e)
+			draw_node(ct, depth+1)
+}
 function template_editor(id, t) {
 	ui.popup(id+'.tree_popup', layer_popup, 'it', 'c')
-		ui.scrollbox(id+'.sb', 0, null, null, null, null, 200, 600)
-			ui.bb('', 'blue')
-			template_tree(id+'.tree')
+		ui.scrollbox(id+'.sb', 0, null, null, null, null, 200, 100)
+			ui.bb('', '#ccc')
+			ui.p(10)
+			ui.v(1, 10, 's', 't')
+				ui.bb('', '#333')
+				draw_node(t, 0)
+				//ui.template_tree(id, t)
+			ui.end()
 		ui.end('scrollbox')
 	ui.end('popup')
 }
 
-function template_tree(id) {
-	ui.m(0, 500, 500)
-	ui.stack()
-	ui.end()
-}
+ui.widget('template_tree', {
+	create: function(cmd, id, t) {
+		return ui_cmd_box(cmd, 1, 's', 's', 500, 500, id, t)
+	},
+	measure: function(a, i, axis) {
+		add_ct_min_wh(a, axis, 1000, 1)
+	},
+	draw: function(a, i) {
+		//
+	},
+})
 
 // drag point widget ---------------------------------------------------------
 
-const CMD_DRAG_POINT = ui.widget('drag_point', {
+ui.widget('drag_point', {
+	create: function(cmd, id, cx, cy, color, on_drag) {
+		let hit = hit_set.has(id)
+		if (hit)
+			pr('hit', id)
+		ui_cmd(cmd, cx, cy, color, id, on_drag)
+	},
 	draw: function(a, i) {
 		let r = 5
 		let x     = a[i+0]
@@ -1955,12 +2014,6 @@ const CMD_DRAG_POINT = ui.widget('drag_point', {
 		}
 	},
 })
-ui.drag_point = function(id, cx, cy, color, on_drag) {
-	let hit = hit_set.has(id)
-	if (hit)
-		pr('hit', id)
-	ui_cmd(CMD_DRAG_POINT, cx, cy, color, id, on_drag)
-}
 
 // testbed -------------------------------------------------------------------
 
