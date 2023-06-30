@@ -35,9 +35,9 @@ let G = window
 
 GOALS
 
-- drag & drop UI designer with anchors
+- drag & drop UI designer
 - reusable UI modules with controlled variations
-- IMGUI with layers and layouting
+- IMGUI with popups and layouting
 - remote screen sharing with input routing
 
 IMGUI
@@ -59,7 +59,7 @@ IMGUI
 	* padding
 	* margin
 	* text min-w/h
-	- popup layouting
+	* popup layouting
 	- word-wrapping
 	- grid fr stretch
 	- grid min-w/h grow
@@ -118,7 +118,7 @@ CONS vs WEB
 
 */
 
-// ---------------------------------------------------------------------------
+// utilities ------------------------------------------------------------------
 
 G.isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
 G.isarray = Array.isArray
@@ -143,6 +143,7 @@ G.ceil  = Math.ceil
 G.round = Math.round
 G.max   = Math.max
 G.min   = Math.min
+G.abs   = Math.abs
 
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
@@ -200,11 +201,14 @@ EventTarget.prototype.on = function(event, f, on) {
 		this.removeEventListener(event, f)
 }
 
-// ---------------------------------------------------------------------------
-
-G.ui = {}
-
-G.DEBUG = 0
+function hash32(s) {
+	let hash = 0
+	for (let i = 0, n = s.length; i < n; i++) {
+		hash = ((hash << 5) - hash) + s.charCodeAt(i)
+		hash |= 0 // convert to 32bit integer
+	}
+	return hash
+}
 
 function map_freelist() {
 	let fl = []
@@ -219,7 +223,33 @@ function map_freelist() {
 	}
 }
 
-// ---------------------------------------------------------------------------
+// when using capture_pointer(), setting the cursor for the element that
+// is hovered doesn't work anymore, so use this hack instead.
+{
+let cursor_style
+G.force_cursor = function(cursor) {
+	if (cursor) {
+		if (!cursor_style) {
+			cursor_style = tag('style')
+			cursor_style.unsafe_html = '* {cursor: '+cursor+' !important; }'
+			root.add(cursor_style)
+		} else {
+			cursor_style.unsafe_html = '* {cursor: '+cursor+' !important; }'
+		}
+	} else if (cursor_style) {
+		cursor_style.remove()
+		cursor_style = null
+	}
+}
+}
+
+// ui module -----------------------------------------------------------------
+
+G.ui = {}
+
+G.DEBUG = 0
+
+// canvas --------------------------------------------------------------------
 
 let a = []
 
@@ -259,12 +289,11 @@ function redraw() {
 	raf_id = requestAnimationFrame(raf_redraw)
 }
 resize_canvas()
-redraw()
 window.on('resize', resize_canvas)
 
-// ---------------------------------------------------------------------------
+// input event handling ------------------------------------------------------
 
-let mx, my, mx0, my0, down, captured_id
+let mx, my, mx0, my0, down, clicked, captured_id
 
 canvas.on('pointerdown', function(ev) {
 	mx = ev.clientX * dpr
@@ -272,7 +301,7 @@ canvas.on('pointerdown', function(ev) {
 	if (ev.which == 1) {
 		down = true
 		this.setPointerCapture(ev.pointerId)
-		hit_test_all()
+		hit_all()
 		redraw()
 	}
 })
@@ -283,23 +312,25 @@ canvas.on('pointerup', function(ev) {
 	if (ev.which == 1) {
 		down = false
 		captured_id = null
+		clicked = true
 		this.releasePointerCapture(ev.pointerId)
-		hit_test_all()
+		hit_all()
 		redraw()
+		clicked = null
 	}
 })
 
 canvas.on('pointermove', function(ev) {
 	mx = ev.clientX * dpr
 	my = ev.clientY * dpr
-	hit_test_all()
+	hit_all()
 	redraw()
 })
 
 canvas.on('pointerleave', function(ev) {
 	mx = null
 	my = null
-	hit_test_all()
+	hit_all()
 	redraw()
 })
 
@@ -329,39 +360,38 @@ function captured(id) {
 	return capture_state
 }
 
-// ---------------------------------------------------------------------------
+// layers --------------------------------------------------------------------
 
 function layer_make(name) {
-	return {name: name}
+	let layer = [] // [popup1_i,...]
+	layer.name = name
+	return layer
 }
 
 function layer_clear(layer) {
-	layer.i0 = null
-	layer.i1 = null
+	layer.length = 0
 }
 
-let layer_base  = layer_make('b')
-let layer_popup = layer_make('p')
+let layer_base  = layer_make('base')
+let layer_popup = layer_make('popup')
 
 a.layers = [layer_base, layer_popup]
 
 let layer_stack = []
+let layer
 
-function push_layer(layer) {
+function push_layer(layer1, i) {
+	if (layer1 != layer)
+		layer1.push(i)
+	layer = layer1
 	layer_stack.push(layer)
-	if (layer.i0 == null)
-		layer.i0 = a.length
 }
 
-ui.push_layer_base  = function() { push_layer(layer_base ) }
-ui.push_layer_popup = function() { push_layer(layer_popup) }
-
-ui.pop_layer = function() {
-	let layer = assert(layer_stack.pop(), 'no layer')
-	layer.i1 = a.length
+function pop_layer() {
+	layer = assert(layer_stack.pop(), 'no layer')
 }
 
-// ---------------------------------------------------------------------------
+// id state maps -------------------------------------------------------------
 
 let id_state_map_freelist = map_freelist()
 let id_state_maps = map() // {id->map}
@@ -397,37 +427,49 @@ function id_state_gc() {
 	id_current_set = empty
 }
 
-// ---------------------------------------------------------------------------
+// imgui command array -------------------------------------------------------
 
 let cmd_names = []
 let cmd_name_map = map()
 
+function C(a, i) { return cmd_names[a[i-1]] }
+
 let measure   = []
 let position  = []
+let translate = []
 let draw      = []
 let hit       = []
 
-function cmd(code, name) {
+function cmd(name, is_ct) {
+	let code = hash32(name)
+	code = (is_ct ? -1 : 1) * abs(code)
 	assert(!cmd_names[code], 'duplicate command code {0} for {1}', code, name)
 	cmd_names[code] = name
 	cmd_name_map.set(name, code)
 	return code
 }
-
-ui.widget = function(e) {
-	cmd(e.code, e.name)
-	measure  [code] = e.measure
-	position [code] = e.position
-	draw     [code] = e.draw
-	hit      [code] = e.hit
+function cmd_ct(name) {
+	return cmd(name, true)
 }
+
+ui.widget = function(cmd_name, t, is_ct) {
+	let _cmd = cmd(cmd_name, is_ct)
+	measure   [_cmd] = t.measure
+	position  [_cmd] = t.position
+	translate [_cmd] = t.translate
+	draw      [_cmd] = t.draw
+	hit       [_cmd] = t.hit
+	return _cmd
+}
+ui.widget_ct = function(cmd_name, t) { return ui.widget(cmd_name, t, true) }
 
 let color, font, font_size
 
-function reset_text() {
+function reset_all() {
 	color = null
 	font = null
 	font_size = null
+	reset_paddings()
 }
 
 function ui_cmd(cmd, ...args) {
@@ -438,8 +480,19 @@ function ui_cmd(cmd, ...args) {
 }
 
 let ct_stack = [] // [ct_i1,...]
-let ct_x
-let ct_y
+
+function check_stacks() {
+	if (ct_stack.length) {
+		for (let i of ct_stack)
+			pr(C(a, i), 'not closed')
+		assert(false)
+	}
+	if (layer_stack.length) {
+		for (let layer of layer_stack)
+			pr('layer', layer.name, 'not closed')
+		assert(false)
+	}
+}
 
 const PX1        =  4
 const PX2        =  6
@@ -448,8 +501,8 @@ const MX2        = 10
 
 const FR         = 12 // children of v,h: fraction from main-axis size.
 const ALIGN      = 13 // all children: align v,h.
-const NEXT_EXT_I = 15 // all containers: next command after this one's `end`.
-const S          = 16 // first index after the cell struct.
+const NEXT_EXT_I = 15 // all containers: next command after this one's END command.
+const S          = 16 // first index after the ui_cmd_box_ct header.
 
 const FLEX_GAP      = S+0
 const FLEX_TOTAL_FR = S+1
@@ -492,18 +545,18 @@ let px1, px2, py1, py2
 let mx1, mx2, my1, my2
 
 ui.padding = function(_px1, _px2, _py1, _py2) {
-	px1 = _px1
-	px2 = _px2
-	py1 = _py1
-	py2 = _py2
+	px1 = _px1 || 0
+	px2 = _px2 || _px1 || 0
+	py1 = _py1 || _px1 || 0
+	py2 = _py2 || _py1 || _px1 || 0
 }
 ui.p = ui.padding
 
 ui.margin = function(_mx1, _mx2, _my1, _my2) {
-	mx1 = _mx1
-	mx2 = _mx2
-	my1 = _my1
-	my2 = _my2
+	mx1 = _mx1 || 0
+	mx2 = _mx2 || _mx1 || 0
+	my1 = _my1 || _mx1 || 0
+	my2 = _my2 || _my1 || _mx1 || 0
 }
 ui.m = ui.margin
 
@@ -517,12 +570,9 @@ function reset_paddings() {
 	mx2 = 0
 	my2 = 0
 }
-reset_paddings()
 
-function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
-	let i = ui_cmd(cmd,
-
-		// cell struct
+function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
+	return ui_cmd(cmd,
 		0, // x
 		0, // y
 		min_w ?? 0,
@@ -532,41 +582,40 @@ function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 		fr ?? 1,
 		parse_align  (align  ?? 's'),
 		parse_valign (valign ?? 's'),
+		...args
+	)
+}
 
+// NOTE: `ct` is short for container, which must end with ui.end().
+function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
+	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		0, // next_ext_i
-
-		gap ?? 0,
-		0, // total_fr
+		...args
 	)
 	ct_stack.push(i)
 	reset_paddings()
+	return i
 }
 
-const CMD_H = cmd(1, 'h')
-const CMD_V = cmd(2, 'v')
+function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
+	ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+		gap ?? 0,
+		0, // total_fr
+	)
+}
+
+const CMD_H = cmd_ct('h')
+const CMD_V = cmd_ct('v')
 
 ui.h = function(...args) { ui_hv(CMD_H, ...args) }
 ui.v = function(...args) { ui_hv(CMD_V, ...args) }
 
-let CMD_STACK = cmd(3, 'stack')
-ui.stack = function(fr, align, valign, min_w, min_h) {
-	let i = ui_cmd(CMD_STACK,
+const STACK_ID = S+0
 
-		// cell struct
-		0, // x
-		0, // y
-		min_w ?? 0, // min_w
-		min_h ?? 0, // min_h
-		px1, py1, px2, py2,
-		mx1, my1, mx2, my2,
-		fr ?? 1,
-		parse_align  (align  ?? 's'),
-		parse_valign (valign ?? 's'),
-
-		0, // next_ext_i
-	)
-	ct_stack.push(i)
-	reset_paddings()
+const CMD_STACK = cmd_ct('stack')
+ui.stack = function(id, fr, align, valign, min_w, min_h) {
+	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
+		id)
 }
 
 const SB_OVERFLOW =  S+0 // overflow x,y
@@ -574,28 +623,14 @@ const SB_CW       =  S+2 // content w,h
 const SB_ID       =  S+4
 const SB_SX       =  S+5 // scroll x,y
 
-const CMD_SCROLLBOX = cmd(4, 'scrollbox')
+const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
 	let ss = id_state(id)
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
 
-	let i = ui_cmd(CMD_SCROLLBOX,
-
-		// cell struct
-		0, // x
-		0, // y
-		0, // content w swapped with min_w on `end`
-		0, // content h swapped with min_h on `end`
-		px1, py1, px2, py2,
-		mx1, my1, mx2, my2,
-		fr ?? 1,
-		parse_align  (align  ?? 's'),
-		parse_valign (valign ?? 's'),
-
-		0, // next_ext_i
-
+	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
 		overflow_x ?? 'auto',
 		overflow_y ?? 'auto',
 		min_w ?? 0, // swapped with content w on `end`
@@ -604,9 +639,6 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 		sx ?? 0, // scroll x
 		sy ?? 0, // scroll y
 	)
-	ct_stack.push(i)
-	reset_paddings()
-
 	if (ss) {
 		ss.set('scroll_x', sx)
 		ss.set('scroll_y', sy)
@@ -663,35 +695,32 @@ function popup_parse_align(s) {
 	assert(false, 'invalid align {0}', s)
 }
 
-const POPUP_LAYER = S+0
-const POPUP_SIDE  = S+1
-const POPUP_ALIGN = S+2
-const POPUP_FIXED = S+3
+const POPUP_LAYER     = S+0
+const POPUP_SIDE      = S+1
+const POPUP_ALIGN     = S+2
+const POPUP_FIXED     = S+3
+const POPUP_FONT      = S+4
+const POPUP_FONT_SIZE = S+5
+const POPUP_COLOR     = S+6
 
-const CMD_POPUP = cmd(5, 'popup')
-ui.popup = function(id, side, align, fixed, min_w, min_h) {
-	let layer = layer_stack.at(-1)
-	let i = ui_cmd(CMD_POPUP,
-
-		// cell struct but out-of-layout (no fr or align)
-		0, // x
-		0, // y
-		min_w ?? 0, // min_w
-		min_h ?? 0, // min_h
-		px1, py1, px2, py2,
-		mx1, my1, mx2, my2,
-		0, 0, 0, 0, // TODO: not used but written to, remove it!
-
-		layer,
+const CMD_POPUP = cmd_ct('popup')
+ui.popup = function(id, layer1, side, align, min_w, min_h, fixed) {
+	layer1 = layer1 || layer
+	// TODO: fr, align, valign are not used. find a way to remove them.
+	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
+		layer1,
 		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
 		fixed,
+		// inherited state
+		font,
+		font_size,
+		color,
 	)
-	ct_stack.push(i)
-	reset_paddings()
+	push_layer(layer1, i)
 }
 
-const CMD_END = cmd(19, 'end')
+const CMD_END = cmd('end')
 ui.end = function(cmd_name) {
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd_name) {
@@ -701,6 +730,9 @@ ui.end = function(cmd_name) {
 	}
 	let end_i = ui_cmd(CMD_END, i)
 	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
+
+	if (a[i-1] == CMD_POPUP)
+		pop_layer()
 }
 
 const BORDER_SIDE_T = 1
@@ -722,12 +754,15 @@ function parse_border_sides(s) {
 	)
 }
 
-const CMD_RECT = cmd(20, 'rect')
-ui.rect = function(bg_color, sides, border_color, border_radius) {
-	ui_cmd(CMD_RECT, bg_color, parse_border_sides(sides), border_color, border_radius)
+const BB_ID = 0
+
+const CMD_BB = cmd('bb') // border-background
+ui.bb = function(id, bg_color, sides, border_color, border_radius) {
+	let ct_i = assert(ct_stack.at(-1), 'bb outside container')
+	ui_cmd(CMD_BB, id, ct_i, bg_color, parse_border_sides(sides), border_color, border_radius)
 }
 
-const CMD_SHADOW = cmd(21, 'shadow')
+const CMD_SHADOW = cmd('shadow')
 ui.shadow = function(color, blur, x, y) {
 	ui_cmd(CMD_SHADOW, color, blur, x, y)
 }
@@ -736,21 +771,10 @@ const TEXT_ASC = S-1
 const TEXT_ID  = S+0
 const TEXT_S   = S+1
 
-const CMD_TEXT = cmd(22, 'text')
+const CMD_TEXT = cmd('text')
 ui.text = function(id, s, align, valign, fr) {
-	ui_cmd(CMD_TEXT,
-
-		// cell struct
-		0, // x
-		0, // y
-		0, // min_w, measured
-		0, // min_h, measured
-		px1, py1, px2, py2,
-		mx1, my1, mx2, my2,
-		fr ?? 0,
-		parse_align  (align  ?? '['),
-		parse_valign (valign ?? 'c'),
-
+	// NOTE: min_w and min_h are measured, not given.
+	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? '[', valign ?? 'c', 0, 0,
 		0, // ascent
 		id,
 		s,
@@ -758,21 +782,21 @@ ui.text = function(id, s, align, valign, fr) {
 	reset_paddings()
 }
 
-const CMD_COLOR = cmd(23, 'color')
+const CMD_COLOR = cmd('color')
 ui.color = function(s) {
 	if (color == s) return
 	ui_cmd(CMD_COLOR, s)
 	color = s
 }
 
-const CMD_FONT = cmd(24, 'font')
+const CMD_FONT = cmd('font')
 ui.font = function(s) {
 	if (font == s) return
 	ui_cmd(CMD_FONT, s)
 	font = s
 }
 
-const CMD_FONT_SIZE = cmd(25, 'font_size')
+const CMD_FONT_SIZE = cmd('font_size')
 ui.font_size = function(s) {
 	if (font_size == s) return
 	ui_cmd(CMD_FONT_SIZE, s)
@@ -791,12 +815,16 @@ function set_font_size(a, i) {
 
 function get_next_ext_i(a, i) {
 	let cmd = a[i-1]
-	if (cmd < CMD_END)
+	if (cmd < 0) // container
 		return a[i+NEXT_EXT_I]
 	return a[i-2] // next_i
 }
 
-// ---------------------------------------------------------------------------
+// measuring phase (per-axis) ------------------------------------------------
+
+// calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1) of all boxes
+// by walking the container tree bottom-up (non-recursive, uses ct_stack).
+// the minimum dimensions include margins and paddings.
 
 function is_main_axis(cmd, axis) {
 	return (
@@ -810,7 +838,9 @@ function paddings(a, i, axis) {
 }
 
 function add_ct_min_wh(a, axis, w, fr) {
-	let i = assert(ct_stack.at(-1), 'object outside container')
+	let i = ct_stack.at(-1)
+	if (i == null) // root ct
+		return
 	let cmd = a[i-1]
 	let main_axis = is_main_axis(cmd, axis)
 	let min_w = a[i+2+axis]
@@ -828,7 +858,7 @@ measure[CMD_FONT_SIZE] = set_font_size
 
 measure[CMD_TEXT] = function(a, i, axis) {
 	let fr = a[i+FR]
-	if (!axis) {
+	if (!axis) { // measure once
 		let s = a[i+TEXT_S]
 		let m = cx.measureText(s)
 		let asc = m.fontBoundingBoxAscent
@@ -848,29 +878,28 @@ function ct_stack_push(a, i) {
 measure[CMD_H        ] = ct_stack_push
 measure[CMD_V        ] = ct_stack_push
 measure[CMD_STACK    ] = ct_stack_push
-measure[CMD_POPUP    ] = ct_stack_push
 measure[CMD_SCROLLBOX] = ct_stack_push
+measure[CMD_POPUP    ] = ct_stack_push
 
 measure[CMD_END] = function(a, _, axis) {
 	let i = assert(ct_stack.pop(), 'end command outside a container')
-	if (!ct_stack.length)
-		return
+	let p = max(0, paddings(a, i, axis))
 	let cmd = a[i-1]
 	if (cmd == CMD_SCROLLBOX) {
 		let co_min_w = a[i+2+axis] // content min_w
-		let sb_min_w = a[i+SB_CW+axis] + paddings(a, i, axis) // scrollbox min_w
+		let sb_min_w = a[i+SB_CW+axis] + p // scrollbox min_w
 		a[i+SB_CW+axis] = co_min_w
 		a[i+2+axis] = sb_min_w
 		let fr = a[i+FR]
 		add_ct_min_wh(a, axis, sb_min_w, fr)
 	} else if (cmd == CMD_POPUP) {
-		a[i+2+axis] += paddings(a, i, axis)
+		a[i+2+axis] += p
 		// popups don't affect their target's layout so no add_ct_min_wh() call.
 	} else {
 		let main_axis = is_main_axis(cmd, axis)
 		if (main_axis)
 			a[i+2+axis] = max(0, a[i+2+axis] - a[i+FLEX_GAP]) // remove last element's gap
-		a[i+2+axis] += paddings(a, i, axis)
+		a[i+2+axis] += p
 		let min_w = a[i+2+axis]
 		let fr    = a[i+FR]
 		add_ct_min_wh(a, axis, min_w, fr)
@@ -878,23 +907,48 @@ measure[CMD_END] = function(a, _, axis) {
 }
 
 function measure_all(axis) {
-	reset_text()
+	check_stacks()
+	reset_all()
 	let i = 2
 	let n = a.length
 	while (i < n) {
-		let cmd = a[i-1]
+		let cmd    = a[i-1]
+		let next_i = a[i-2]
 		let measure_f = measure[cmd]
 		if (measure_f)
 			measure_f(a, i, axis)
-		i = a[i-2] // next_i
+		i = next_i
 	}
-	assert(!ct_stack.length)
+	check_stacks()
 }
 
-// ---------------------------------------------------------------------------
+// positioning phase (per-axis) ----------------------------------------------
 
-function position_children_cross_axis(a, i, axis, ct_w) {
+// calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1)
+// of all boxes by walking the container tree top-down, and using different
+// positioning algorithms based on container type (recursive).
+// the resulting boxes at a[i+0..3] exclude margins and paddings.
+// scrolling and popup positioning is done later.
 
+position[CMD_TEXT] = function(a, i, axis, x, w) {
+	a[i+0+axis] = x
+	a[i+2+axis] = w
+}
+
+function position_box(position_f, a, i, axis, ct_x, ct_w) {
+
+	// outer-box (ct_x, ct_w) -> inner-box (x, w).
+	let p1 = a[i+MX1+axis] + a[i+PX1+axis]
+	let p2 = a[i+MX2+axis] + a[i+PX2+axis]
+	let x = ct_x + p1
+	let w = ct_w - (p1 + p2)
+
+	position_f(a, i, axis, x, w)
+}
+
+function position_children_cross_axis(a, i, axis, sx, sw) {
+
+	i = a[i-2] // next_i
 	while (a[i-1] != CMD_END) {
 
 		let cmd = a[i-1]
@@ -906,15 +960,15 @@ function position_children_cross_axis(a, i, axis, ct_w) {
 			let align = a[i+ALIGN+axis]
 
 			// stretch or align the item on the cross-axis.
-			let x = 0
-			let w = align == ALIGN_STRETCH ? ct_w : min_w
+			let x = sx
+			let w = align == ALIGN_STRETCH ? sw : min_w
 			if (align == ALIGN_END)
-				x = ct_w - w
+				x = sx + sw - w
 			else if (align == ALIGN_CENTER)
-				x = round((ct_w - w) / 2)
+				x = round(sx + (sw - w) / 2)
 
 			// position item's children recursively.
-			position_f(a, i, axis, x, w)
+			position_box(position_f, a, i, axis, x, w)
 
 		}
 
@@ -922,23 +976,16 @@ function position_children_cross_axis(a, i, axis, ct_w) {
 	}
 }
 
-function position_flex(a, i, axis, ct_x, ct_w) {
+function position_flex(a, i, axis, sx, sw) {
 
-	ct_stack.push(i)
+	a[i+0+axis] = sx
+	a[i+2+axis] = sw
 
-	a[i+0+axis] = ct_x
-	a[i+2+axis] = ct_w
+	if (is_main_axis(a[i-1], axis)) {
 
-	let main_axis = is_main_axis(a[i-1], axis)
-	let next_i = a[i-2]
-	let i0 = i
-
-	let total_w = ct_w - paddings(a, i0, axis)
-
-	if (main_axis) {
-
-		let gap      = a[i0+FLEX_GAP]
-		let total_fr = a[i0+FLEX_TOTAL_FR]
+		let next_i   = a[i-2]
+		let gap      = a[i+FLEX_GAP]
+		let total_fr = a[i+FLEX_TOTAL_FR]
 
 		// compute total gap.
 		let gap_w = 0
@@ -950,14 +997,15 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 					n++
 				i = get_next_ext_i(a, i)
 			}
-			gap_w = n * gap
+			gap_w = max(0, (n - 1) * gap)
 		}
-		total_w -= gap_w
+
+		let total_w = sw - gap_w
 
 		// compute total overflow width and total free width.
 		let total_overflow_w = 0
 		let total_free_w     = 0
-		let i = next_i
+		i = next_i
 		while (a[i-1] != CMD_END) {
 
 			let cmd = a[i-1]
@@ -981,7 +1029,6 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 		// take it. each child shrinks to take in the percent of the overflow
 		// equal to the child's percent of free space.
 		i = next_i
-		let sx = 0
 		while (a[i-1] != CMD_END) {
 
 			let cmd = a[i-1]
@@ -1004,8 +1051,11 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 					let shrink_w = total_overflow_w * free_p
 					if (shrink_w != shrink_w) // total_free_w == 0
 						shrink_w = 0
-					sw = flex_w - shrink_w
+					sw = floor(flex_w - shrink_w)
 				}
+
+				// TODO: check if this is the last element and if it is,
+				// set `sw = total_w - sx` so that it eats up all rounding errors.
 
 				// align the item inside the stretched segment defined by (sx, sw).
 				let x = sx
@@ -1016,9 +1066,10 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 					x = round(sx + (sw - w) / 2)
 
 				// position item's children recursively.
-				position_f(a, i, axis, x, w)
+				position_box(position_f, a, i, axis, x, w)
 
-				sx = sx + sw + gap
+				sw += gap
+				sx += sw
 
 			}
 
@@ -1027,89 +1078,133 @@ function position_flex(a, i, axis, ct_x, ct_w) {
 
 	} else {
 
-		position_children_cross_axis(a, next_i, axis, total_w)
+		position_children_cross_axis(a, i, axis, sx, sw)
 
 	}
-
-	ct_stack.pop()
 
 }
+position[CMD_H] = position_flex
+position[CMD_V] = position_flex
 
-position[CMD_H    ] = position_flex
-position[CMD_V    ] = position_flex
-position[CMD_STACK] = position_flex
+position[CMD_STACK] = function(a, i, axis, x, w) {
+	a[i+0+axis] = x
+	a[i+2+axis] = w
+	position_children_cross_axis(a, i, axis, x, w)
+}
 
-position[CMD_SCROLLBOX] = function(a, i, axis, ct_x, ct_w) {
+// NOTE: scrolling is done later.
+position[CMD_SCROLLBOX] = function(a, i, axis, x, w) {
+	a[i+0+axis] = x
+	a[i+2+axis] = w
+	let content_w = a[i+SB_CW+axis]
+	position_children_cross_axis(a, i, axis, x, max(content_w, w))
+}
 
-	ct_stack.push(i)
+// NOTE: popup positioning is done later.
+position[CMD_POPUP] = function(a, i, axis) {
+	let min_w = a[i+2+axis]
+	position_children_cross_axis(a, i, axis, 0, min_w)
+}
 
-	let co_w = a[i+SB_CW+axis] // scrollbox content w
-	let next_i = a[i-2]
+function position_all(axis) {
+	let ct_w = axis ? a.h : a.w
+	let i = 2
+	let cmd = a[i-1]
+	let min_w = a[i+2+axis]
+	let position_f = position[cmd]
+	position_box(position_f, a, i, axis, 0, max(min_w, ct_w))
+}
 
-	a[i+0+axis] = ct_x
-	a[i+2+axis] = ct_w
+// translation phase ---------------------------------------------------------
 
-	let total_w = ct_w - paddings(a, i, axis)
-	position_children_cross_axis(a, next_i, axis, max(co_w, total_w))
+// do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
-	// update sx,sy once on the y-axis positioning.
-	if (axis) {
+translate[CMD_TEXT] = function(a, i, dx, dy) {
+	a[i+0] += dx
+	a[i+1] += dy
+}
 
-		let x  = a[i+0]
-		let y  = a[i+1]
-		let w  = a[i+2]
-		let h  = a[i+3]
-		let cw = a[i+SB_CW+0]
-		let ch = a[i+SB_CW+1]
-		let sx = a[i+SB_SX+1]
-		let sy = a[i+SB_SX+1]
+function translate_children(a, i, dx, dy) {
+	let ct_i = i
+	i = a[i-2] // next_i
+	while (a[i-1] != CMD_END) {
+		let cmd = a[i-1]
+		let next_ext_i = get_next_ext_i(a, i)
+		let translate_f = translate[cmd]
+		if (translate_f)
+			translate_f(a, i, dx, dy, ct_i)
+		i = next_ext_i
+	}
+}
 
-		sx = max(0, min(sx, cw - w))
-		sy = max(0, min(sy, ch - h))
+function translate_ct(a, i, dx, dy) {
+	a[i+0] += dx
+	a[i+1] += dy
+	translate_children(a, i, dx, dy)
+}
 
-		let psx = sx / (cw - w)
-		let psy = sy / (ch - h)
+translate[CMD_H    ] = translate_ct
+translate[CMD_V    ] = translate_ct
+translate[CMD_STACK] = translate_ct
 
-		let id = a[i+SB_ID]
-		if (id) {
-			for (let axis = 0; axis < 2; axis++) {
+translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
-				let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-				if (!visible)
-					continue
+	let x  = a[i+0] + dx
+	let y  = a[i+1] + dy
+	let w  = a[i+2]
+	let h  = a[i+3]
+	let cw = a[i+SB_CW+0]
+	let ch = a[i+SB_CW+1]
+	let sx = a[i+SB_SX+0]
+	let sy = a[i+SB_SX+1]
 
-				let sbar_id = id+'.scrollbar'+axis
-				let cs = captured(sbar_id)
-				if (cs) {
-					if (!axis) {
-						let psx0 = cs.get('ps0')
-						let dpsx = (mx - mx0) / (w - tw)
-						sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
-						id_state(id).set('scroll_x', sx)
-						a[i+SB_SX] = sx
-					} else {
-						let psy0 = cs.get('ps0')
-						let dpsy = (my - my0) / (h - th)
-						sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
-						id_state(id).set('scroll_y', sy)
-						a[i+SB_SX+1] = sy
-					}
-					break
+	a[i+0] = x
+	a[i+1] = y
+
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+
+	let psx = sx / (cw - w)
+	let psy = sy / (ch - h)
+
+	let id = a[i+SB_ID]
+	if (id) {
+		for (let axis = 0; axis < 2; axis++) {
+
+			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+			if (!visible)
+				continue
+
+			let sbar_id = id+'.scrollbar'+axis
+			let cs = captured(sbar_id)
+			if (cs) {
+				if (!axis) {
+					let psx0 = cs.get('ps0')
+					let dpsx = (mx - mx0) / (w - tw)
+					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
+					id_state(id).set('scroll_x', sx)
+					a[i+SB_SX+0] = sx
 				} else {
-					let hs = hovers(sbar_id)
-					if (!hs)
-						continue
-					let cs = capture(sbar_id)
-					if (!cs)
-						continue
-					cs.set('ps0', !axis ? psx : psy)
+					let psy0 = cs.get('ps0')
+					let dpsy = (my - my0) / (h - th)
+					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
+					id_state(id).set('scroll_y', sy)
+					a[i+SB_SX+1] = sy
 				}
+				break
+			} else {
+				let hs = hovers(sbar_id)
+				if (!hs)
+					continue
+				let cs = capture(sbar_id)
+				if (!cs)
+					continue
+				cs.set('ps0', !axis ? psx : psy)
 			}
 		}
-
 	}
 
-	ct_stack.pop()
+	translate_children(a, i, dx - sx, dy - sy)
 
 }
 
@@ -1157,309 +1252,101 @@ function position_popup(w, h, side, align, tx1, ty1, tx2, ty2) {
 	else if (align == POPUP_ALIGN_END && sdx)
 		y = y + th - h
 }
+translate[CMD_POPUP] = function(a, i, dx, dy, ct_i) {
 
-position[CMD_POPUP] = function(a, i, axis, ct_x, ct_w) {
+	let tx1 = a[ct_i+0] - a[ct_i+PX1+0]
+	let ty1 = a[ct_i+1] - a[ct_i+PX1+1]
+	let tx2 = a[ct_i+2] + tx1 + a[ct_i+PX2+0]
+	let ty2 = a[ct_i+3] + ty1 + a[ct_i+PX2+1]
 
-	ct_stack.push(i)
+	let w     = a[i+2]
+	let h     = a[i+3]
+	let side  = a[i+POPUP_SIDE]
+	let align = a[i+POPUP_ALIGN]
+	let fixed = a[i+POPUP_FIXED] // TODO: use this!
 
-	let min_w = a[i+2+axis]
-	let next_i = a[i-2]
+	position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
 
-	let total_w = ct_w - paddings(a, i, axis)
-	position_children_cross_axis(a, next_i, axis, total_w)
+	// if popup doesn't fit the screen, first try to change its side
+	// or alignment and relayout, and if that doesn't work, its offset.
 
-	if (axis) {
+	let d = 10
+	let bw = a.w
+	let bh = a.h
 
-		let ct_i = assert(ct_stack.at(-2), 'popup outside container')
-		let tx1 = a[ct_i+0]
-		let ty1 = a[ct_i+1]
-		let tx2 = a[ct_i+2] + tx1
-		let ty2 = a[ct_i+3] + ty1
+	let out_x1 = x < d
+	let out_y1 = y < d
+	let out_x2 = x + w > (bw - d)
+	let out_y2 = y + h > (bh - d)
 
-		let w     = a[i+2]
-		let h     = a[i+3]
-		let side  = a[i+POPUP_SIDE]
-		let align = a[i+POPUP_ALIGN]
-		let fixed = a[i+POPUP_FIXED]
+	let re
+	if (side == POPUP_SIDE_BOTTOM && out_y2) {
+		re = 1; side = POPUP_SIDE_TOP
+	} else if (side == POPUP_SIDE_TOP && out_y1) {
+		re = 1; side = POPUP_SIDE_BOTTOM
+	} else if (side == POPUP_SIDE_RIGHT && out_x2) {
+		re = 1; side = POPUP_SIDE_LEFT
+	} else if (side == POPUP_SIDE_TOP && out_x1) {
+		re = 1; side = POPUP_SIDE_BOTTOM
+	}
 
+	let vert =
+			side == POPUP_SIDE_BOTTOM
+		|| side == POPUP_SIDE_TOP
+		|| side == POPUP_SIDE_INNER_BOTTOM
+		|| side == POPUP_SIDE_INNER_TOP
+
+	if (align == POPUP_ALIGN_END && ((vert && out_x2) || (!vert && out_y2))) {
+		re = 1; align = POPUP_ALIGN_START
+	} else if (align == POPUP_ALIGN_START && ((vert && out_x1) || (!vert && out_y1))) {
+		re = 1; align = POPUP_ALIGN_END
+	}
+
+	if (re)
 		position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
 
-		// if popup doesn't fit the screen, first try to change its side
-		// or alignment and relayout, and if that doesn't work, its offset.
+	// if nothing else works, adjust the offset to fit the screen.
+	let ox2 = max(0, x + w - (bw - d))
+	let ox1 = min(0, x)
+	let oy2 = max(0, y + h - (bh - d))
+	let oy1 = min(0, y)
+	x -= ox1 ? ox1 : ox2
+	y -= oy1 ? oy1 : oy2
 
-		let d = 10
-		let bw = a.w
-		let bh = a.h
+	a[i+0] = x
+	a[i+1] = y
 
-		let out_x1 = x < d
-		let out_y1 = y < d
-		let out_x2 = x + w > (bw - d)
-		let out_y2 = y + h > (bh - d)
-
-		let re
-		if (side == POPUP_SIDE_BOTTOM && out_y2) {
-			re = 1; side = POPUP_SIDE_TOP
-		} else if (side == POPUP_SIDE_TOP && out_y1) {
-			re = 1; side = POPUP_SIDE_BOTTOM
-		} else if (side == POPUP_SIDE_RIGHT && out_x2) {
-			re = 1; side = POPUP_SIDE_LEFT
-		} else if (side == POPUP_SIDE_TOP && out_x1) {
-			re = 1; side = POPUP_SIDE_BOTTOM
-		}
-
-		let vert =
-			   side == POPUP_SIDE_BOTTOM
-			|| side == POPUP_SIDE_TOP
-			|| side == POPUP_SIDE_INNER_BOTTOM
-			|| side == POPUP_SIDE_INNER_TOP
-
-		if (align == POPUP_ALIGN_END && ((vert && out_x2) || (!vert && out_y2))) {
-			re = 1; align = POPUP_ALIGN_START
-		} else if (align == POPUP_ALIGN_START && ((vert && out_x1) || (!vert && out_y1))) {
-			re = 1; align = POPUP_ALIGN_END
-		}
-
-		if (re)
-			position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
-
-		// if nothing else works, adjust the offset to fit the screen.
-		let ox2 = max(0, x + w - (bw - d))
-		let ox1 = min(0, x)
-		let oy2 = max(0, y + h - (bh - d))
-		let oy1 = min(0, y)
-		x -= ox1 ? ox1 : ox2
-		y -= oy1 ? oy1 : oy2
-
-		a[i+0] = x // + (fixed ? sx : 0) - spx
-		a[i+1] = y // + (fixed ? sy : 0) - spy
-
-	}
-
-	ct_stack.pop()
+	translate_children(a, i, x, y)
 
 }
 }
 
-position[CMD_TEXT] = function(a, i, axis, ct_x, ct_w) {
-	a[i+0+axis] = ct_x
-	a[i+2+axis] = ct_w
-}
-
-function position_all(axis) {
-	reset_text()
-	let s_w = axis ? a.h : a.w
+function translate_all() {
 	let i = 2
-	let n = a.length
-	while (i < n) {
-		let cmd = a[i-1]
-		let position_f = position[cmd]
-		if (position_f) {
-			let min_w = a[i+2+axis]
-			position_f(a, i, axis, 0, max(min_w, s_w), 0)
-		}
-		i = get_next_ext_i(a, i)
-	}
+	let cmd = a[i-1]
+	let translate_f = translate[cmd]
+	translate_f(a, i, 0, 0)
 }
 
-// ---------------------------------------------------------------------------
+// drawing phase -------------------------------------------------------------
 
-let hit_set = set() // {id}
-let layer
+draw[CMD_POPUP] = function(a, i) {
 
-let hit_state_map_freelist = map_freelist()
-let hit_state_maps = map() // {id->map}
+	let popup_layer = a[i+POPUP_LAYER]
+	if (popup_layer != layer)
+		return true
 
-function hovers(id) {
-	if (!id)
-		return
-	if (!hit_set.has(id))
-		return
-	let m = hit_state_maps.get(id)
-	if (!m) {
-		m = hit_state_map_freelist()
-		hit_state_maps.set(id, m)
-	}
-	return m
+	font      = a[i+POPUP_FONT]
+	font_size = a[i+POPUP_FONT_SIZE]
+	color     = a[i+POPUP_COLOR]
+
+	cx.font = font_size + 'px ' + font
 }
-
-function hit_rect(x, y, w, h) {
-	return (
-		(mx >= x && mx < x + w) &&
-		(my >= y && my < y + h)
-	)
-}
-
-function hit_box(a, i) {
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	return hit_rect(ct_x + x, ct_y + y, w, h)
-}
-
-hit[CMD_TEXT] = function(a, i) {
-	if (!hit_box(a, i))
-		return
-	hit_set.add(a[i+TEXT_ID])
-	return true
-}
-
-function same_layer(a, i) {
-	if (a[i-1] == CMD_POPUP)
-		if (a[i+POPUP_LAYER] != layer)
-			return false
-	return true
-}
-
-function hit_ct(a, i) {
-
-	if (!hit_box(a, i))
-		return
-
-	let ct_x0 = ct_x
-	let ct_y0 = ct_y
-
-	ct_x += a[i+0]
-	ct_y += a[i+1]
-
-	if (a[i-1] == CMD_SCROLLBOX) {
-		ct_x += a[i+SB_SX+0]
-		ct_y += a[i+SB_SX+1]
-	}
-
-	// hit direct children in reverse paint order.
-	let ct_i = i
-	let next_ext_i = get_next_ext_i(a, i)
-	let end_i = a[next_ext_i-3] // prev_i
-	i = a[end_i-3] // prev_i
-	while (i > ct_i) {
-		if (a[i-1] == CMD_END)
-			i = a[i] // start_i
-		if (same_layer(a, i)) {
-			let hit_f = hit[a[i-1]]
-			if (hit_f && hit_f(a, i))
-				break
-		}
-		i = a[i-3] // prev_i
-	}
-
-	ct_x = ct_x0
-	ct_y = ct_y0
-
-	return true
-}
-
-hit[CMD_SCROLLBOX] = function(a, i) {
-	let id = a[i+SB_ID]
-	if (!id)
-		return
-	if (!hit_ct(a, i))
-		return
-	for (let axis = 0; axis < 2; axis++) {
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-		if (!visible)
-			continue
-		if (!hit_rect(tx, ty, tw, th))
-			continue
-		let sbar_id = id+'.scrollbar'+axis
-		hit_set.add(sbar_id)
-	}
-	return true
-}
-
-hit[CMD_H    ] = hit_ct
-hit[CMD_V    ] = hit_ct
-hit[CMD_STACK] = hit_ct
-
-function hit_test_all() {
-
-	reset_text()
-	for (let m of hit_state_maps.values())
-		hit_state_map_freelist(m)
-	hit_state_maps.clear()
-	hit_set.clear()
-
-	if (mx == null)
-		return
-
-	// iterate layers in reverse order.
-	for (let j = a.layers.length-1; j >= 0; j--) {
-		layer = a.layers[j]
-		let i0 = layer.i0
-		let i1 = layer.i1
-		if (i0 == null)
-			continue
-		// iterate commands in layer's range in reverse order.
-		let prev_i = i1-1
-		if (prev_i < i0)
-			continue
-		let i = a[prev_i]
-		ct_x = 0
-		ct_y = 0
-		while (1) {
-			if (a[i-1] == CMD_END)
-				i = a[i] // start_i
-			if (same_layer(a, i)) {
-				let hit_f = hit[a[i-1]]
-				if (hit_f && hit_f(a, i))
-					break
-			}
-			if (i == i0+2)
-				break
-			i = a[i-3] // prev_i
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-
-function draw_debug_box(a, i) {
-	if (!DEBUG) return
-	// if (a[i-1] != CMD_POPUP) return
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	let mx1 = a[i+MX1+0]
-	let my1 = a[i+MX1+1]
-	let mx2 = a[i+MX2+0]
-	let my2 = a[i+MX2+1]
-	let px1 = a[i+PX1+0]
-	let py1 = a[i+PX1+1]
-	let px2 = a[i+PX2+0]
-	let py2 = a[i+PX2+1]
-	cx.beginPath()
-	cx.fillStyle = 'hsl(240deg 100% 50% / .4)'
-	cx.rect(x, y, w, h)
-	cx.fill()
-	cx.beginPath()
-	cx.fillStyle = 'hsl(120deg 100% 50% / .4)'
-	cx.rect(x+mx1, y+my1, w-mx1-mx2, h-my1-my2)
-	cx.fill()
-	cx.beginPath()
-	cx.fillStyle = 'hsl(0deg 100% 50% / .4)'
-	cx.rect(x+mx1+px1, y+my1+py1, w-mx1-mx2-px1-px2, h-my1-my2-py1-py2)
-	cx.fill()
-}
-
-draw[CMD_H] = function(a, i) {
-
-	ct_stack.push(i)
-
-	let x = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
-
-	ct_x += x
-	ct_y += y
-}
-draw[CMD_V    ] = draw[CMD_H]
-draw[CMD_STACK] = draw[CMD_H]
-draw[CMD_POPUP] = draw[CMD_H]
 
 draw[CMD_TEXT] = function(a, i) {
 
-	let x = ct_x + a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y = ct_y + a[i+1] + a[i+MX1+1] + a[i+PX1+1]
+	let x   = a[i+0]
+	let y   = a[i+1]
 	let s   = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
 
@@ -1474,8 +1361,8 @@ let scrollbar_rect
 {
 let r = [false, 0, 0, 0, 0]
 scrollbar_rect = function(a, i, axis) {
-	let x  = ct_x + a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y  = ct_y + a[i+1] + a[i+MX1+1] + a[i+PX1+1]
+	let x  = a[i+0]
+	let y  = a[i+1]
 	let w  = a[i+2]
 	let h  = a[i+3]
 	let cw = a[i+SB_CW+0]
@@ -1518,44 +1405,22 @@ scrollbar_rect = function(a, i, axis) {
 
 draw[CMD_SCROLLBOX] = function(a, i) {
 
-	ct_stack.push(i)
-
-	let x  = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y  = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
-	let w  = a[i+2]
-	let h  = a[i+3]
-	let cw = a[i+SB_CW+0]
-	let ch = a[i+SB_CW+1]
-	let sx = a[i+SB_SX+0]
-	let sy = a[i+SB_SX+1]
-
-	ct_x += x
-	ct_y += y
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
 
 	cx.save()
 	cx.beginPath()
-	cx.rect(ct_x, ct_y, w, h)
+	cx.rect(x, y, w, h)
 	cx.clip()
-	ct_x -= sx
-	ct_y -= sy
 }
 
 draw[CMD_END] = function(a, end_i) {
 
-	let i = ct_stack.pop()
-	let x = a[i+0] + a[i+MX1+0] + a[i+PX1+0]
-	let y = a[i+1] + a[i+MX1+1] + a[i+PX1+1]
-
-	if (a[i-1] == CMD_SCROLLBOX) {
+	let i = a[end_i]
+	if (a[i-1] == CMD_SCROLLBOX)
 		cx.restore()
-		let sx = a[i+SB_SX+0]
-		let sy = a[i+SB_SX+1]
-		ct_x += sx
-		ct_y += sy
-	}
-
-	ct_x -= x
-	ct_y -= y
 
 	if (a[i-1] == CMD_SCROLLBOX) {
 		let id = a[i+SB_ID]
@@ -1633,24 +1498,20 @@ draw[CMD_SHADOW] = function(a, i) {
 	shadow_set = true
 }
 
-draw[CMD_RECT] = function(a, i) {
-	let ct_i = ct_stack.at(-1)
+draw[CMD_BB] = function(a, i) {
+	let ct_i = a[i+1]
 	let px1 = a[ct_i+PX1+0]
 	let py1 = a[ct_i+PX1+1]
 	let px2 = a[ct_i+PX2+0]
 	let py2 = a[ct_i+PX2+1]
-	let mx1 = a[ct_i+MX1+0]
-	let my1 = a[ct_i+MX1+1]
-	let mx2 = a[ct_i+MX2+0]
-	let my2 = a[ct_i+MX2+1]
-	let x = ct_x + -px1
-	let y = ct_y + -py1
-	let w = a[ct_i+2] - mx1 - mx2
-	let h = a[ct_i+3] - my1 - my2
-	let bg_color      = a[i]
-	let border_sides  = a[i+1]
-	let border_color  = a[i+2]
-	let border_radius = a[i+3]
+	let x   = a[ct_i+0] - px1
+	let y   = a[ct_i+1] - py1
+	let w   = a[ct_i+2] + px1 + px2
+	let h   = a[ct_i+3] + py1 + py2
+	let bg_color      = a[i+2]
+	let border_sides  = a[i+3]
+	let border_color  = a[i+4]
+	let border_radius = a[i+5]
 	if (bg_color != null) {
 		cx.fillStyle = bg_color
 		border_path(cx, x, y, x + w, y + h, BORDER_SIDE_ALL, border_radius)
@@ -1678,76 +1539,428 @@ draw[CMD_COLOR] = function(a, i) {
 draw[CMD_FONT] = set_font
 draw[CMD_FONT_SIZE] = set_font_size
 
-// ---------------------------------------------------------------------------
-
 function draw_all() {
-	reset_text()
 	for (layer of a.layers) {
-		let i0 = layer.i0
-		let i1 = layer.i1
-		if (i0 == null)
-			continue
-		ct_x = 0
-		ct_y = 0
-		let i = i0 + 2
-		while (i < i1) {
-			if (same_layer(a, i)) {
+		for (let i of layer) {
+			let next_ext_i = get_next_ext_i(a, i)
+			check_stacks()
+			reset_all()
+			while (i < next_ext_i) {
 				let draw_f = draw[a[i-1]]
-				if (draw_f)
-					draw_f(a, i)
-				i = a[i-2] // next_i
-			} else {
-				i = get_next_ext_i(a, i)
+				if (draw_f && draw_f(a, i))
+					i = get_next_ext_i(a, i)
+				else
+					i = a[i-2] // next_i
 			}
+			check_stacks()
 		}
 	}
 }
+
+// hit-testing phase ---------------------------------------------------------
+
+let hit_set = set() // {id}
+
+let hit_state_map_freelist = map_freelist()
+let hit_state_maps = map() // {id->map}
+
+function set_hit_id(id) {
+	if (id)
+		hit_set.add(id)
+}
+
+function hovers(id) {
+	if (!id)
+		return
+	if (!hit_set.has(id))
+		return
+	let m = hit_state_maps.get(id)
+	if (!m) {
+		m = hit_state_map_freelist()
+		hit_state_maps.set(id, m)
+	}
+	return m
+}
+
+function hit_rect(x, y, w, h) {
+	return (
+		(mx >= x && mx < x + w) &&
+		(my >= y && my < y + h)
+	)
+}
+
+function hit_box(a, i) {
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	return hit_rect(x, y, w, h)
+}
+
+hit[CMD_TEXT] = function(a, i) {
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	if (hit_rect(x, y, w, h)) {
+		set_hit_id(a[i+TEXT_ID])
+		hit_template(a, i, x, y, w, h)
+		return true
+	}
+}
+
+function hit_children(a, i) {
+
+	// hit direct children in reverse paint order.
+	let ct_i = i
+	let next_ext_i = get_next_ext_i(a, i)
+	let end_i = a[next_ext_i-3] // prev_i
+	i = a[end_i-3] // prev_i
+	let found
+	while (i > ct_i) {
+		if (a[i-1] == CMD_END)
+			i = a[i] // start_i
+		let hit_f = hit[a[i-1]]
+		if (hit_f && hit_f(a, i)) {
+			found = true
+			break
+		}
+		i = a[i-3] // prev_i
+	}
+
+	return found
+}
+
+hit[CMD_SCROLLBOX] = function(a, i) {
+	let id = a[i+SB_ID]
+	if (!id)
+		return
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+
+	// fast-test the outer box since we're clipping the contents.
+	if (!hit_rect(x, y, w, h))
+		return
+
+	set_hit_id(id)
+
+	hit_template(a, i, x, y, w, h)
+
+	// test the scrollbars
+	for (let axis = 0; axis < 2; axis++) {
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+		if (!visible)
+			continue
+		if (!hit_rect(tx, ty, tw, th))
+			continue
+		set_hit_id(id+'.scrollbar'+axis)
+		return true
+	}
+
+	// test the children
+	hit_children(a, i)
+
+	return true
+}
+
+hit[CMD_POPUP] = function(a, i) {
+
+	let popup_layer = a[i+POPUP_LAYER]
+	if (popup_layer != layer)
+		return
+
+	hit_children(a, i)
+}
+
+function hit_flex(a, i) {
+	if (hit_children(a, i))
+		return true
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	if (hit_rect(x, y, w, h))
+		hit_template(a, i, x, y, w, h)
+}
+
+hit[CMD_H] = hit_flex
+hit[CMD_V] = hit_flex
+
+hit[CMD_STACK] = function(a, i) {
+	if (hit_children(a, i)) {
+		set_hit_id(a[i+STACK_ID])
+		return true
+	}
+	if (hit_box(a, i)) {
+		set_hit_id(a[i+STACK_ID])
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
+		hit_template(a, i, x, y, w, h)
+		return true
+	}
+}
+
+hit[CMD_BB] = function(a, i) {
+	let ct_i = a[i+1]
+	let px1 = a[ct_i+PX1+0]
+	let py1 = a[ct_i+PX1+1]
+	let x = a[ct_i+0] - px1
+	let y = a[ct_i+1] - py1
+	let w = a[ct_i+2] + px1 + px2
+	let h = a[ct_i+3] + py1 + py2
+	if (hit_rect(x, y, w, h)) {
+		set_hit_id(a[i+BB_ID])
+		hit_template(a, i, x, y, w, h)
+		return true
+	}
+}
+
+function hit_all() {
+
+	template_hit = null
+	for (let m of hit_state_maps.values())
+		hit_state_map_freelist(m)
+	hit_state_maps.clear()
+	hit_set.clear()
+
+	if (mx == null)
+		return
+
+	// iterate layers in reverse order.
+	for (let j = a.layers.length-1; j >= 0; j--) {
+		layer = a.layers[j]
+		// iterate layer's cointainers in reverse order.
+		for (let k = layer.length-1; k >= 0; k--) {
+			reset_all()
+			let i = layer[k]
+			let hit_f = hit[a[i-1]]
+			if (hit_f(a, i)) {
+				j = -1
+				break
+			}
+		}
+	}
+	layer = null
+
+}
+
+// animation frame -----------------------------------------------------------
 
 function redraw_all() {
 	a.length = 0
 	for (let layer of a.layers)
 		layer_clear(layer)
-	reset_text()
-	ui.push_layer_base()
+	check_stacks()
+	reset_all()
+
+	let i = ui.stack()
+	push_layer(layer_base, i)
 	make_frame()
-	ui.pop_layer()
-	assert(!ct_stack.length, 'container not closed')
-	assert(!layer_stack.length, 'layer not closed')
+	ui.end()
+	pop_layer()
 	id_state_gc()
-	measure_all(0)
-	position_all(0)
-	measure_all(1)
-	position_all(1)
+
+	measure_all(0); position_all(0) // x-axis
+	measure_all(1); position_all(1) // y-axis
+	translate_all()
 	draw_all()
 }
 
-function pr_layer(a) {
-	let i = 2
-	let depth = 0
-	let n = a.length
-	while (i < n) {
-		let cmd = a[i-1]
-		if (cmd == CMD_END)
-			depth--
-		let indent = (' ').repeat(depth)
-		let cmd_s = cmd_names[cmd]
-		if (cmd < CMD_END) {
-			let next_ext_i = a[i+NEXT_EXT_I]
-			let next_ext_cmd_s = cmd_names[a[next_ext_i-1]]
-			pr(indent + '(' + cmd_s + (next_ext_cmd_s ? ' > ' + next_ext_cmd_s : ''))
-			depth++
-		} else if (cmd == CMD_END) {
-			pr(indent + ')')
-		} else {
-			pr(indent + cmd_s)
+// template widget -----------------------------------------------------------
+
+let targs = {}
+
+targs.text  = function(t) { return [t.id, t.s, t.align, t.valign, t.fr] }
+targs.h     = function(t) { return [t.fr, t.gap, t.align, t.valign, t.min_w, t.min_h] }
+targs.v     = targs.h
+targs.stack = function(t) { return [t.id, t.fr, t.align, t.valign, t.min_w, t.min_h] }
+targs.bb    = function(t) { return [t.id, t.bg_color, t.sides, t.border_color, t.border_radius] }
+
+let template_hit
+let template_hit_i0
+let template_hit_i1
+let template_hit_t
+let template_hit_ch_t
+let template_hit_i
+let template_hit_x
+let template_hit_y
+let template_selected_t
+let template_selected_ch_t
+let template_selected_i
+let template_selected_x
+let template_selected_y
+let template_selected_w
+let template_selected_h
+
+function hit_template(a, i, x, y, w, h) {
+	if (template_hit && i >= template_hit_i0 && i < template_hit_i1) {
+		template_hit_ch_t = template_find_node(a, i, template_hit_t, template_hit_i0)
+		template_hit_i = i
+		if (clicked || template_selected_ch_t == template_hit_ch_t) {
+			template_selected_t    = template_hit_t
+			template_selected_i    = template_hit_i
+			template_selected_ch_t = template_hit_ch_t
+			template_selected_x = x
+			template_selected_y = y
+			template_selected_w = w
+			template_selected_h = h
 		}
-		let next_i = a[i-2]
-		i = next_i
+		return true
 	}
-	assert(depth == 0)
 }
 
-// ---------------------------------------------------------------------------
+function template_find_node(a, i, t, t_i) {
+	if (i == t_i)
+		return t
+	if (t.e) {
+		let ch_t_i = a[t_i-2] // next_i
+		for (let ch_t of t.e) {
+			let found_t = template_find_node(a, i, ch_t, ch_t_i)
+			if (found_t)
+				return found_t
+			ch_t_i = get_next_ext_i(a, ch_t_i)
+		}
+	}
+}
+
+function template_add(t) {
+	let cmd = cmd_name_map.get(t.t)
+	let targs_f = assert(targs[t.t], 'unknown type {0}', t.t)
+	let args = targs_f(t)
+	ui[t.t](...args)
+	if (t.e)
+		for (let ch_t of t.e)
+			template_add(ch_t, 0)
+	if (cmd < 0)
+		ui.end(t.t)
+}
+
+const CMD_TEMPLATE_OVERLAY = cmd('template_overlay')
+
+function template_drag_point(id, ha, va) {
+	let x = template_selected_x
+	let y = template_selected_y
+	let w = template_selected_w
+	let h = template_selected_h
+	ui.drag_point(id+'.'+ha+va,
+		x + (ha == 'r' ? w : ha == 'c' ? round(w / 2) : 0),
+		y + (va == 'b' ? h : va == 'c' ? round(h / 2) : 0),
+		'red',
+	)
+}
+ui.template = function(id, t, ...stack_args) {
+	ui.stack(id, ...stack_args)
+	let i0 = a.length+2 // index of first cmd's arg#1
+	template_add(t)
+	let i1 = a.length+2 // index of next cmd's arg#1
+	ui_cmd_box(CMD_TEMPLATE_OVERLAY, 1, 's', 's', 0, 0, id+'.overlay', t, i0, i1)
+	if (template_selected_ch_t) {
+		template_editor(id, template_selected_t)
+		template_drag_point(id, 'l', 't')
+		template_drag_point(id, 'l', 'c')
+		template_drag_point(id, 'l', 'b')
+		template_drag_point(id, 'r', 't')
+		template_drag_point(id, 'r', 'c')
+		template_drag_point(id, 'r', 'b')
+	}
+	ui.end('stack')
+}
+
+position[CMD_TEMPLATE_OVERLAY] = function(a, i, axis, ct_x, ct_w) {
+	a[i+0+axis] = ct_x
+	a[i+2+axis] = ct_w
+}
+
+hit[CMD_TEMPLATE_OVERLAY] = function(a, i) {
+	let id = a[i+S-1]
+	let t  = a[i+S+0]
+	let i0 = a[i+S+1]
+	let i1 = a[i+S+2]
+	template_hit = hit_box(a, i)
+	if (template_hit) {
+		template_hit_i0 = i0
+		template_hit_i1 = i1
+		template_hit_t = t
+		template_hit_x = a[template_hit_i+0]
+		template_hit_y = a[template_hit_i+1]
+	}
+	template_hit_ch_t = null
+	template_hit_i = null
+}
+
+draw[CMD_TEMPLATE_OVERLAY] = function(a, i) {
+	if (template_selected_t) {
+		cx.strokeStyle = 'magenta'
+		cx.lineWidth = 1
+		cx.beginPath()
+		cx.rect(
+			template_selected_x + .5,
+			template_selected_y + .5,
+			template_selected_w - .5,
+			template_selected_h - .5,
+		)
+		cx.stroke()
+	}
+}
+
+function template_editor(id, t) {
+	ui.popup(id+'.tree_popup', layer_popup, 'it', '[')
+		ui.scrollbox(id+'.sb', 0, null, null, null, null, 200, 600)
+			ui.bb('', 'gray')
+			template_tree(id+'.tree')
+		ui.end('scrollbox')
+	ui.end('popup')
+}
+
+function template_tree(id) {
+
+}
+
+// drag point widget ---------------------------------------------------------
+
+const CMD_DRAG_POINT = ui.widget('drag_point', {
+	draw: function(a, i) {
+		let r = 5
+		let x     = a[i+0]
+		let y     = a[i+1]
+		let color = a[i+2]
+		cx.fillStyle = color
+		cx.beginPath()
+		cx.rect(x-r, y-r, 2*r, 2*r)
+		cx.fill()
+	},
+	hit: function(a, i) {
+		let r = 5
+		let x  = a[i+0]
+		let y  = a[i+1]
+		let id = a[i+3]
+		if (hit_rect(x-r, y-r, 2*r, 2*r)) {
+			hit_set.add(id)
+			return true
+		}
+	},
+})
+ui.drag_point = function(id, cx, cy, color, on_drag) {
+	let hit = hit_set.has(id)
+	if (hit)
+		pr('hit', id)
+	ui_cmd(CMD_DRAG_POINT, cx, cy, color, id, on_drag)
+}
+
+// testbed -------------------------------------------------------------------
+
+let test_template = {
+	t: 'v', fr: 2, gap: 20, e: [
+		{t: 'text', id: 't1', s: 'TP Hello!'},
+		{t: 'stack', id: 'st1', fr: 1, e: [
+			{t: 'bb', id: 'r1', bg_color: 'hsl(120deg 50% 16%)'},
+		]},
+	]}
 
 function make_frame() {
 
@@ -1755,72 +1968,104 @@ function make_frame() {
 	ui.font('Arial')
 	ui.font_size(30)
 
+	ui.m(50, null, 50)
 	ui.h(1, 20)
-		ui.text('t1', 'Hello!')
-		ui.stack(1)
-			ui.rect('hsl(0deg 0% 16%)')
+		ui.text('t1', 'Hello1!')
+		ui.stack('', 1)
+			ui.bb('', 'hsl(0deg 0% 16%)')
+			if (1) {
 			ui.scrollbox('sb1', 1)
-				ui.m(50 ,  50, 0, 0)
-				ui.p(100, 100, 0, 0)
+				ui.m(50, 50, 0, 0)
+				ui.p(20)
 				ui.v(1, 20, 'c', 'c')
 					// ui.bg('hsl(0deg 0% 16%)')
 					ui.shadow('black', 5, 2, 2)
-					ui.rect('blue', 1, 'hsl(0 0% 100%)', 20)
+					ui.bb('', 'blue', 1, 'hsl(0 0% 100%)', 20)
 					// ui.padding(10, 10, 10, 10)
 					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
 					// ui.padding(10, 10, 10, 10)
-					ui.text('t3', (max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
+					ui.text('t3', ( max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
 					ui.text('t4', (last_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
-					ui.push_layer_popup()
 					ui.m(0, 0, -20, 0)
-					ui.popup('p1', 'b')
-						ui.rect('hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
-						ui.p(20, 20, 20, 20)
+					ui.popup('p1', layer_popup, 'b')
+					 	ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
+					 	ui.p(20)
 						ui.text('tp1', 'Wasup?')
 					ui.end('popup')
-					ui.pop_layer()
 				ui.end('v')
 			ui.end('scrollbox')
+			}
 		ui.end('stack')
-		ui.stack(1, 'c', 'c')
-			ui.rect(null, 'blt', 'red', 10)
+		ui.stack('', 1, 'c', 'c')
+			ui.bb('', null, 'blt', 'red', 10)
 			// ui.margin (10, 10, 10, 10)
 			// ui.padding(10, 10, 10, 10)
 			ui.text('t4', 'Hello Again!', 'c', 'c', 1)
 		ui.end('stack')
-		ui.text('t3', '...and again.', 'c', 'c', 1)
+		ui.template('tpl1', test_template)
+		// ui.text('t3', '...and again.', 'c', 'c', 1)
 	ui.end('h')
 
 	// redraw()
 
 }
 
-// ---------------------------------------------------------------------------
+// debugging -----------------------------------------------------------------
 
-let modules = {
-	main: {
-		type: 'tabs',
-		tabs: [
-			{type: 'module', name: 'module1'},
-			{type: 'module', name: 'module2'},
-		],
-	},
-	module1: {
-		type: 'text',
-		text: 'Hello!',
-	},
+function draw_debug_box(a, i) {
+	if (!DEBUG) return
+	// if (a[i-1] != CMD_POPUP) return
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let mx1 = a[i+MX1+0]
+	let my1 = a[i+MX1+1]
+	let mx2 = a[i+MX2+0]
+	let my2 = a[i+MX2+1]
+	let px1 = a[i+PX1+0]
+	let py1 = a[i+PX1+1]
+	let px2 = a[i+PX2+0]
+	let py2 = a[i+PX2+1]
+	cx.beginPath()
+	cx.fillStyle = 'hsl(240deg 100% 50% / .4)'
+	cx.rect(x, y, w, h)
+	cx.fill()
+	cx.beginPath()
+	cx.fillStyle = 'hsl(120deg 100% 50% / .4)'
+	cx.rect(x+mx1, y+my1, w-mx1-mx2, h-my1-my2)
+	cx.fill()
+	cx.beginPath()
+	cx.fillStyle = 'hsl(0deg 100% 50% / .4)'
+	cx.rect(x+mx1+px1, y+my1+py1, w-mx1-mx2-px1-px2, h-my1-my2-py1-py2)
+	cx.fill()
 }
 
-let module = {}
-
-module.tabs = function() {
-
-	return tabs
-}
-
-module.module2 = function() {
-
-
+function pr_layer(a) {
+	let i = 2
+	let depth = 0
+	let n = a.length
+	let pr1 = pr
+	while (i < n) {
+		let cmd = a[i-1]
+		if (cmd == CMD_END)
+			depth--
+		let indent = (' ').repeat(depth)
+		let cmd_s = cmd_names[cmd]
+		if (cmd < 0) {
+			let next_ext_i = a[i+NEXT_EXT_I]
+			let next_ext_cmd_s = cmd_names[a[next_ext_i-1]]
+			pr1(indent + '(' + cmd_s, i)
+			depth++
+		} else if (cmd == CMD_END) {
+			pr1(indent + ')', i)
+		} else {
+			pr1(indent + cmd_s, i)
+		}
+		let next_i = a[i-2]
+		i = next_i
+	}
+	assert(depth == 0)
 }
 
 }()) // module function
