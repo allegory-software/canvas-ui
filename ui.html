@@ -383,12 +383,13 @@ let layer
 function push_layer(layer1, i) {
 	if (layer1 != layer)
 		layer1.push(i)
+	if (layer)
+		layer_stack.push(layer)
 	layer = layer1
-	layer_stack.push(layer)
 }
 
 function pop_layer() {
-	layer = assert(layer_stack.pop(), 'no layer')
+	layer = layer_stack.pop()
 }
 
 // id state maps -------------------------------------------------------------
@@ -695,19 +696,21 @@ function popup_parse_align(s) {
 	assert(false, 'invalid align {0}', s)
 }
 
-const POPUP_LAYER     = S+0
-const POPUP_SIDE      = S+1
-const POPUP_ALIGN     = S+2
-const POPUP_FIXED     = S+3
-const POPUP_FONT      = S+4
-const POPUP_FONT_SIZE = S+5
-const POPUP_COLOR     = S+6
+const POPUP_ID        = S+0
+const POPUP_LAYER     = S+1
+const POPUP_SIDE      = S+2
+const POPUP_ALIGN     = S+3
+const POPUP_FIXED     = S+4
+const POPUP_FONT      = S+5
+const POPUP_FONT_SIZE = S+6
+const POPUP_COLOR     = S+7
 
 const CMD_POPUP = cmd_ct('popup')
 ui.popup = function(id, layer1, side, align, min_w, min_h, fixed) {
 	layer1 = layer1 || layer
 	// TODO: fr, align, valign are not used. find a way to remove them.
 	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
+		id,
 		layer1,
 		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
@@ -938,10 +941,10 @@ position[CMD_TEXT] = function(a, i, axis, x, w) {
 function position_box(position_f, a, i, axis, ct_x, ct_w) {
 
 	// outer-box (ct_x, ct_w) -> inner-box (x, w).
-	let p1 = a[i+MX1+axis] + a[i+PX1+axis]
-	let p2 = a[i+MX2+axis] + a[i+PX2+axis]
-	let x = ct_x + p1
-	let w = ct_w - (p1 + p2)
+	let mpl = a[i+MX1+axis] + a[i+PX1+axis]
+	let mpr = a[i+MX2+axis] + a[i+PX2+axis]
+	let x = ct_x + mpl
+	let w = ct_w - (mpl + mpr)
 
 	position_f(a, i, axis, x, w)
 }
@@ -1377,20 +1380,25 @@ scrollbar_rect = function(a, i, axis) {
 	let ph = h / ch
 	let thickness = 10
 	let visible, tx, ty, tw, th
+	let h_visible = pw < 1
+	let v_visible = ph < 1
+	let both_visible = h_visible && v_visible && 1 || 0
 	if (!axis) {
-		visible = pw < 1
+		visible = h_visible
 		if (visible) {
-			tw = pw * w
+			let bw = w - both_visible * thickness
+			tw = pw * bw
 			th = thickness
-			tx = psx * (w - tw)
+			tx = psx * (bw - tw)
 			ty = h - th
 		}
 	} else {
-		visible = ph < 1
+		visible = v_visible
 		if (visible) {
-			th = ph * h
+			let bh = h - both_visible * thickness
+			th = ph * bh
 			tw = thickness
-			ty = psy * (h - th)
+			ty = psy * (bh - th)
 			tx = w - tw
 		}
 	}
@@ -1672,7 +1680,7 @@ hit[CMD_POPUP] = function(a, i) {
 	if (popup_layer != layer)
 		return
 
-	hit_children(a, i)
+	return hit_children(a, i)
 }
 
 function hit_flex(a, i) {
@@ -1909,16 +1917,18 @@ draw[CMD_TEMPLATE_OVERLAY] = function(a, i) {
 }
 
 function template_editor(id, t) {
-	ui.popup(id+'.tree_popup', layer_popup, 'it', '[')
+	ui.popup(id+'.tree_popup', layer_popup, 'it', 'c')
 		ui.scrollbox(id+'.sb', 0, null, null, null, null, 200, 600)
-			ui.bb('', 'gray')
+			ui.bb('', 'blue')
 			template_tree(id+'.tree')
 		ui.end('scrollbox')
 	ui.end('popup')
 }
 
 function template_tree(id) {
-
+	ui.m(0, 500, 500)
+	ui.stack()
+	ui.end()
 }
 
 // drag point widget ---------------------------------------------------------
@@ -1986,20 +1996,22 @@ function make_frame() {
 					// ui.padding(10, 10, 10, 10)
 					ui.text('t3', ( max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
 					ui.text('t4', (last_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
-					ui.m(0, 0, -20, 0)
-					ui.popup('p1', layer_popup, 'b')
-					 	ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
-					 	ui.p(20)
-						ui.text('tp1', 'Wasup?')
-					ui.end('popup')
+					if (1) {
+						ui.m(0, 0, -20, 0)
+						ui.popup('p1', layer_popup, 'b')
+							ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
+							ui.p(20)
+							ui.text('tp1', 'Wasup?')
+						ui.end('popup')
+					}
 				ui.end('v')
 			ui.end('scrollbox')
 			}
 		ui.end('stack')
+		ui.m(10)
+		ui.p(10)
 		ui.stack('', 1, 'c', 'c')
 			ui.bb('', null, 'blt', 'red', 10)
-			// ui.margin (10, 10, 10, 10)
-			// ui.padding(10, 10, 10, 10)
 			ui.text('t4', 'Hello Again!', 'c', 'c', 1)
 		ui.end('stack')
 		ui.template('tpl1', test_template)
