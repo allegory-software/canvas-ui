@@ -2381,7 +2381,22 @@ function get_idata(s, key, w, h) {
 	return idata
 }
 
-function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum) {
+function draw_cross(x0, y0, w, h, sat, lum, color) {
+	if (sat == null) return
+	let x = round(x0 + lerp(sat, 0, 1, 0, w-1)) + .5
+	let y = round(y0 + lerp(lum, 0, 1, 0, h-1)) + .5
+	let d = 10
+	cx.strokeStyle = color
+	cx.lineWidth = 1
+	cx.beginPath()
+	cx.moveTo(x, y); cx.lineTo(x+d, y)
+	cx.moveTo(x, y); cx.lineTo(x-d, y)
+	cx.moveTo(x, y); cx.lineTo(x, y+d)
+	cx.moveTo(x, y); cx.lineTo(x, y-d)
+	cx.stroke()
+}
+
+function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum, sel_sat, sel_lum) {
 
 		let idata = get_idata(s, 'hsl_square', w, h)
 
@@ -2401,19 +2416,22 @@ function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum) {
 
 		cx.putImageData(idata, x, y)
 
-		if (hit_sat != null) {
-			cx.strokeStyle = '#000'
-			cx.lineWidth = 1
-			cx.beginPath()
-			let hit_x = lerp(hit_sat, 0, 1, 0, w-1)
-			let hit_y = lerp(hit_lum, 0, 1, 0, h-1)
-			cx.arc(x + hit_x, y + hit_y, 10, 0, 2 * PI)
-			cx.stroke()
-		}
-
+		draw_cross(x, y, w, h, hit_sat, hit_lum, '#888')
+		draw_cross(x, y, w, h, sel_sat, sel_lum, '#000')
 }
 
-function draw_hue_bar(s, x, y, w, h, hit_hue) {
+function draw_hue_line(x, y, h, w, hue, color) {
+	if (hue == null) return
+	cx.strokeStyle = color
+	cx.lineWidth = 1
+	cx.beginPath()
+	let hue_y = lerp(hue, 0, 360, 0, h-1)
+	cx.moveTo(x    , y + hue_y - 1 + .5)
+	cx.lineTo(x + w, y + hue_y - 1 + .5)
+	cx.stroke()
+}
+
+function draw_hue_bar(s, x, y, w, h, hit_hue, sel_hue) {
 
 		let idata = get_idata(s, 'hue_bar', w, h)
 
@@ -2432,16 +2450,8 @@ function draw_hue_bar(s, x, y, w, h, hit_hue) {
 
 		cx.putImageData(idata, x, y)
 
-		if (hit_hue != null) {
-			cx.strokeStyle = '#000'
-			cx.lineWidth = 1
-			cx.beginPath()
-			let hit_hue_y = lerp(hit_hue, 0, 360, 0, h-1)
-			cx.moveTo(x    , y + hit_hue_y - 1 + .5)
-			cx.lineTo(x + w, y + hit_hue_y - 1 + .5)
-			cx.stroke()
-		}
-
+		draw_hue_line(x, y, h, w, hit_hue, '#888')
+		draw_hue_line(x, y, h, w, sel_hue, '#000')
 }
 
 {
@@ -2464,20 +2474,27 @@ ui.box_widget('color_picker', {
 
 		let hs = ui.hovers(id)
 		let hit = hs && hs.get('hit')
-		let hue = hit == 'hue_bar'    ? hs.get('hue') : s.get('hue')
-		let sat = hit == 'hsl_square' ? hs.get('sat') : s.get('sat')
-		let lum = hit == 'hsl_square' ? hs.get('lum') : s.get('lum')
 
-		if (click)
-			if (hue != null)
-				s.set('hue', hue)
-			else if (lum != null) {
-				s.set('sat', sat)
-				s.set('lum', lum)
+		if (click) {
+			if (hit == 'hue_bar') {
+				s.set('hue', hs.get('hue'))
+			} else if (hit == 'hsl_square') {
+				s.set('sat', hs.get('sat'))
+				s.set('lum', hs.get('lum'))
 			}
+		}
 
-		draw_hsl_square(s, x, y, w, h, hue, sat, lum)
-		draw_hue_bar(s, x+w+10, y, 20, h, hue)
+		draw_hsl_square(s, x, y, w, h,
+			s.get('hue'),
+			hs?.get('sat'),
+			hs?.get('lum'),
+			s.get('sat'),
+			s.get('lum'),
+		)
+		draw_hue_bar(s, x+w+10, y, 20, h,
+			hs?.get('hue'),
+			s.get('hue'),
+		)
 
 	},
 
