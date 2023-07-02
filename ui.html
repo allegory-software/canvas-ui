@@ -145,10 +145,18 @@ G.max   = Math.max
 G.min   = Math.min
 G.abs   = Math.abs
 
+G.PI  = Math.PI
+G.rad = PI / 180
+G.deg = 180 / PI
+
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
 G.clamp = function(x, x0, x1) {
 	return min(max(x, x0 ?? -1/0), x1 ?? 1/0)
+}
+
+G.lerp = function(x, x0, x1, y0, y1) {
+	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
 }
 
 Number.prototype.dec = Number.prototype.toFixed
@@ -157,6 +165,8 @@ G.num = function(s) {
 	let x = parseFloat(s)
 	return x != x ? undefined : x
 }
+
+G.str = String
 
 // usage:
 //	 '{1} of {0}'.subst(total, current)
@@ -185,6 +195,8 @@ G.obj = () => Object.create(null)
 G.set = (iter) => new Set(iter)
 G.map = (iter) => new Map(iter)
 G.array = (...args) => new Array(...args)
+
+G.assign = Object.assign
 
 G.noop = function() {}
 
@@ -302,6 +314,8 @@ let wheel_dy = 0
 let trackpad = false
 
 function reset_mouse() {
+	if (clickup)
+		captured_id = null
 	click = false
 	clickup = false
 	wheel_dy = 0
@@ -326,7 +340,6 @@ canvas.on('pointerup', function(ev) {
 	if (ev.which == 1) {
 		pressed = false
 		clickup = true
-		captured_id = null
 		this.releasePointerCapture(ev.pointerId)
 		hit_all()
 		redraw()
@@ -429,7 +442,7 @@ function id_touch(id) {
 	id_remove_set.delete(id)
 }
 
-function id_state(id) {
+ui.state = function(id) {
 	if (!id)
 		return
 	id_touch(id)
@@ -497,6 +510,24 @@ ui.widget = function(cmd_name, t, is_ct) {
 	}
 }
 ui.widget_ct = function(cmd_name, t) { return ui.widget(cmd_name, t, true) }
+
+ui.box_widget = function(cmd_name, t) {
+	return ui.widget(cmd_name, assign({
+		measure: function(a, i, axis) {
+			let fr = a[i+FR]
+			let w  = a[i+2+axis]
+			add_ct_min_wh(a, axis, w, fr)
+		},
+		position: function(a, i, axis, x, w) {
+			a[i+0+axis] = x
+			a[i+2+axis] = w
+		},
+		translate: function(a, i, dx, dy) {
+			a[i+0] += dx
+			a[i+1] += dy
+		},
+	}, t))
+}
 
 let color, font, font_size
 
@@ -662,7 +693,7 @@ const SB_SX       =  S+5 // scroll x,y
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
-	let ss = id_state(id)
+	let ss = ui.state(id)
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
 
@@ -786,12 +817,15 @@ function parse_border_sides(s) {
 		return 0
 	if (s == true) // true, 1
 		return BORDER_SIDE_ALL
-	return (
+	let b = (
 		(s.includes('l') ? BORDER_SIDE_L : 0) +
 		(s.includes('r') ? BORDER_SIDE_R : 0) +
 		(s.includes('t') ? BORDER_SIDE_T : 0) +
 		(s.includes('b') ? BORDER_SIDE_B : 0)
 	)
+	if (s.starts('-'))
+		b = ~b & BORDER_SIDE_ALL
+	return b
 }
 
 const BB_ID = 0
@@ -811,10 +845,14 @@ const TEXT_ASC = S-1
 const TEXT_ID  = S+0
 const TEXT_S   = S+1
 
+const TEXT_MEASURE = -1
+
 const CMD_TEXT = cmd('text')
-ui.text = function(id, s, align, valign, fr) {
+ui.text = function(id, s, align, valign, fr, min_w, min_h) {
 	// NOTE: min_w and min_h are measured, not given.
-	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? '[', valign ?? 'c', 0, 0,
+	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? '[', valign ?? 'c',
+			min_w ?? TEXT_MEASURE,
+			min_h ?? TEXT_MEASURE,
 		0, // ascent
 		id,
 		s,
@@ -902,8 +940,8 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let m = cx.measureText(s)
 		let asc = m.fontBoundingBoxAscent
 		let dsc = m.fontBoundingBoxDescent
-		a[i+2] = ceil(m.width) + paddings(a, i, 0)
-		a[i+3] = ceil(asc+dsc) + paddings(a, i, 1)
+		if (a[i+2] == TEXT_MEASURE) a[i+2] = ceil(m.width) + paddings(a, i, 0)
+		if (a[i+3] == TEXT_MEASURE) a[i+3] = ceil(asc+dsc) + paddings(a, i, 1)
 		a[i+TEXT_ASC] = round(asc)
 	}
 	let w = a[i+2+axis]
@@ -922,7 +960,7 @@ measure[CMD_POPUP    ] = ct_stack_push
 
 measure[CMD_END] = function(a, _, axis) {
 	let i = assert(ct_stack.pop(), 'end command outside a container')
-	let p = max(0, paddings(a, i, axis))
+	let p = paddings(a, i, axis)
 	let cmd = a[i-1]
 	if (cmd == CMD_SCROLLBOX) {
 		let co_min_w = a[i+2+axis] // content min_w
@@ -1217,10 +1255,10 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 				continue
 
 			// wheel scrolling
-			if (axis && wheel_dy) {
-				let sy0 = id_state(id).get('scroll_y') ?? 0
+			if (axis && wheel_dy && ui.hit(id)) {
+				let sy0 = ui.state(id).get('scroll_y') ?? 0
 				sy = clamp(sy - wheel_dy, 0, ch - h)
-				id_state(id).set('scroll_y', sy)
+				ui.state(id).set('scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
 
@@ -1232,13 +1270,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 					let psx0 = cs.get('ps0')
 					let dpsx = (mx - mx0) / (w - tw)
 					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
-					id_state(id).set('scroll_x', sx)
+					ui.state(id).set('scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
 					let psy0 = cs.get('ps0')
 					let dpsy = (my - my0) / (h - th)
 					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
-					id_state(id).set('scroll_y', sy)
+					ui.state(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
 				break
@@ -1325,52 +1363,58 @@ translate[CMD_POPUP] = function(a, i, dx, dy, ct_i) {
 		ty2 = bh - d
 	}
 
+	tx1 += a[i+PX1+0] + a[i+MX1+0]
+	ty1 += a[i+PX1+1] + a[i+MX1+1]
+	tx2 -= a[i+PX2+0] + a[i+MX2+0]
+	ty2 -= a[i+PX2+1] + a[i+MX2+1]
+
 	position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
 
-	// if popup doesn't fit the screen, first try to change its side
-	// or alignment and relayout, and if that doesn't work, its offset.
+	if (!fixed) {
 
-	let out_x1 = x < d
-	let out_y1 = y < d
-	let out_x2 = x + w > (bw - d)
-	let out_y2 = y + h > (bh - d)
+		// if popup doesn't fit the screen, first try to change its side
+		// or alignment and relayout, and if that doesn't work, its offset.
 
-	let re
-	if (side == POPUP_SIDE_BOTTOM && out_y2) {
-		re = 1; side = POPUP_SIDE_TOP
-	} else if (side == POPUP_SIDE_TOP && out_y1) {
-		re = 1; side = POPUP_SIDE_BOTTOM
-	} else if (side == POPUP_SIDE_RIGHT && out_x2) {
-		re = 1; side = POPUP_SIDE_LEFT
-	} else if (side == POPUP_SIDE_TOP && out_x1) {
-		re = 1; side = POPUP_SIDE_BOTTOM
+		let out_x1 = x < d
+		let out_y1 = y < d
+		let out_x2 = x + w > (bw - d)
+		let out_y2 = y + h > (bh - d)
+
+		let re
+		if (side == POPUP_SIDE_BOTTOM && out_y2) {
+			re = 1; side = POPUP_SIDE_TOP
+		} else if (side == POPUP_SIDE_TOP && out_y1) {
+			re = 1; side = POPUP_SIDE_BOTTOM
+		} else if (side == POPUP_SIDE_RIGHT && out_x2) {
+			re = 1; side = POPUP_SIDE_LEFT
+		} else if (side == POPUP_SIDE_TOP && out_x1) {
+			re = 1; side = POPUP_SIDE_BOTTOM
+		}
+
+		let vert =
+				side == POPUP_SIDE_BOTTOM
+			|| side == POPUP_SIDE_TOP
+			|| side == POPUP_SIDE_INNER_BOTTOM
+			|| side == POPUP_SIDE_INNER_TOP
+
+		if (align == POPUP_ALIGN_END && ((vert && out_x2) || (!vert && out_y2))) {
+			re = 1; align = POPUP_ALIGN_START
+		} else if (align == POPUP_ALIGN_START && ((vert && out_x1) || (!vert && out_y1))) {
+			re = 1; align = POPUP_ALIGN_END
+		}
+
+		if (re)
+			position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
+
 	}
-
-	let vert =
-			side == POPUP_SIDE_BOTTOM
-		|| side == POPUP_SIDE_TOP
-		|| side == POPUP_SIDE_INNER_BOTTOM
-		|| side == POPUP_SIDE_INNER_TOP
-
-	if (align == POPUP_ALIGN_END && ((vert && out_x2) || (!vert && out_y2))) {
-		re = 1; align = POPUP_ALIGN_START
-	} else if (align == POPUP_ALIGN_START && ((vert && out_x1) || (!vert && out_y1))) {
-		re = 1; align = POPUP_ALIGN_END
-	}
-
-	if (re)
-		position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
 
 	// if nothing else works, adjust the offset to fit the screen.
 	let ox2 = max(0, x + w - (bw - d))
-	let ox1 = min(0, x)
+	let ox1 = min(0, x - d)
 	let oy2 = max(0, y + h - (bh - d))
-	let oy1 = min(0, y)
+	let oy1 = min(0, y - d)
 	x -= ox1 ? ox1 : ox2
 	y -= oy1 ? oy1 : oy2
-
-	x += a[i+PX1+0] + a[i+MX1+0]
-	y += a[i+PX1+1] + a[i+MX1+1]
 
 	a[i+0] = x
 	a[i+1] = y
@@ -1628,7 +1672,7 @@ let hit_set = set() // {id}
 let hit_state_map_freelist = map_freelist()
 let hit_state_maps = map() // {id->map}
 
-function set_hit_id(id) {
+function hit_set_id(id) {
 	if (id)
 		hit_set.add(id)
 }
@@ -1671,7 +1715,7 @@ hit[CMD_TEXT] = function(a, i) {
 	let w = a[i+2]
 	let h = a[i+3]
 	if (hit_rect(x, y, w, h)) {
-		set_hit_id(a[i+TEXT_ID])
+		hit_set_id(a[i+TEXT_ID])
 		hit_template(a, i, x, y, w, h)
 		return true
 	}
@@ -1713,7 +1757,7 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 	if (!hit_rect(x, y, w, h))
 		return
 
-	set_hit_id(id)
+	hit_set_id(id)
 
 	hit_template(a, i, x, y, w, h)
 
@@ -1724,7 +1768,7 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 			continue
 		if (!hit_rect(tx, ty, tw, th))
 			continue
-		set_hit_id(id+'.scrollbar'+axis)
+		hit_set_id(id+'.scrollbar'+axis)
 		return true
 	}
 
@@ -1759,11 +1803,11 @@ hit[CMD_V] = hit_flex
 
 hit[CMD_STACK] = function(a, i) {
 	if (hit_children(a, i)) {
-		set_hit_id(a[i+STACK_ID])
+		hit_set_id(a[i+STACK_ID])
 		return true
 	}
 	if (hit_box(a, i)) {
-		set_hit_id(a[i+STACK_ID])
+		hit_set_id(a[i+STACK_ID])
 		let x = a[i+0]
 		let y = a[i+1]
 		let w = a[i+2]
@@ -1782,7 +1826,7 @@ hit[CMD_BB] = function(a, i) {
 	let w = a[ct_i+2] + px1 + px2
 	let h = a[ct_i+3] + py1 + py2
 	if (hit_rect(x, y, w, h)) {
-		set_hit_id(a[i+BB_ID])
+		hit_set_id(a[i+BB_ID])
 		hit_template(a, i, x, y, w, h)
 		return true
 	}
@@ -1845,12 +1889,49 @@ reset_all()
 // template widget -----------------------------------------------------------
 
 let targs = {}
+let tprops = {}
 
 targs.text  = function(t) { return [t.id, t.s, t.align, t.valign, t.fr] }
 targs.h     = function(t) { return [t.fr, t.gap, t.align, t.valign, t.min_w, t.min_h] }
 targs.v     = targs.h
 targs.stack = function(t) { return [t.id, t.fr, t.align, t.valign, t.min_w, t.min_h] }
 targs.bb    = function(t) { return [t.id, t.bg_color, t.sides, t.border_color, t.border_radius] }
+
+tprops.text = {
+	id     : {type: 'id'  , },
+	s      : {type: 'text', },
+	align  : {type: 'enum', enum_values: 's c l r'},
+	valign : {type: 'enum', enum_values: 's c t b'},
+	fr     : {type: 'fr'  , },
+}
+
+tprops.h = {
+	fr     : {type: 'fr'  , },
+	gap    : {type: 'size', },
+	align  : {type: 'enum', enum_values: 's c l r'},
+	valign : {type: 'enum', enum_values: 's c t b'},
+	min_w  : {type: 'size'},
+	min_h  : {type: 'size'},
+}
+tprops.v = tprops.h
+
+tprops.stack = {
+	id     : {type: 'id'  , },
+	fr     : {type: 'fr'  , },
+	align  : {type: 'enum', enum_values: 's c l r'},
+	valign : {type: 'enum', enum_values: 's c t b'},
+	min_w  : {type: 'size', },
+	min_h  : {type: 'size', },
+}
+
+tprops.bb = {
+	id            : {type: 'id'   , },
+	bg_color      : {type: 'color', },
+	sides         : {type: 'enum' , enum_values: 't r b l tb rl tr rb lt bl -l -b -r -t'},
+	bg_color      : {type: 'color', },
+	border_color  : {type: 'color', },
+	border_radius : {type: 'size' , },
+}
 
 let template_hit
 let template_hit_i0
@@ -1935,7 +2016,7 @@ ui.template = function(id, t, ...stack_args) {
 	let i1 = a.length+2 // index of next cmd's arg#1
 	ui_cmd_box(CMD_TEMPLATE_OVERLAY, 1, 's', 's', 0, 0, id+'.overlay', t, i0, i1)
 	if (template_selected_ch_t) {
-		template_editor(id, template_selected_t)
+		template_editor(id, template_selected_t, template_selected_ch_t)
 		template_drag_point(id, 'l', 't')
 		template_drag_point(id, 'l', 'c')
 		template_drag_point(id, 'l', 'b')
@@ -1997,9 +2078,10 @@ function draw_node(t, depth) {
 		for (let ct of t.e)
 			draw_node(ct, depth+1)
 }
-function template_editor(id, t) {
-	ui.begin_toolbox(id, 'Tree')
-		ui.scrollbox(id+'.sb', 1, null, null, null, null, 200, 100)
+function template_editor(id, t, ch_t) {
+
+	ui.begin_toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
+		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 200, 100)
 			ui.bb('', '#ccc')
 			ui.p(10)
 			ui.v(1, 10, 's', 't')
@@ -2008,6 +2090,34 @@ function template_editor(id, t) {
 			ui.end_v()
 		ui.end_scrollbox()
 	ui.end_toolbox(id)
+
+	ui.begin_toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
+		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 200, 100)
+			ui.v()
+			ui.bb('', '#333')
+			let defs = tprops[ch_t.t]
+			for (let k in defs) {
+				let def = defs[k]
+				let v = ch_t[k]
+				ui.h()
+					ui.bb('', null, 'b', '#666')
+					let vs = v ? str(v) : ''
+					ui.p(8, 8, 4)
+					ui.text('', k , 'l', null, 1, 0)
+					ui.m(0, 0, 0, 1)
+					ui.p(8, 8, 4)
+					ui.stack()
+						if (def.type == 'color') {
+							ui.bb('', v, 'l', '#888')
+							// ui.text('', vs, null, null, 1)
+						}
+					ui.end_stack()
+				ui.end_h()
+			}
+			ui.end_v()
+		ui.end_scrollbox()
+	ui.end_toolbox(id)
+
 }
 
 // drag point widget ---------------------------------------------------------
@@ -2035,35 +2145,65 @@ ui.widget('drag_point', {
 		let y  = a[i+1]
 		let id = a[i+3]
 		if (hit_rect(x-r, y-r, 2*r, 2*r)) {
-			hit_set.add(id)
+			hit_set_id(id)
 			return true
 		}
 	},
 })
 
+// drag & drop ---------------------------------------------------------------
+
+{
+let out = [0, 0]
+ui.drag = function(id, move, dx0, dy0) {
+	let move_x = !move || move == 'x' || move == 'xy'
+	let move_y = !move || move == 'y' || move == 'xy'
+	let dx = dx0 ?? 0
+	let dy = dy0 ?? 0
+	let cs = ui.captured(id)
+	let state
+	if (cs) {
+		if (move_x) { dx = cs.get('drag_x0') + (mx - mx0) }
+		if (move_y) { dy = cs.get('drag_y0') + (my - my0) }
+		state = clickup ? 'drop' : 'dragging'
+	} else if (ui.hit(id)) {
+		if (click) {
+			let cs = ui.capture(id)
+			if (move_x) cs.set('drag_x0', dx)
+			if (move_y) cs.set('drag_y0', dy)
+			state = 'drag'
+		} else
+			state = 'hover'
+	}
+	out[0] = state
+	out[1] = dx
+	out[2] = dy
+	return out
+}
+}
+
 // toolbox widget ------------------------------------------------------------
 
-ui.begin_toolbox = function(id, title) {
+ui.begin_toolbox = function(id, title, align, x0, y0) {
 
-	let tid = id+'.title'
-	let x = id_state(id).get('x') ?? 0
-	let y = id_state(id).get('y') ?? 0
-	let cs = ui.captured(tid)
-	if (cs) {
-		x = cs.get('x0') + (mx - mx0)
-		y = cs.get('y0') + (my - my0)
-		id_state(id).set('x', x)
-		id_state(id).set('y', y)
-	} else if (ui.hit(tid)) {
-		if (click) {
-			let cs = ui.capture(tid)
-			cs.set('x0', x)
-			cs.set('y0', y)
-		}
+	let align_start = parse_align(align || '[') == ALIGN_START
+	let [dstate, dx, dy] = ui.drag(id+'.title')
+	let s = ui.state(id)
+	let mx1 =  align_start ? (s.get('mx1') ?? x0) + dx : 0
+	let mx2 = !align_start ? (s.get('mx2') ?? x0) - dx : 0
+	let my1 = (s.get('my1') ?? y0) + dy
+	let my2 = (s.get('my2') ?? y0) - dy
+	let min_w = s.get('min_w')
+	let min_h = s.get('min_h')
+	if (dstate == 'drop') {
+		s.set('mx1', mx1)
+		s.set('mx2', mx2)
+		s.set('my1', my1)
+		s.set('my2', my2)
 	}
 
-	ui.m(x, 0, y, 0)
-	ui.popup(id+'.popup', layer_popup, 'it', '[', null, null, true)
+	ui.m(mx1, mx2, my1, my2)
+	ui.popup(id+'.popup', layer_popup, 'it', align, min_w, min_h, true)
 		ui.p(1)
 		ui.bb('', null, 1, 'red')
 		ui.stack()
@@ -2077,8 +2217,7 @@ ui.begin_toolbox = function(id, title) {
 
 ui.end_toolbox = function(id) {
 			ui.end_v()
-			let rid = id+'.resizer'
-			ui.resizer(rid)
+			ui.resizer(id)
 		ui.end_stack()
 	ui.end_popup()
 }
@@ -2096,7 +2235,7 @@ let hit = function(x0, y0, d1, d2, x, y, w, h) {
 	return x0 >= x && x0 <= x + w && y0 >= y && y0 <= y + h
 }
 
-function hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h) {
+function hit_sides(x0, y0, d1, d2, x, y, w, h) {
 	if (hit(x0, y0, d1, d2, x, y, 0, 0))
 		return 'top_left'
 	else if (hit(x0, y0, d1, d2, x + w, y, 0, 0))
@@ -2115,24 +2254,22 @@ function hit_test_rect_sides(x0, y0, d1, d2, x, y, w, h) {
 		return 'right'
 }
 
-function hit_test_sides(x, y, w, h) {
-	return hit_test_rect_sides(mx, my, 5, 5, x, y, w, h)
-}
-
 let cursors = {
-	top          : 'ns-resize',
 	bottom       : 'ns-resize',
-	left         : 'ew-resize',
 	right        : 'ew-resize',
-	top_left     : 'nwse-resize',
 	bottom_right : 'nwse-resize',
-	top_right    : 'nesw-resize',
-	bottom_left  : 'nesw-resize',
+	// TODO:
+	//top          : 'ns-resize',
+	//left         : 'ew-resize',
+	//top_left     : 'nwse-resize',
+	//top_right    : 'nesw-resize',
+	//bottom_left  : 'nesw-resize',
 }
 
 ui.widget('resizer', {
-	create: function(cmd, id) {
-		return ui_cmd_box(cmd, 1, 's', 's', 0, 0, id)
+	create: function(cmd, ct_id, id) {
+		id = id || ct_id+'.resizer'
+		return ui_cmd_box(cmd, 1, 's', 's', 0, 0, id, ct_id)
 	},
 	position: function(a, i, axis, x, w) {
 		a[i+0+axis] = x
@@ -2143,22 +2280,232 @@ ui.widget('resizer', {
 		a[i+1] += dy
 	},
 	hit: function(a, i) {
+
 		let x = a[i+0]
 		let y = a[i+1]
 		let w = a[i+2]
 		let h = a[i+3]
-		let side = hit_test_rect_sides(mx, my, 5, 5, x, y, w, h)
-		if (side && !captured_id) {
-			let id = a[i+S-1]
-			hit_set.add(id)
+
+		let id    = a[i+S-1]
+		let ct_id = a[i+S+0]
+
+		let borders = 2
+
+		let side = hit_sides(mx, my, 5, 5, x, y, w, h)
+		if (side) {
+			hit_set_id(id)
+			let rs = ui.hovers(id)
+			rs.set('side', side)
+			rs.set('measured_x', x)
+			rs.set('measured_y', y)
+			rs.set('measured_w', w + borders)
+			rs.set('measured_h', h + borders)
+		}
+
+		let [dstate, dx, dy] = ui.drag(id)
+		let hs = ui.hovers(id)
+		let cs = ui.captured(id)
+		set_cursor()
+		if (dstate == 'hover') {
+			let side = hs.get('side')
 			set_cursor(cursors[side])
 			return true
-		} else {
-			set_cursor()
 		}
+		if (dstate == 'drag') {
+			let side = hs.get('side')
+			set_cursor(cursors[side])
+			cs.set('side', side)
+			if (side == 'right' || side == 'bottom_right') {
+				let min_w = hs.get('measured_w')
+				cs.set('min_w', min_w)
+			}
+			if (side == 'bottom' || side == 'bottom_right') {
+				let min_h = hs.get('measured_h')
+				cs.set('min_h', min_h)
+			}
+		}
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+			let side = cs.get('side')
+			set_cursor(cursors[side])
+			if (side == 'right' || side == 'bottom_right') {
+				let min_w = cs.get('min_w')
+				ui.state(ct_id).set('min_w', min_w + dx)
+			}
+			if (side == 'bottom' || side == 'bottom_right') {
+				let min_h = cs.get('min_h')
+				ui.state(ct_id).set('min_h', min_h + dy)
+			}
+		}
+
 	},
 })
 
+}
+
+// color picker --------------------------------------------------------------
+
+// hsl is in (0..360, 0..1, 0..1)
+function h2rgb(m1, m2, h) {
+	if (h<0) h = h+1
+	if (h>1) h = h-1
+	if (h*6<1)
+		return m1+(m2-m1)*h*6
+	else if (h*2<1)
+		return m2
+	else if (h*3<2)
+		return m1+(m2-m1)*(2/3-h)*6
+	else
+		return m1
+}
+function hsl_to_rgb(d, i, h, s, L) {
+	h = h / 360
+	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
+	let m1 = L*2-m2
+	d[i+0] = 255 * h2rgb(m1, m2, h+1/3)
+	d[i+1] = 255 * h2rgb(m1, m2, h)
+	d[i+2] = 255 * h2rgb(m1, m2, h-1/3)
+	d[i+3] = 255
+}
+
+function get_idata(s, key, w, h) {
+	let idata = s.get(key)
+	if (!idata
+		|| s.get(key+'.w') != w
+		|| s.get(key+'.h') != h
+	) {
+		idata = cx.createImageData(w, h)
+		s.set(key, idata)
+		s.set(key+'.w', w)
+		s.set(key+'.h', h)
+	}
+	return idata
+}
+
+function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum) {
+
+		let idata = get_idata(s, 'hsl_square', w, h)
+
+		if (idata.hue != hue) {
+			let d = idata.data
+			let w = idata.width
+			let h = idata.height
+			for (let y = 0; y < h; y++) {
+				for (let x = 0; x < w; x++) {
+					let sat = lerp(x, 0, w-1, 0, 1)
+					let lum = lerp(y, 0, h-1, 1, 0)
+					hsl_to_rgb(d, (y * w + x) * 4, hue, sat, lum)
+				}
+			}
+			idata.hue = hue
+		}
+
+		cx.putImageData(idata, x, y)
+
+		if (hit_sat != null) {
+			cx.strokeStyle = '#000'
+			cx.lineWidth = 1
+			cx.beginPath()
+			let hit_x = lerp(hit_sat, 0, 1, 0, w-1)
+			let hit_y = lerp(hit_lum, 0, 1, 0, h-1)
+			cx.arc(x + hit_x, y + hit_y, 10, 0, 2 * PI)
+			cx.stroke()
+		}
+
+}
+
+function draw_hue_bar(s, x, y, w, h, hit_hue) {
+
+		let idata = get_idata(s, 'hue_bar', w, h)
+
+		if (!idata.ready) {
+			let d = idata.data
+			let w = idata.width
+			let h = idata.height
+			for (let y = 0; y < h; y++) {
+				for (let x = 0; x < w; x++) {
+					let hue = lerp(y, 0, h-1, 0, 360)
+					hsl_to_rgb(d, (y * w + x) * 4, hue, 1, .5)
+				}
+			}
+			idata.ready = true
+		}
+
+		cx.putImageData(idata, x, y)
+
+		if (hit_hue != null) {
+			cx.strokeStyle = '#000'
+			cx.lineWidth = 1
+			cx.beginPath()
+			let hit_hue_y = lerp(hit_hue, 0, 360, 0, h-1)
+			cx.moveTo(x    , y + hit_hue_y - 1 + .5)
+			cx.lineTo(x + w, y + hit_hue_y - 1 + .5)
+			cx.stroke()
+		}
+
+}
+
+{
+let w = 256
+let h = 256
+ui.box_widget('color_picker', {
+
+	create: function(cmd, id) {
+		return ui_cmd_box(cmd, 1, 'c', 'c', 200, 200, id)
+	},
+
+	draw: function(a, i) {
+
+		let x = a[i+0]
+		let y = a[i+1]
+		let sw = a[i+2]
+		let sh = a[i+3]
+		let id = a[i+S-1]
+		let s = ui.state(id)
+
+		let hs = ui.hovers(id)
+		let hit = hs && hs.get('hit')
+		let hue = hit == 'hue_bar'    ? hs.get('hue') : s.get('hue')
+		let sat = hit == 'hsl_square' ? hs.get('sat') : s.get('sat')
+		let lum = hit == 'hsl_square' ? hs.get('lum') : s.get('lum')
+
+		if (click)
+			if (hue != null)
+				s.set('hue', hue)
+			else if (lum != null) {
+				s.set('sat', sat)
+				s.set('lum', lum)
+			}
+
+		draw_hsl_square(s, x, y, w, h, hue, sat, lum)
+		draw_hue_bar(s, x+w+10, y, 20, h, hue)
+
+	},
+
+	hit: function(a, i) {
+		let id = a[i+S-1]
+		let x = a[i+0]
+		let y = a[i+1]
+
+		if (hit_rect(x, y, w, h)) {
+			hit_set_id(id)
+			let hs = ui.hovers(id)
+			hs.set('hit', 'hsl_square')
+			hs.set('sat', lerp(mx - x, 0, w-1, 0, 1))
+			hs.set('lum', lerp(my - y, 0, h-1, 0, 1))
+			return true
+		}
+
+		if (hit_rect(x+w+10, y, 20, w)) {
+			hit_set_id(id)
+			let hs = ui.hovers(id)
+			hs.set('hit', 'hue_bar')
+			hs.set('hue', lerp(my-y, 0, h-1, 0, 360))
+			return true
+		}
+
+	},
+
+})
 }
 
 // testbed -------------------------------------------------------------------
@@ -2209,10 +2556,16 @@ function make_frame() {
 		ui.end_stack()
 		ui.m(10)
 		ui.p(10)
+		ui.stack()
+			ui.bb('', 'blue')
+			ui.color_picker('cp1')
+		ui.end_stack()
+		if (0) {
 		ui.stack('', 1, 'c', 'c')
 			ui.bb('', null, 'blt', 'red', 10)
 			ui.text('t4', 'Hello Again!', 'c', 'c', 1)
 		ui.end_stack()
+		}
 		ui.template('tpl1', test_template)
 		// ui.text('t3', '...and again.', 'c', 'c', 1)
 	ui.end_h()
