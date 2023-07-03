@@ -518,9 +518,9 @@ ui.box_widget = function(cmd_name, t) {
 			let w  = a[i+2+axis]
 			add_ct_min_wh(a, axis, w, fr)
 		},
-		position: function(a, i, axis, x, w) {
-			a[i+0+axis] = x
-			a[i+2+axis] = w
+		position: function(a, i, axis, sx, sw) {
+			a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+			a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
 		},
 		translate: function(a, i, dx, dy) {
 			a[i+0] += dx
@@ -532,7 +532,7 @@ ui.box_widget = function(cmd_name, t) {
 let color, font, font_size
 
 function reset_all() {
-	color = null
+	color = 'white'
 	font = null
 	font_size = null
 	reset_paddings()
@@ -558,6 +558,7 @@ function check_stacks() {
 			pr('layer', layer.name, 'not closed')
 		assert(false)
 	}
+	assert(!color_stack.length, 'color not closed')
 }
 
 const PX1        =  4
@@ -617,6 +618,10 @@ ui.padding = function(_px1, _px2, _py1, _py2) {
 	py2 = _py2 ?? _py1 ?? _px1 ?? 0
 }
 ui.p = ui.padding
+ui.padding_left   = function(p) { px1 = p }; ui.pl = ui.padding_left
+ui.padding_right  = function(p) { px2 = p }; ui.pr = ui.padding_right
+ui.padding_top    = function(p) { py1 = p }; ui.pt = ui.padding_top
+ui.padding_bottom = function(p) { py2 = p }; ui.pb = ui.padding_bottom
 
 ui.margin = function(_mx1, _mx2, _my1, _my2) {
 	mx1 = _mx1 ?? 0
@@ -625,6 +630,10 @@ ui.margin = function(_mx1, _mx2, _my1, _my2) {
 	my2 = _my2 ?? _my1 ?? _mx1 ?? 0
 }
 ui.m = ui.margin
+ui.margin_left   = function(m) { mx1 = m }; ui.ml = ui.margin_left
+ui.margin_right  = function(m) { mx2 = m }; ui.mr = ui.margin_right
+ui.margin_top    = function(m) { my1 = m }; ui.mt = ui.margin_top
+ui.margin_bottom = function(m) { my2 = m }; ui.mb = ui.margin_bottom
 
 function reset_paddings() {
 	px1 = 0
@@ -769,7 +778,6 @@ const POPUP_ALIGN     = S+3
 const POPUP_FIXED     = S+4
 const POPUP_FONT      = S+5
 const POPUP_FONT_SIZE = S+6
-const POPUP_COLOR     = S+7
 
 const CMD_POPUP = cmd_ct('popup')
 ui.popup = function(id, layer1, side, align, min_w, min_h, fixed) {
@@ -784,9 +792,9 @@ ui.popup = function(id, layer1, side, align, min_w, min_h, fixed) {
 		// inherited state
 		font,
 		font_size,
-		color,
 	)
 	push_layer(layer1, i)
+	ui.begin_color(color)
 }
 
 const CMD_END = cmd('end')
@@ -797,8 +805,10 @@ ui.end = function(cmd) {
 	let end_i = ui_cmd(CMD_END, i)
 	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
 
-	if (a[i-1] == CMD_POPUP)
+	if (a[i-1] == CMD_POPUP) {
 		pop_layer()
+		ui.end_color()
+	}
 }
 ui.end_h         = function() { ui.end(CMD_H) }
 ui.end_v         = function() { ui.end(CMD_V) }
@@ -815,7 +825,7 @@ const BORDER_SIDE_ALL = 15
 function parse_border_sides(s) {
 	if (!s) // 0, null, undefined
 		return 0
-	if (s == true) // true, 1
+	if (s == true || s == 'all') // true, 1, 'all'
 		return BORDER_SIDE_ALL
 	let b = (
 		(s.includes('l') ? BORDER_SIDE_L : 0) +
@@ -859,9 +869,17 @@ ui.text = function(id, s, align, valign, fr, min_w, min_h) {
 	)
 }
 
+let color_stack = []
+
 const CMD_COLOR = cmd('color')
-ui.color = function(s) {
-	if (color == s) return
+ui.begin_color = function(s) {
+	color_stack.push(color)
+	ui_cmd(CMD_COLOR, s)
+	color = s
+}
+
+ui.end_color = function() {
+	let s = color_stack.pop()
 	ui_cmd(CMD_COLOR, s)
 	color = s
 }
@@ -911,7 +929,10 @@ function is_main_axis(cmd, axis) {
 }
 
 function paddings(a, i, axis) {
-	return a[i+MX1+axis] + a[i+MX2+axis] + a[i+PX1+axis] + a[i+PX2+axis]
+	return (
+		a[i+MX1+axis] + a[i+MX2+axis] +
+		a[i+PX1+axis] + a[i+PX2+axis]
+	)
 }
 
 function add_ct_min_wh(a, axis, w, fr) {
@@ -940,10 +961,13 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let m = cx.measureText(s)
 		let asc = m.fontBoundingBoxAscent
 		let dsc = m.fontBoundingBoxDescent
-		if (a[i+2] == TEXT_MEASURE) a[i+2] = ceil(m.width) + paddings(a, i, 0)
-		if (a[i+3] == TEXT_MEASURE) a[i+3] = ceil(asc+dsc) + paddings(a, i, 1)
-		a[i+TEXT_ASC] = round(asc)
+		let m_x = a[i+2] == TEXT_MEASURE
+		let m_y = a[i+3] == TEXT_MEASURE
+		if (m_x) a[i+2] = ceil(m.width)
+		if (m_y) a[i+3] = ceil(asc+dsc)
+		a[i+TEXT_ASC] = (m_x && m_y ? 1 : -1) * round(asc)
 	}
+	a[i+2+axis] += paddings(a, i, axis)
 	let w = a[i+2+axis]
 	add_ct_min_wh(a, axis, w, fr)
 }
@@ -1005,22 +1029,42 @@ function measure_all(axis) {
 // of all boxes by walking the container tree top-down, and using different
 // positioning algorithms based on container type (recursive).
 // the resulting boxes at a[i+0..3] exclude margins and paddings.
-// scrolling and popup positioning is done later.
+// scrolling and popup positioning is done at a later stage.
 
-position[CMD_TEXT] = function(a, i, axis, x, w) {
-	a[i+0+axis] = x
-	a[i+2+axis] = w
+function align_w(a, i, axis, sw) {
+	let align = a[i+ALIGN+axis]
+	if (align == ALIGN_STRETCH)
+		return sw
+	return a[i+2+axis] // min_w
 }
 
-function position_box(position_f, a, i, axis, ct_x, ct_w) {
+function align_x(a, i, axis, sx, sw) {
+	let align = a[i+ALIGN+axis]
+	if (align == ALIGN_END) {
+		let min_w = a[i+2+axis]
+		return sx + sw - min_w
+	} else if (align == ALIGN_CENTER) {
+		let min_w = a[i+2+axis]
+		return sx + round((sw - min_w) / 2)
+	} else {
+		return sx
+	}
+}
 
-	// outer-box (ct_x, ct_w) -> inner-box (x, w).
-	let mpl = a[i+MX1+axis] + a[i+PX1+axis]
-	let mpr = a[i+MX2+axis] + a[i+PX2+axis]
-	let x = ct_x + mpl
-	let w = ct_w - (mpl + mpr)
+// outer-box (ct_x, ct_w) -> inner-box (x, w).
+function inner_x(a, i, axis, ct_x) {
+	return ct_x + a[i+MX1+axis] + a[i+PX1+axis]
+}
+function inner_w(a, i, axis, ct_w) {
+	return ct_w - paddings(a, i, axis)
+}
 
-	position_f(a, i, axis, x, w)
+position[CMD_TEXT] = function(a, i, axis, sx, sw) {
+	a[i+2+axis] = sw // stretch min_w to sw
+	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	a[i+0+axis] = x
+	a[i+2+axis] = w
 }
 
 function position_children_cross_axis(a, i, axis, sx, sw) {
@@ -1030,23 +1074,9 @@ function position_children_cross_axis(a, i, axis, sx, sw) {
 
 		let cmd = a[i-1]
 		let position_f = position[cmd]
-
 		if (position_f) {
-
-			let min_w = a[i+2+axis]
-			let align = a[i+ALIGN+axis]
-
-			// stretch or align the item on the cross-axis.
-			let x = sx
-			let w = align == ALIGN_STRETCH ? sw : min_w
-			if (align == ALIGN_END)
-				x = sx + sw - w
-			else if (align == ALIGN_CENTER)
-				x = round(sx + (sw - w) / 2)
-
 			// position item's children recursively.
-			position_box(position_f, a, i, axis, x, w)
-
+			position_f(a, i, axis, sx, sw)
 		}
 
 		i = get_next_ext_i(a, i)
@@ -1054,6 +1084,9 @@ function position_children_cross_axis(a, i, axis, sx, sw) {
 }
 
 function position_flex(a, i, axis, sx, sw) {
+
+	sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	sw = inner_w(a, i, axis, align_w(a, i, axis, sw))
 
 	a[i+0+axis] = sx
 	a[i+2+axis] = sw
@@ -1115,7 +1148,6 @@ function position_flex(a, i, axis, sx, sw) {
 
 				let min_w = a[i+2+axis]
 				let fr    = a[i+FR]
-				let align = a[i+ALIGN+axis]
 
 				// compute item's stretched width.
 				let flex_w = total_w * fr / total_fr
@@ -1134,16 +1166,8 @@ function position_flex(a, i, axis, sx, sw) {
 				// TODO: check if this is the last element and if it is,
 				// set `sw = total_w - sx` so that it eats up all rounding errors.
 
-				// align the item inside the stretched segment defined by (sx, sw).
-				let x = sx
-				let w = align == ALIGN_STRETCH ? sw : min_w
-				if (align == ALIGN_END)
-					x = sx + sw - w
-				else if (align == ALIGN_CENTER)
-					x = round(sx + (sw - w) / 2)
-
 				// position item's children recursively.
-				position_box(position_f, a, i, axis, x, w)
+				position_f(a, i, axis, sx, sw)
 
 				sw += gap
 				sx += sw
@@ -1163,14 +1187,18 @@ function position_flex(a, i, axis, sx, sw) {
 position[CMD_H] = position_flex
 position[CMD_V] = position_flex
 
-position[CMD_STACK] = function(a, i, axis, x, w) {
+position[CMD_STACK] = function(a, i, axis, sx, sw) {
+	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 	position_children_cross_axis(a, i, axis, x, w)
 }
 
 // NOTE: scrolling is done later.
-position[CMD_SCROLLBOX] = function(a, i, axis, x, w) {
+position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
+	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 	let content_w = a[i+SB_CW+axis]
@@ -1179,8 +1207,7 @@ position[CMD_SCROLLBOX] = function(a, i, axis, x, w) {
 
 // NOTE: popup positioning is done later.
 position[CMD_POPUP] = function(a, i, axis) {
-	let min_w = a[i+2+axis]
-	let w = min_w - paddings(a, i, axis)
+	let w = inner_w(a, i, axis, a[i+2+axis])
 	a[i+2+axis] = w
 	position_children_cross_axis(a, i, axis, 0, w)
 }
@@ -1191,7 +1218,7 @@ function position_all(axis) {
 	let cmd = a[i-1]
 	let min_w = a[i+2+axis]
 	let position_f = position[cmd]
-	position_box(position_f, a, i, axis, 0, max(min_w, ct_w))
+	position_f(a, i, axis, 0, max(min_w, ct_w))
 }
 
 // translation phase ---------------------------------------------------------
@@ -1441,7 +1468,6 @@ draw[CMD_POPUP] = function(a, i) {
 
 	font      = a[i+POPUP_FONT]
 	font_size = a[i+POPUP_FONT_SIZE]
-	color     = a[i+POPUP_COLOR]
 
 	cx.font = font_size + 'px ' + font
 }
@@ -1453,9 +1479,22 @@ draw[CMD_TEXT] = function(a, i) {
 	let s   = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
 
+	if (asc < 0) { // clip
+		let w = a[i+2]
+		let h = a[i+3]
+		cx.save()
+		cx.beginPath()
+		cx.rect(x, y, w, h)
+		cx.clip()
+	}
+
 	cx.textAlign = 'left'
 	cx.fillStyle = color
-	cx.fillText(s, x, y+asc)
+	cx.fillText(s, x, y + abs(asc))
+
+	if (asc < 0) {
+		cx.restore()
+	}
 
 	draw_debug_box(a, i)
 }
@@ -1900,37 +1939,37 @@ targs.bb    = function(t) { return [t.id, t.bg_color, t.sides, t.border_color, t
 tprops.text = {
 	id     : {type: 'id'  , },
 	s      : {type: 'text', },
-	align  : {type: 'enum', enum_values: 's c l r'},
-	valign : {type: 'enum', enum_values: 's c t b'},
+	align  : {type: 'enum', enum_values: 's c l r', default: 'l'},
+	valign : {type: 'enum', enum_values: 's c t b', default: 'c'},
 	fr     : {type: 'fr'  , },
 }
 
 tprops.h = {
 	fr     : {type: 'fr'  , },
 	gap    : {type: 'size', },
-	align  : {type: 'enum', enum_values: 's c l r'},
-	valign : {type: 'enum', enum_values: 's c t b'},
-	min_w  : {type: 'size'},
-	min_h  : {type: 'size'},
+	align  : {type: 'enum', enum_values: 's c l r', default: 's'},
+	valign : {type: 'enum', enum_values: 's c t b', default: 's'},
+	min_w  : {type: 'size', default: 0},
+	min_h  : {type: 'size', default: 0},
 }
 tprops.v = tprops.h
 
 tprops.stack = {
 	id     : {type: 'id'  , },
 	fr     : {type: 'fr'  , },
-	align  : {type: 'enum', enum_values: 's c l r'},
-	valign : {type: 'enum', enum_values: 's c t b'},
-	min_w  : {type: 'size', },
-	min_h  : {type: 'size', },
+	align  : {type: 'enum', enum_values: 's c l r', default: 's'},
+	valign : {type: 'enum', enum_values: 's c t b', default: 's'},
+	min_w  : {type: 'size', default: 0},
+	min_h  : {type: 'size', default: 0},
 }
 
 tprops.bb = {
 	id            : {type: 'id'   , },
 	bg_color      : {type: 'color', },
-	sides         : {type: 'enum' , enum_values: 't r b l tb rl tr rb lt bl -l -b -r -t'},
+	sides         : {type: 'enum' , enum_values: 't r b l tb rl tr rb lt bl -l -b -r -t all', default: 'all'},
 	bg_color      : {type: 'color', },
 	border_color  : {type: 'color', },
-	border_radius : {type: 'size' , },
+	border_radius : {type: 'size' , default: 0},
 }
 
 let template_hit
@@ -2071,8 +2110,9 @@ function draw_node(t, depth) {
 		let hit = ui.hit(t)
 		if (hit && click)
 			template_select_node(t)
-		ui.color(hit ? '#fff' : '#ccc')
+		ui.begin_color(hit ? '#fff' : '#ccc')
 		ui.text(t, t.t, 'l', 'c', 1)
+		ui.end_color()
 	//ui.end()
 	if (t.e)
 		for (let ct of t.e)
@@ -2081,7 +2121,7 @@ function draw_node(t, depth) {
 function template_editor(id, t, ch_t) {
 
 	ui.begin_toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
-		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 200, 100)
+		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 200, 200)
 			ui.bb('', '#ccc')
 			ui.p(10)
 			ui.v(1, 10, 's', 't')
@@ -2089,11 +2129,12 @@ function template_editor(id, t, ch_t) {
 				draw_node(t, 0)
 			ui.end_v()
 		ui.end_scrollbox()
-	ui.end_toolbox(id)
+	ui.end_toolbox(id+'.tree_toolbox')
 
 	ui.begin_toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
-		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 200, 100)
-			ui.v()
+		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 200, 200)
+			ui.font_size(14)
+			ui.v(1, 0, 's', 't')
 			ui.bb('', '#333')
 			let defs = tprops[ch_t.t]
 			for (let k in defs) {
@@ -2101,22 +2142,27 @@ function template_editor(id, t, ch_t) {
 				let v = ch_t[k]
 				ui.h()
 					ui.bb('', null, 'b', '#666')
-					let vs = v ? str(v) : ''
-					ui.p(8, 8, 4)
-					ui.text('', k , 'l', null, 1, 0)
-					ui.m(0, 0, 0, 1)
-					ui.p(8, 8, 4)
+					let vs = v != null ? str(v) : (def.default ?? '')
+					ui.mb(1)
+					ui.p(8, 8, 5, 5)
+					ui.text('', k , 'l', null, 1, 20)
+					ui.mb(1)
+					ui.p(8, 8, 5, 5)
 					ui.stack()
+						ui.bb('', v, 'l', '#888')
 						if (def.type == 'color') {
 							ui.bb('', v, 'l', '#888')
-							// ui.text('', vs, null, null, 1)
+						} else {
+							ui.begin_color(v != null ? '#fff' : '#888')
+							ui.text('', vs, 'l', null, 1, 20)
+							ui.end_color()
 						}
 					ui.end_stack()
 				ui.end_h()
 			}
 			ui.end_v()
 		ui.end_scrollbox()
-	ui.end_toolbox(id)
+	ui.end_toolbox(id+'.prop_toolbox')
 
 }
 
@@ -2169,9 +2215,11 @@ ui.drag = function(id, move, dx0, dy0) {
 	} else if (ui.hit(id)) {
 		if (click) {
 			let cs = ui.capture(id)
-			if (move_x) cs.set('drag_x0', dx)
-			if (move_y) cs.set('drag_y0', dy)
-			state = 'drag'
+			if (cs) {
+				if (move_x) cs.set('drag_x0', dx)
+				if (move_y) cs.set('drag_y0', dy)
+				state = 'drag'
+			}
 		} else
 			state = 'hover'
 	}
@@ -2537,7 +2585,6 @@ let test_template = {
 
 function make_frame() {
 
-	ui.color('white')
 	ui.font('Arial')
 	ui.font_size(16)
 
