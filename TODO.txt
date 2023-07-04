@@ -1,0 +1,95 @@
+TODO
+
+- toolbox z-index
+- toolbox move by all sides, with all alignment combinations
+- bb on text
+- bb on scrollbox
+- negative margins
+
+LIBRARIZATION
+
+- phy layers: canvas, webgl, input
+
+------------------------------------------------------------------------------
+
+GOALS
+
+- drag & drop UI designer
+- reusable UI modules with controlled variations
+- IMGUI with popups and layouting
+- remote screen sharing with input routing
+
+IMGUI
+
+- drawing
+	* z-index
+	* text
+	* bg-color
+	* border
+	* box-shadow
+	- images (incl. svg?)
+- layouting
+	* min width & height
+	* flexbox fr stretch
+	* flexbox min-w/h grow
+	* flexbox align
+	* flexbox gap
+	* stack
+	* padding
+	* margin
+	* text min-w/h
+	* popup layouting
+	- word-wrapping
+	- grid fr stretch
+	- grid min-w/h grow
+	- grid align
+	- grid gap
+	- transition animations
+- mouse
+	* hit-test rect
+	* hit state
+	* hit parents
+	* capturing
+	* capture state
+	- drag & drop
+- keyboard
+	- focused widget
+	- event bubbling
+- text selection
+	- drag-select with mouse
+- text(area) input
+	- put it behind the canvas with correct width & height
+		- route keyboard events to it
+		- redraw it on canvas with offset and selection
+
+CHALLENGES
+
+- input on a canvas
+- textarea on a canvas
+- webgl2 canvas on a 2d canvas
+- word wrapping (our layout algo supports word-wrapping for horizontal text)
+- rich text on a canvas (inline box model)
+
+PROS vs WEB
+- stateless i.e. reactive / IMGUI (but with layouting and z-index and no frame lag)
+- simpler and far more productive layouting and styling models
+- global z-index, allowing for:
+	- relatively-positioned but painted-last popups
+	- painted-last focus ring
+- transition animations for in-layout objects, allowing for:
+	- animated element moving, drag/drop and selection under/overlays
+- streamable and replayable rendering, for sreen-sharing and remote interaction
+- super-fast and memory-efficient with very low gc pressure between frames.
+- complex widgets built with a combination of box-stacking and custom-drawing.
+
+CONS vs WEB
+- must reimplement:
+	- text selection & clipboard ops
+	- scrollbox
+	- word-wrapping
+	- inline layouting with:
+		- u, b, i, strike, sub, sup, h1..6, p, br, hr, float
+- no fancy typography:
+	- no smart word-wrapping (Thai, auto-hyphenation)
+	- no BiDi
+	- no smart underline (interrupted by letter descenders)
