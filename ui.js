@@ -549,7 +549,7 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		min_h ?? 0,
 		px1, py1, px2, py2,
 		mx1, my1, mx2, my2,
-		fr ?? 1,
+		max(0, fr ?? 1),
 		parse_align  (align  ?? 's'),
 		parse_valign (valign ?? 's'),
 		...args
@@ -763,18 +763,20 @@ ui.shadow = function(color, blur, x, y) {
 }
 
 const TEXT_ASC = S-1
-const TEXT_ID  = S+0
-const TEXT_S   = S+1
-
-const TEXT_MEASURE = -1
+const TEXT_X   = S+0
+const TEXT_W   = S+1
+const TEXT_ID  = S+2
+const TEXT_S   = S+3
 
 const CMD_TEXT = cmd('text')
-ui.text = function(id, s, align, valign, fr, min_w, min_h) {
+ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
 	// NOTE: min_w and min_h are measured, not given.
 	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? '[', valign ?? 'c',
-			min_w ?? TEXT_MEASURE,
-			min_h ?? TEXT_MEASURE,
+		min_w ?? -1, // -1=auto
+		min_h ?? -1, // -1=auto
 		0, // ascent
+		0, // text_x
+		max_min_w ?? -1, // -1=inf
 		id,
 		s,
 	)
@@ -872,15 +874,23 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let m = cx.measureText(s)
 		let asc = m.fontBoundingBoxAscent
 		let dsc = m.fontBoundingBoxDescent
-		let m_x = a[i+2] == TEXT_MEASURE
-		let m_y = a[i+3] == TEXT_MEASURE
-		if (m_x) a[i+2] = ceil(m.width)
-		if (m_y) a[i+3] = ceil(asc+dsc)
-		a[i+TEXT_ASC] = (m_x && m_y ? 1 : -1) * round(asc)
+		let text_w = ceil(m.width)
+		let text_h = ceil(asc+dsc)
+		let min_w = a[i+2]
+		let min_h = a[i+3]
+		let max_min_w = a[i+TEXT_W]
+		if (min_w == -1) min_w = text_w
+		if (min_h == -1) min_h = text_h
+		if (max_min_w != -1)
+			min_w = min(max_min_w, min_w)
+		a[i+2] = min_w
+		a[i+3] = min_h
+		a[i+TEXT_ASC] = round(asc)
+		a[i+TEXT_W] = text_w + paddings(a, i, 0)
 	}
 	a[i+2+axis] += paddings(a, i, axis)
-	let w = a[i+2+axis]
-	add_ct_min_wh(a, axis, w, fr)
+	let min_w = a[i+2+axis]
+	add_ct_min_wh(a, axis, min_w, fr)
 }
 
 function ct_stack_push(a, i) {
@@ -971,7 +981,12 @@ function inner_w(a, i, axis, ct_w) {
 }
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
-	a[i+2+axis] = sw // stretch min_w to sw
+	if (!axis) {
+		a[i+2] = a[i+TEXT_W] // we're positioning text_w, not min_w!
+		// store the segment we're clipping the text to, if we have to.
+		a[i+TEXT_X] = sx + a[i+MX1] + a[i+PX1]
+		a[i+TEXT_W] = sw - paddings(a, i, 0)
+	}
 	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
 	a[i+0+axis] = x
@@ -1008,6 +1023,9 @@ function position_flex(a, i, axis, sx, sw) {
 		let gap      = a[i+FLEX_GAP]
 		let total_fr = a[i+FLEX_TOTAL_FR]
 
+		if (!total_fr)
+			total_fr = 1
+
 		// compute total gap.
 		let gap_w = 0
 		if (gap) {
@@ -1035,7 +1053,7 @@ function position_flex(a, i, axis, sx, sw) {
 				let min_w = a[i+2+axis]
 				let fr    = a[i+FR]
 
-				let flex_w = total_w * max(0, fr) / total_fr
+				let flex_w = total_w * fr / total_fr
 				let overflow_w = max(0, min_w - flex_w)
 				let free_w = max(0, flex_w - min_w)
 				total_overflow_w += overflow_w
@@ -1139,6 +1157,7 @@ function position_all(axis) {
 translate[CMD_TEXT] = function(a, i, dx, dy) {
 	a[i+0] += dx
 	a[i+1] += dy
+	a[i+TEXT_X] += dx
 }
 
 function translate_children(a, i, dx, dy) {
@@ -1402,15 +1421,18 @@ draw[CMD_TEXT] = function(a, i) {
 
 	let x   = a[i+0]
 	let y   = a[i+1]
+	let w   = a[i+2]
 	let s   = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
+	let sx  = a[i+TEXT_X]
+	let sw  = a[i+TEXT_W]
+	let clip = w > sw
 
-	if (asc < 0) { // clip
-		let w = a[i+2]
+	if (clip) {
 		let h = a[i+3]
 		cx.save()
 		cx.beginPath()
-		cx.rect(x, y, w, h)
+		cx.rect(sx, y, sw, h)
 		cx.clip()
 	}
 
@@ -1418,9 +1440,8 @@ draw[CMD_TEXT] = function(a, i) {
 	cx.fillStyle = color
 	cx.fillText(s, x, y + abs(asc))
 
-	if (asc < 0) {
+	if (clip)
 		cx.restore()
-	}
 
 	draw_debug_box(a, i)
 }
@@ -1967,11 +1988,8 @@ function template_add(t) {
 		ui.end()
 }
 
-function template_drag_point(id, ch_t, ch_i, ha, va) {
-	let ct_i = ch_i
-	if (a[ct_i-1] == CMD_BB)
-		ct_i = a[ct_i+BB_CT_I]
-	ui.popup('', layer_handle, ct_i, ha, va)
+function template_drag_point(id, ch_t, ct_i, ha, va) {
+	ui.popup('', layer_popup, ct_i, ha, va)
 		ui.drag_point(id+'.'+ha+va, 0, 0, 'red')
 	ui.end_popup()
 }
@@ -1984,14 +2002,17 @@ ui.template = function(id, t, ...stack_args) {
 	ui.template_overlay(id, t, i0, i1)
 	let ch_t = selected_template_node_t
 	let ch_i = selected_template_node_i
+	let ct_i = ch_i
+	if (a[ct_i-1] == CMD_BB)
+		ct_i = a[ct_i+BB_CT_I]
 	if (t == selected_template_root_t) {
+		template_drag_point(id, ch_t, ct_i, 'l', '[')
+		template_drag_point(id, ch_t, ct_i, 'l', 'c')
+		template_drag_point(id, ch_t, ct_i, 'l', ']')
+		template_drag_point(id, ch_t, ct_i, 'r', '[')
+		template_drag_point(id, ch_t, ct_i, 'r', 'c')
+		template_drag_point(id, ch_t, ct_i, 'r', ']')
 		template_editor(id, t, ch_t)
-		template_drag_point(id, ch_t, ch_i, 'l', '[')
-		template_drag_point(id, ch_t, ch_i, 'l', 'c')
-		template_drag_point(id, ch_t, ch_i, 'l', ']')
-		template_drag_point(id, ch_t, ch_i, 'r', '[')
-		template_drag_point(id, ch_t, ch_i, 'r', 'c')
-		template_drag_point(id, ch_t, ch_i, 'r', ']')
 	}
 	ui.end_stack()
 }
@@ -2042,16 +2063,18 @@ ui.box_widget('template_overlay', {
 })
 
 function draw_node(id, t_t, t, depth) {
-	ui.m(depth * 20, 0, 0, 0)
-	//ui.stack('', 1)
-		//ui.bb('', 'blue')
+	ui.p(depth * 20, 0, 0, 0)
+	ui.stack(t)
 		let hit = ui.hit(t)
 		if (hit && click)
 			template_select_node(id, t_t, t)
+		let sel = t == selected_template_node_t
+		if (sel)
+			ui.bb('', 'blue')
 		ui.begin_color(hit ? '#fff' : '#ccc')
-		ui.text(t, t.t, 'l', 'c', 1)
+		ui.text('', t.t, 'l', 'c', 1)
 		ui.end_color()
-	//ui.end()
+	ui.end_stack()
 	if (t.e)
 		for (let ct of t.e)
 			draw_node(id, t_t, ct, depth+1)
@@ -2059,7 +2082,7 @@ function draw_node(id, t_t, t, depth) {
 function template_editor(id, t, ch_t) {
 
 	ui.begin_toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
-		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 200, 200)
+		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.bb('', '#ccc')
 			ui.p(10)
 			ui.v(1, 10, 's', 't')
@@ -2070,7 +2093,7 @@ function template_editor(id, t, ch_t) {
 	ui.end_toolbox(id+'.tree_toolbox')
 
 	ui.begin_toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
-		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 200, 200)
+		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.font_size(14)
 			ui.v(1, 0, 's', 't')
 			ui.bb('', '#333')
@@ -2087,10 +2110,10 @@ function template_editor(id, t, ch_t) {
 					ui.mb(1)
 					ui.p(8, 8, 5, 5)
 					ui.stack()
-						ui.bb('', v, 'l', '#888')
 						if (def.type == 'color') {
 							ui.bb('', v, 'l', '#888')
 						} else {
+							ui.bb('', null, 'l', '#888')
 							ui.begin_color(v != null ? '#fff' : '#888')
 							ui.text('', vs, 'l', null, 1, 20)
 							ui.end_color()
@@ -2194,7 +2217,7 @@ ui.begin_toolbox = function(id, title, align, x0, y0) {
 	}
 
 	ui.m(mx1, mx2, my1, my2)
-	ui.popup(id+'.popup', layer_popup, null, 'it', align, min_w, min_h, 'move')
+	ui.popup(id+'.popup', layer_popup, null, 'it', align, min_w, min_h, 'constrain')
 		ui.p(1)
 		ui.bb('', null, 1, 'red')
 		ui.stack()
