@@ -9,6 +9,11 @@
 "use strict"
 let G = window
 
+// declare `ui = window` to get rid of the ui namespace.
+let ui = G.ui || {}
+
+ui.DEBUG = 0
+
 // utilities ------------------------------------------------------------------
 
 // single-value filter.
@@ -148,12 +153,6 @@ G.set_cursor = function(cursor) {
 	}
 }
 }
-
-// ui module -----------------------------------------------------------------
-
-G.ui = {}
-
-G.DEBUG = 0
 
 // canvas --------------------------------------------------------------------
 
@@ -314,15 +313,32 @@ let layer_stack = []
 let layer
 
 function begin_layer(layer1, i) {
-	if (layer1 != layer)
-		layer1.push(i)
-	if (layer)
-		layer_stack.push(layer)
+	layer1.push(i)
+	layer_stack.push(layer)
 	layer = layer1
 }
 
 function end_layer() {
 	layer = layer_stack.pop()
+}
+
+// scopes --------------------------------------------------------------------
+
+let scope_freelist = map_freelist()
+let scope_stack = []
+let scope
+
+function begin_scope() {
+	scope_stack.push(scope)
+	scope = scope_freelist()
+}
+
+function end_scope() {
+	end_color()
+	end_font()
+	end_font_size()
+	scope_freelist(scope)
+	scope = scope_stack.pop()
 }
 
 // id state maps -------------------------------------------------------------
@@ -428,9 +444,11 @@ let color, font, font_size
 
 function reset_all() {
 	color = 'white'
-	font = null
-	font_size = null
+	font = 'Arial'
+	ui.font_size_normal = 14
+	font_size = ui.font_size_normal
 	reset_paddings()
+	cx.font = font_size + 'px ' + font
 }
 
 function ui_cmd(cmd, ...args) {
@@ -453,7 +471,7 @@ function check_stacks() {
 			pr('layer', layer.name, 'not closed')
 		assert(false)
 	}
-	assert(!color_stack.length, 'color not closed')
+	assert(!scope_stack.length, 'scope not closed')
 }
 
 const PX1        =  4
@@ -505,6 +523,18 @@ function parse_valign(s) {
 // paddings and margins, applied to the next box cmd and then they are reset.
 let px1, px2, py1, py2
 let mx1, mx2, my1, my2
+
+ui.rem = rem => round(rem * ui.font_size_normal)
+ui. em =  em => round( em * font_size)
+
+let rem = ui.rem
+ui.sp025 = () => rem( .125)
+ui.sp05  = () => rem( .25)
+ui.sp075 = () => rem( .375)
+ui.sp1   = () => rem( .5)
+ui.sp2   = () => rem( .75)
+ui.sp4   = () => rem(1)
+ui.sp8   = () => rem(2)
 
 ui.padding = function(_px1, _px2, _py1, _py2) {
 	px1 = _px1 ?? 0
@@ -569,7 +599,8 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 }
 
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
-	ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+	begin_scope()
+	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 		gap ?? 0,
 		0, // total_fr
 	)
@@ -578,13 +609,14 @@ function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 const CMD_H = cmd_ct('h')
 const CMD_V = cmd_ct('v')
 
-ui.h = function(...args) { ui_hv(CMD_H, ...args) }
-ui.v = function(...args) { ui_hv(CMD_V, ...args) }
+ui.h = function(...args) { return ui_hv(CMD_H, ...args) }
+ui.v = function(...args) { return ui_hv(CMD_V, ...args) }
 
 const STACK_ID = S+0
 
 const CMD_STACK = cmd_ct('stack')
 ui.stack = function(id, fr, align, valign, min_w, min_h) {
+	begin_scope()
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
 		id)
 }
@@ -601,6 +633,7 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
 
+	begin_scope()
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
 		overflow_x ?? 'auto',
 		overflow_y ?? 'auto',
@@ -682,8 +715,9 @@ const POPUP_TARGET_I  = S+2
 const POPUP_SIDE      = S+3
 const POPUP_ALIGN     = S+4
 const POPUP_FLAGS     = S+5
-const POPUP_FONT      = S+6
-const POPUP_FONT_SIZE = S+7
+const POPUP_COLOR     = S+6
+const POPUP_FONT      = S+7
+const POPUP_FONT_SIZE = S+8
 
 const POPUP_TARGET_SCREEN = -1
 const POPUP_TARGET_PARENT = -2
@@ -692,6 +726,10 @@ const CMD_POPUP = cmd_ct('popup')
 ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 	layer1 = layer1 || layer
 	// TODO: fr, align, valign are not used. find a way to remove them.
+	begin_scope()
+	begin_color(color)
+	begin_font(font)
+	begin_font_size(font_size)
 	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
 		id,
 		layer1,
@@ -699,16 +737,13 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
 		popup_parse_flags(flags ?? 'change_side constrain'),
-		// inherited state
-		font,
-		font_size,
 	)
 	begin_layer(layer1, i)
-	ui.begin_color(color)
 }
 
 const CMD_END = cmd('end')
 ui.end = function(cmd) {
+	end_scope()
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd && a[i-1] != cmd)
 		assert(false, 'closing {0} instead of {1}', cmd_names[cmd], C(a, i))
@@ -717,7 +752,6 @@ ui.end = function(cmd) {
 
 	if (a[i-1] == CMD_POPUP) {
 		end_layer()
-		ui.end_color()
 	}
 }
 ui.end_h         = function() { ui.end(CMD_H) }
@@ -782,34 +816,66 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
 	)
 }
 
-let color_stack = []
-
 const CMD_COLOR = cmd('color')
-ui.begin_color = function(s) {
-	color_stack.push(color)
+function begin_color(s) {
+	scope.set('color', color)
 	ui_cmd(CMD_COLOR, s)
 	color = s
 }
-
-ui.end_color = function() {
-	let s = color_stack.pop()
+function end_color() {
+	let s = scope.get('color')
+	if (s == null) return
 	ui_cmd(CMD_COLOR, s)
 	color = s
+}
+ui.color = function(s) {
+	if (color == s) return
+	begin_color(s)
 }
 
 const CMD_FONT = cmd('font')
-ui.font = function(s) {
-	if (font == s) return
+function begin_font(s) {
+	scope.set('font', s)
 	ui_cmd(CMD_FONT, s)
 	font = s
 }
+function end_font() {
+	let s = scope.get('font')
+	if (s == null) return
+	ui_cmd(CMD_FONT, s)
+	font = s
+}
+ui.font = function(s) {
+	if (font == s) return
+	begin_font(s)
+}
+
+ui.font_sizes = {
+	xsmall  : .72,      // 10/14
+	small   : .8125,    // 12/14
+	smaller : .875,     // 13/14
+	large   : 1.125,    // 16/14
+	xlarge  : 1.5,
+}
 
 const CMD_FONT_SIZE = cmd('font_size')
-ui.font_size = function(s) {
-	if (font_size == s) return
+function begin_font_size(s) {
+	scope.set('font_size', s)
 	ui_cmd(CMD_FONT_SIZE, s)
 	font_size = s
 }
+function end_font_size() {
+	let s = scope.get('font_size')
+	if (s == null) return
+	ui_cmd(CMD_FONT_SIZE, s)
+	font_size = s
+}
+ui.font_size = function(rel_size) {
+	let s = (ui.font_sizes[rel_size] ?? rel_size ?? 1) * ui.font_size_normal
+	if (font_size == s) return
+	begin_font_size(s)
+}
+ui.fs = ui.font_size
 
 function set_font(a, i) {
 	font = a[i]
@@ -1406,15 +1472,9 @@ function translate_all() {
 // drawing phase -------------------------------------------------------------
 
 draw[CMD_POPUP] = function(a, i) {
-
 	let popup_layer = a[i+POPUP_LAYER]
 	if (popup_layer != layer)
 		return true
-
-	font      = a[i+POPUP_FONT]
-	font_size = a[i+POPUP_FONT_SIZE]
-
-	cx.font = font_size + 'px ' + font
 }
 
 draw[CMD_TEXT] = function(a, i) {
@@ -1513,10 +1573,10 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 draw[CMD_END] = function(a, end_i) {
 
 	let i = a[end_i]
-	if (a[i-1] == CMD_SCROLLBOX)
+	if (a[i-1] == CMD_SCROLLBOX) {
+
 		cx.restore()
 
-	if (a[i-1] == CMD_SCROLLBOX) {
 		let id = a[i+SB_ID]
 		for (let axis = 0; axis < 2; axis++) {
 
@@ -1688,21 +1748,21 @@ function hit_rect(x, y, w, h) {
 }
 
 function hit_box(a, i) {
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
+	let px1 = a[i+PX1+0]
+	let py1 = a[i+PX1+1]
+	let px2 = a[i+PX2+0]
+	let py2 = a[i+PX2+1]
+	let x = a[i+0] - px1
+	let y = a[i+1] - py1
+	let w = a[i+2] + px1 + px2
+	let h = a[i+3] + py1 + py2
 	return hit_rect(x, y, w, h)
 }
 
 hit[CMD_TEXT] = function(a, i) {
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	if (hit_rect(x, y, w, h)) {
+	if (hit_box(a, i)) {
 		hit_set_id(a[i+TEXT_ID])
-		hit_template(a, i, x, y, w, h)
+		hit_template(a, i)
 		return true
 	}
 }
@@ -1734,18 +1794,13 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 	if (!id)
 		return
 
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-
 	// fast-test the outer box since we're clipping the contents.
-	if (!hit_rect(x, y, w, h))
+	if (!hit_box(a, i))
 		return
 
 	hit_set_id(id)
 
-	hit_template(a, i, x, y, w, h)
+	hit_template(a, i)
 
 	// test the scrollbars
 	for (let axis = 0; axis < 2; axis++) {
@@ -1776,12 +1831,8 @@ hit[CMD_POPUP] = function(a, i) {
 function hit_flex(a, i) {
 	if (hit_children(a, i))
 		return true
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	if (hit_rect(x, y, w, h))
-		hit_template(a, i, x, y, w, h)
+	if (hit_box(a, i))
+		hit_template(a, i)
 }
 
 hit[CMD_H] = hit_flex
@@ -1794,26 +1845,16 @@ hit[CMD_STACK] = function(a, i) {
 	}
 	if (hit_box(a, i)) {
 		hit_set_id(a[i+STACK_ID])
-		let x = a[i+0]
-		let y = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
-		hit_template(a, i, x, y, w, h)
+		hit_template(a, i)
 		return true
 	}
 }
 
 hit[CMD_BB] = function(a, i) {
 	let ct_i = a[i+1]
-	let px1 = a[ct_i+PX1+0]
-	let py1 = a[ct_i+PX1+1]
-	let x = a[ct_i+0] - px1
-	let y = a[ct_i+1] - py1
-	let w = a[ct_i+2] + px1 + px2
-	let h = a[ct_i+3] + py1 + py2
-	if (hit_rect(x, y, w, h)) {
+	if (hit_box(a, ct_i)) {
 		hit_set_id(a[i+BB_ID])
-		hit_template(a, i, x, y, w, h)
+		hit_template(a, i)
 		return true
 	}
 }
@@ -1939,13 +1980,11 @@ let hit_template_i1
 let selected_template_id
 let selected_template_root_t
 let selected_template_node_t
-let selected_template_node_i
 
 function template_select_node(id, root_t, node_t, node_i) {
 	selected_template_id = id
 	selected_template_root_t = root_t
 	selected_template_node_t = node_t
-	selected_template_node_i = node_i
 	ui.redraw()
 }
 
@@ -1962,7 +2001,7 @@ function template_find_node(a, i, t, t_i) {
 		}
 	}
 }
-function hit_template(a, i, x, y, w, h) {
+function hit_template(a, i) {
 	let id = hit_template_id
 	if (id && i >= hit_template_i0 && i < hit_template_i1) {
 		let hs = ui.hovers(id)
@@ -1970,7 +2009,7 @@ function hit_template(a, i, x, y, w, h) {
 		let node_t = template_find_node(a, i, root_t, hit_template_i0)
 		hs.set('node', node_t)
 		if (clickup)
-			template_select_node(id, root_t, node_t, i)
+			template_select_node(id, root_t, node_t)
 		return true
 	}
 }
@@ -2001,7 +2040,7 @@ ui.template = function(id, t, ...stack_args) {
 	let i1 = a.length+2 // index of next cmd's arg#1
 	ui.template_overlay(id, t, i0, i1)
 	let ch_t = selected_template_node_t
-	let ch_i = selected_template_node_i
+	let ch_i = ch_t && ch_t.i
 	let ct_i = ch_i
 	if (a[ct_i-1] == CMD_BB)
 		ct_i = a[ct_i+BB_CT_I]
@@ -2063,7 +2102,7 @@ ui.box_widget('template_overlay', {
 })
 
 function draw_node(id, t_t, t, depth) {
-	ui.p(depth * 20, 0, 0, 0)
+	ui.p(depth * 20, 0, ui.sp05(), ui.sp05())
 	ui.stack(t)
 		let hit = ui.hit(t)
 		if (hit && click)
@@ -2071,9 +2110,8 @@ function draw_node(id, t_t, t, depth) {
 		let sel = t == selected_template_node_t
 		if (sel)
 			ui.bb('', 'blue')
-		ui.begin_color(hit ? '#fff' : '#ccc')
+		ui.color(hit ? '#fff' : '#ccc')
 		ui.text('', t.t, 'l', 'c', 1)
-		ui.end_color()
 	ui.end_stack()
 	if (t.e)
 		for (let ct of t.e)
@@ -2083,10 +2121,9 @@ function template_editor(id, t, ch_t) {
 
 	ui.begin_toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
 		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 150, 200)
-			ui.bb('', '#ccc')
+			ui.bb('', '#333')
 			ui.p(10)
-			ui.v(1, 10, 's', 't')
-				ui.bb('', '#333')
+			ui.v(1, 0, 's', 't')
 				draw_node(id, t, t, 0)
 			ui.end_v()
 		ui.end_scrollbox()
@@ -2094,7 +2131,6 @@ function template_editor(id, t, ch_t) {
 
 	ui.begin_toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
 		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 150, 200)
-			ui.font_size(14)
 			ui.v(1, 0, 's', 't')
 			ui.bb('', '#333')
 			let defs = tprops[ch_t.t]
@@ -2114,9 +2150,8 @@ function template_editor(id, t, ch_t) {
 							ui.bb('', v, 'l', '#888')
 						} else {
 							ui.bb('', null, 'l', '#888')
-							ui.begin_color(v != null ? '#fff' : '#888')
+							ui.color(v != null ? '#fff' : '#888')
 							ui.text('', vs, 'l', null, 1, 20)
-							ui.end_color()
 						}
 					ui.end_stack()
 				ui.end_h()
@@ -2551,9 +2586,6 @@ let test_template = {
 
 function make_frame() {
 
-	ui.font('Arial')
-	ui.font_size(16)
-
 	ui.m(50, null, 50)
 	ui.h(1, 20)
 		ui.text('t1', 'Hello1!')
@@ -2567,9 +2599,9 @@ function make_frame() {
 					// ui.bg('hsl(0deg 0% 16%)')
 					ui.shadow('black', 5, 2, 2)
 					ui.bb('', 'blue', 1, 'hsl(0 0% 100%)', 20)
-					// ui.padding(10, 10, 10, 10)
+					// ui.p(10, 10, 10, 10)
 					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
-					// ui.padding(10, 10, 10, 10)
+					// ui.p(10, 10, 10, 10)
 					ui.text('t3', ( max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
 					ui.text('t4', (last_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
 					if (1) {
@@ -2607,7 +2639,7 @@ function make_frame() {
 // debugging -----------------------------------------------------------------
 
 function draw_debug_box(a, i) {
-	if (!DEBUG) return
+	if (!ui.DEBUG) return
 	// if (a[i-1] != CMD_POPUP) return
 	let x = a[i+0]
 	let y = a[i+1]
