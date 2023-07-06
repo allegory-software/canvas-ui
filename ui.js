@@ -17,91 +17,86 @@ ui.DEBUG = 0
 // utilities ------------------------------------------------------------------
 
 // single-value filter.
-G.repl = function(x, v, z) { return x === v ? z : x }
+let repl = function(x, v, z) { return x === v ? z : x }
 
-G.isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
-G.isarray = Array.isArray
-G.isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
-G.isstr = s => typeof s == 'string'
-G.isnum = n => typeof n == 'number'
-G.isbool = b => typeof b == 'boolean'
-G.isfunc = f => typeof f == 'function'
+let isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
+let isarray = Array.isArray
+let isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
+let isstr = s => typeof s == 'string'
+let isnum = n => typeof n == 'number'
+let isbool = b => typeof b == 'boolean'
+let isfunc = f => typeof f == 'function'
 
-G.assert = function(ret, err, ...args) {
+function assert(ret, err, ...args) {
 	if (ret == null || ret === false) {
-		throw ((err && err.subst(...args) || 'assertion failed'))
+		throw ((err && subst(err, ...args) || 'assertion failed'))
 	}
 	return ret
 }
 
-G.pr = console.log
-G.trace = console.trace
+let pr = console.log
+let trace = console.trace
 
-G.floor = Math.floor
-G.ceil  = Math.ceil
-G.round = Math.round
-G.max   = Math.max
-G.min   = Math.min
-G.abs   = Math.abs
+let floor = Math.floor
+let ceil  = Math.ceil
+let round = Math.round
+let max   = Math.max
+let min   = Math.min
+let abs   = Math.abs
 
-G.PI  = Math.PI
-G.rad = PI / 180
-G.deg = 180 / PI
+let PI  = Math.PI
+let rad = PI / 180
+let deg = 180 / PI
 
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
-G.clamp = function(x, x0, x1) {
+function clamp(x, x0, x1) {
 	return min(max(x, x0 ?? -1/0), x1 ?? 1/0)
 }
 
-G.lerp = function(x, x0, x1, y0, y1) {
+function lerp(x, x0, x1, y0, y1) {
 	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
 }
 
-Number.prototype.dec = Number.prototype.toFixed
+function dec(x, d) { return x.toFixed(d) }
 
-G.num = function(s) {
+function num(s) {
 	let x = parseFloat(s)
 	return x != x ? undefined : x
 }
 
-G.str = String
+let str = String
 
 // usage:
 //	 '{1} of {0}'.subst(total, current)
 //	 '{1} of {0}'.subst([total, current])
 //	 '{1} of {0:foo:foos}'.subst([total, current])
 //	 '{current} of {total}'.subst({'current': current, 'total': total})
-String.prototype.subst = function(...args) {
+function subst(s, ...args) {
 	if (!args.length)
-		return this.valueOf()
+		return s.valueOf()
 	if (isarray(args[0]))
 		args = args[0]
 	if (isobject(args[0]))
 		args = args[0]
-	return this.replace(/{(\w+)\:(\w+)\:(\w+)}/g, function(match, s, singular, plural) {
+	return s.replace(/{(\w+)\:(\w+)\:(\w+)}/g, function(match, s, singular, plural) {
 		let v = num(args[s])
 		return v != null ? v + ' ' + (v > 1 ? plural : singular) : s
 	}).replace(/{([\w\:]+)}/g, (match, s) => args[s])
 }
 
-String.prototype.starts = function(s, i) { return this.startsWith(s, i) }
-String.prototype.ends   = function(s, i) { return this.endsWith(s, i) }
-String.prototype.upper  = function() { return this.toUpperCase() }
-String.prototype.lower  = function() { return this.toLowerCase() }
+let obj = () => Object.create(null)
+let set = (iter) => new Set(iter)
+let map = (iter) => new Map(iter)
+let array = (...args) => new Array(...args)
 
-G.obj = () => Object.create(null)
-G.set = (iter) => new Set(iter)
-G.map = (iter) => new Map(iter)
-G.array = (...args) => new Array(...args)
+let assign = Object.assign
 
-G.assign = Object.assign
+function noop() {}
 
-G.noop = function() {}
+let json = JSON.stringify
 
-G.json = JSON.stringify
-
-G.clock = function() { return performance.now() / 1000 }
+function clock() { return performance.now() / 1000 }
 
 EventTarget.prototype.on = function(event, f, on) {
 	if (on == null)
@@ -136,9 +131,9 @@ function map_freelist() {
 
 // when using capture_pointer(), setting the cursor for the element that
 // is hovered doesn't work anymore, so use this hack instead.
-{
+let set_cursor; {
 let cursor_style
-G.set_cursor = function(cursor) {
+set_cursor = function(cursor) {
 	if (cursor) {
 		if (!cursor_style) {
 			cursor_style = document.createElement('style')
@@ -153,6 +148,200 @@ G.set_cursor = function(cursor) {
 	}
 }
 }
+
+// colors --------------------------------------------------------------------
+
+// hsl is in (0..360, 0..1, 0..1)
+function h2rgb(m1, m2, h) {
+	if (h<0) h = h+1
+	if (h>1) h = h-1
+	if (h*6<1)
+		return m1+(m2-m1)*h*6
+	else if (h*2<1)
+		return m2
+	else if (h*3<2)
+		return m1+(m2-m1)*(2/3-h)*6
+	else
+		return m1
+}
+function hsl_to_rgba(d, i, h, s, L, a) {
+	h = h / 360
+	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
+	let m1 = L*2-m2
+	d[i+0] = 255 * h2rgb(m1, m2, h+1/3)
+	d[i+1] = 255 * h2rgb(m1, m2, h)
+	d[i+2] = 255 * h2rgb(m1, m2, h-1/3)
+	d[i+3] = a ?? 255
+}
+
+ui.hsl = function(h, s, L, a) {
+	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
+}
+
+// themes --------------------------------------------------------------------
+
+function theme_make(default_color) {
+	return {
+		default_color : default_color,
+		bg     : [[], [], []], // normal, hover, active
+		border : [[], [], []], // normal, hover, active
+		fg     : [[], [], []],
+	}
+}
+let themes = {
+	light: theme_make('black'),
+	dark : theme_make('white'),
+}
+let theme = themes.dark
+
+ui.dark_mode = function(on) {
+	theme = on ? themes.dark : themes.light
+	ui.redraw()
+}
+
+// text colors ---------------------------------------------------------------
+
+ui.fg_style = function(theme, name, state, h, s, L, a) {
+	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	themes[theme].fg[state_i][name] = [ui.hsl(h, s, L, a), h, s, L, a]
+}
+
+ui.fg = function(name, state) {
+	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	return theme.fg[state_i][name] ?? theme.fg[0][name]
+}
+
+//           theme    name     state       h     s     L    a
+// ---------------------------------------------------------------------------
+ui.fg_style('light', 'text' , 'normal' ,   0, 0.00, 0.00)
+ui.fg_style('light', 'text' , 'hover'  ,   0, 0.00, 0.50)
+ui.fg_style('light', 'text' , 'active' ,   0, 0.00, 0.60)
+ui.fg_style('dark' , 'text' , 'normal' ,   0, 0.00, 0.90)
+ui.fg_style('dark' , 'text' , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_style('dark' , 'text' , 'active' ,   0, 0.00, 1.00)
+ui.fg_style('light', 'label', 'normal' ,   0, 0.00, 0.00)
+ui.fg_style('light', 'label', 'hover'  ,   0, 0.00, 0.00, 0.9)
+ui.fg_style('dark' , 'label', 'normal' ,   0, 0.00, 0.95, 0.7)
+ui.fg_style('dark' , 'label', 'hover'  ,   0, 0.00, 0.90, 0.9)
+ui.fg_style('light', 'link' , 'normal' , 222, 0.00, 0.50)
+ui.fg_style('light', 'link' , 'hover'  , 222, 1.00, 0.70)
+ui.fg_style('light', 'link' , 'active' , 222, 1.00, 0.80)
+ui.fg_style('dark' , 'link' , 'normal' , 222, 1.00, 0.75)
+ui.fg_style('dark' , 'link' , 'hover'  , 222, 1.00, 0.85)
+ui.fg_style('dark' , 'link' , 'active' , 222, 1.00, 1.95)
+
+// ---------------------------------------------------------------------------
+// ui.fg_style('light', 'link' , 'on_light', fg_link_h ?? 0, fg_link_s ?? 0, fg_link_l, 1.0)
+// ui.fg_style('light', 'label', 'on_light', fg_text_h ?? 0, fg_text_s ?? 0, fg_text_l, fg_label_op)
+
+// border colors -------------------------------------------------------------
+
+ui.border_style = function(theme, name, state, h, s, L, a) {
+	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	themes[theme].border[state_i][name] = [ui.hsl(h, s, L, a), h, s, L, a]
+}
+
+ui.border = function(name, state) {
+	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	return theme.border[state_i][name] ?? theme.border[0][name]
+}
+
+//               theme    name     state     h  s  L     a
+// ---------------------------------------------------------------------------
+ui.border_style('light', 'light', 'normal' , 0, 0, 0, 0.10)
+ui.border_style('light', 'light', 'hover'  , 0, 0, 0, 0.30)
+ui.border_style('dark' , 'light', 'normal' , 0, 0, 0, 0.09)
+ui.border_style('dark' , 'light', 'hover'  , 0, 0, 0, 0.03)
+ui.border_style('light', 'dark' , 'normal' , 0, 0, 0, 0.30)
+ui.border_style('dark' , 'dark' , 'normal' , 0, 0, 0, 0.20)
+
+// background colors ---------------------------------------------------------
+
+ui.bg_style = function(theme, name, state, h, s, L, a, is_dark) {
+	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	themes[theme].bg[state_i][name] = [ui.hsl(h, s, L, a), h, s, L, a, is_dark]
+}
+
+ui.bg = function(name, state) {
+	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	return assert(theme.bg[state_i][name] ?? theme.bg[0][name])
+}
+
+//           theme    name      state       h     s     L     a
+// -------------------------------------------------------------
+ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.50)
+ui.bg_style('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
+ui.bg_style('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
+ui.bg_style('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
+ui.bg_style('light', 'bg1'   , 'normal' ,   0, 0.00, 0.95)
+ui.bg_style('light', 'bg1'   , 'hover'  ,   0, 0.00, 0.93)
+ui.bg_style('light', 'bg1'   , 'active' ,   0, 0.00, 0.90)
+ui.bg_style('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
+ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
+ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
+ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
+ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 1.08)
+ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
+ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
+ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
+ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
+
+ui.bg_style('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.80)
+ui.bg_style('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
+ui.bg_style('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
+ui.bg_style('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
+ui.bg_style('dark' , 'bg1'   , 'normal' , 216, 0.28, 0.15)
+ui.bg_style('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
+ui.bg_style('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
+ui.bg_style('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
+ui.bg_style('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
+ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.25)
+ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.27)
+ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.11)
+ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
+ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.98)
+ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.94)
+ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.90)
+
+// ui.bg_style('light', 'button-primary', 'normal', ui.fg('link'))
+// ui.bg_style('light', 'button-primary', 'hover' , 'fg-link-hover')
+
+/*
+	bg-button-primary         : var(--fg-link);
+	bg-button-primary-hover   : var(--fg-link-hover);
+	bg-button-primary-active  : var(--fg-link-active);
+
+	fg-link-hover : hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l-hover ) / 1.0);
+	fg-link-active: hsl(var(--fg-link-h) var(--fg-link-s) var(--fg-link-l-active) / 1.0);
+
+	fg-button-danger-s: 54%;
+	fg-button-danger-l: 43%;
+
+	bg-button-danger          : var(--bg-button);
+	bg-button-danger-hover    : var(--bg-button-hover);
+	bg-button-danger-active   : var(--bg-button-active);
+*/
+
+ui.bg_style('light', 'search'          , 'normal',  60,  1.00, 0.80) // quicksearch text bg
+ui.bg_style('light', 'info'            , 'normal', 200,  1.00, 0.30) // info bubbles
+ui.bg_style('light', 'focused-invalid' , 'normal',   0,  1.00, 0.60)
+ui.bg_style('light', 'warn'            , 'normal',  39,  1.00, 0.50) // warning bubbles
+
+// input value states
+ui.bg_style('light', 'new'             , 'normal', 240, 1.00, 0.97)
+ui.bg_style('light', 'modified'        , 'normal', 120, 1.00, 0.93)
+ui.bg_style('light', 'new-modified'    , 'normal', 180, 0.55, 0.87)
+
+// item interaction states. these need to be opaque!
+ui.bg_style('light', 'unfocused'          , 0, 0, 0.91)
+ui.bg_style('light', 'focused'            , 0, 0, 0.87)
+ui.bg_style('light', 'unfocused-selected' , 0, 0, 0.87)
+ui.bg_style('light', 'focused-selected'   , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_style('light', 'focused-error'      , 0, 1, 0.60)
+ui.bg_style('light', 'unselected'         , 0, 0, 0.93)
+ui.bg_style('light', 'selected'           , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.bg_style('light', 'row-focused'        , 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.bg_style('light', 'row-unfocused'      , 139 / 239 * 360,   0 / 240, 231 / 240)
 
 // canvas --------------------------------------------------------------------
 
@@ -326,19 +515,57 @@ function end_layer() {
 
 let scope_freelist = map_freelist()
 let scope_stack = []
-let scope
+let scope = null
 
 function begin_scope() {
 	scope_stack.push(scope)
-	scope = scope_freelist()
+	// scope creation is delayed to first call of scope_set().
+	// TODO: could COW be faster here with deep scopes?
+	// TODO: would parallel per-key stacks be faster here instead of one stack of maps?
+	scope = null
 }
 
 function end_scope() {
-	end_color()
-	end_font()
-	end_font_size()
-	scope_freelist(scope)
+	let ended_scope = scope
 	scope = scope_stack.pop()
+	if (ended_scope) {
+		end_color(ended_scope)
+		end_theme(ended_scope)
+		end_font(ended_scope)
+		end_font_size(ended_scope)
+		scope_freelist(ended_scope)
+	}
+}
+
+function scope_get(k) {
+	// look in current scope
+	if (scope) {
+		let v = scope.get(k)
+		if (v !== undefined)
+			return v
+	}
+	// look in parent scopes
+	for (let i = scope_stack.length-1; i >= 0; i--) {
+		let scope = scope_stack[i]
+		if (scope) {
+			let v = scope.get(k)
+			if (v !== undefined)
+				return v
+		}
+	}
+}
+
+function scope_set(k, v) {
+	scope = scope ?? scope_freelist()
+	scope.set(k, v)
+}
+
+function scope_prev_var(ended_scope, k) {
+	let v = ended_scope.get(k)
+	if (v === undefined) return
+	let v0 = scope_get(k)
+	if (v === v0) return
+	return v0
 }
 
 // id state maps -------------------------------------------------------------
@@ -442,12 +669,20 @@ ui.box_widget = function(cmd_name, t) {
 
 let color, font, font_size
 
+ui.default_theme = themes.dark
+ui.default_font = 'Arial'
+ui.font_size_normal = 14
+
 function reset_all() {
-	color = 'white'
-	font = 'Arial'
-	ui.font_size_normal = 14
+	theme = ui.default_theme
+	color = ui.fg('text')
+	font = ui.default_font
 	font_size = ui.font_size_normal
 	reset_paddings()
+	scope_set('color', color)
+	scope_set('theme', theme)
+	scope_set('font', font)
+	scope_set('font_size', font_size)
 	cx.font = font_size + 'px ' + font
 }
 
@@ -727,9 +962,10 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 	layer1 = layer1 || layer
 	// TODO: fr, align, valign are not used. find a way to remove them.
 	begin_scope()
-	begin_color(color)
-	begin_font(font)
-	begin_font_size(font_size)
+	if (layer1 != layer) {
+		force_font(font)
+		force_font_size(font_size)
+	}
 	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
 		id,
 		layer1,
@@ -777,7 +1013,7 @@ function parse_border_sides(s) {
 		(s.includes('t') ? BORDER_SIDE_T : 0) |
 		(s.includes('b') ? BORDER_SIDE_B : 0)
 	)
-	if (s.starts('-'))
+	if (s.startsWith('-'))
 		b = ~b & BORDER_SIDE_ALL
 	return b
 }
@@ -787,6 +1023,10 @@ const BB_CT_I = 1
 
 const CMD_BB = cmd('bb') // border-background
 ui.bb = function(id, bg_color, sides, border_color, border_radius) {
+	if (isarray(bg_color)) {
+		set_theme_dark(bg_color[5] ?? bg_color[3] < .5)
+		bg_color = bg_color[0]
+	}
 	let ct_i = assert(ct_stack.at(-1), 'bb outside container')
 	ui_cmd(CMD_BB, id, ct_i, bg_color, parse_border_sides(sides), border_color, border_radius)
 }
@@ -817,63 +1057,67 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
 }
 
 const CMD_COLOR = cmd('color')
-function begin_color(s) {
-	scope.set('color', color)
-	ui_cmd(CMD_COLOR, s)
-	color = s
-}
-function end_color() {
-	let s = scope.get('color')
-	if (s == null) return
-	ui_cmd(CMD_COLOR, s)
-	color = s
-}
 ui.color = function(s) {
 	if (color == s) return
-	begin_color(s)
+	scope_set('color', s)
+	ui_cmd(CMD_COLOR, s)
+	color = s
+}
+function end_color(ended_scope) {
+	let s = scope_prev_var(ended_scope, 'color')
+	if (s === undefined) return
+	ui_cmd(CMD_COLOR, s)
+	color = s
+}
+
+function set_theme_dark(dark) {
+	theme = dark ? themes.dark : themes.light
+	scope_set('theme', theme)
+}
+function end_theme(ended_scope) {
+	let s = scope_prev_var(ended_scope, 'theme')
+	if (s === undefined) return
+	theme = s
 }
 
 const CMD_FONT = cmd('font')
-function begin_font(s) {
-	scope.set('font', s)
+function force_font(s) {
+	scope_set('font', s)
 	ui_cmd(CMD_FONT, s)
 	font = s
 }
-function end_font() {
-	let s = scope.get('font')
-	if (s == null) return
+function end_font(ended_scope) {
+	let s = scope_prev_var(ended_scope, 'font')
+	if (s === undefined) return
 	ui_cmd(CMD_FONT, s)
 	font = s
 }
 ui.font = function(s) {
 	if (font == s) return
-	begin_font(s)
+	force_font(s)
 }
 
-ui.font_sizes = {
-	xsmall  : .72,      // 10/14
-	small   : .8125,    // 12/14
-	smaller : .875,     // 13/14
-	large   : 1.125,    // 16/14
-	xlarge  : 1.5,
-}
+let xsmall  = () => ui.font_size_normal * .72      // 10/14
+let small   = () => ui.font_size_normal * .8125    // 12/14
+let smaller = () => ui.font_size_normal * .875     // 13/14
+let large   = () => ui.font_size_normal * 1.125    // 16/14
+let xlarge  = () => ui.font_size_normal * 1.5
 
 const CMD_FONT_SIZE = cmd('font_size')
-function begin_font_size(s) {
-	scope.set('font_size', s)
+function force_font_size(s) {
+	scope_set('font_size', s)
 	ui_cmd(CMD_FONT_SIZE, s)
 	font_size = s
 }
-function end_font_size() {
-	let s = scope.get('font_size')
-	if (s == null) return
+function end_font_size(ended_scope) {
+	let s = scope_prev_var(ended_scope, 'font_size')
+	if (s === undefined) return
 	ui_cmd(CMD_FONT_SIZE, s)
 	font_size = s
 }
-ui.font_size = function(rel_size) {
-	let s = (ui.font_sizes[rel_size] ?? rel_size ?? 1) * ui.font_size_normal
+ui.font_size = function(s) {
 	if (font_size == s) return
-	begin_font_size(s)
+	force_font_size(s)
 }
 ui.fs = ui.font_size
 
@@ -1497,7 +1741,7 @@ draw[CMD_TEXT] = function(a, i) {
 	}
 
 	cx.textAlign = 'left'
-	cx.fillStyle = color
+	cx.fillStyle = color[0]
 	cx.fillText(s, x, y + abs(asc))
 
 	if (clip)
@@ -2110,7 +2354,7 @@ function draw_node(id, t_t, t, depth) {
 		let sel = t == selected_template_node_t
 		if (sel)
 			ui.bb('', 'blue')
-		ui.color(hit ? '#fff' : '#ccc')
+		ui.color(ui.fg('text', hit ? 'hover' : 'normal'))
 		ui.text('', t.t, 'l', 'c', 1)
 	ui.end_stack()
 	if (t.e)
@@ -2121,7 +2365,7 @@ function template_editor(id, t, ch_t) {
 
 	ui.begin_toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
 		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 150, 200)
-			ui.bb('', '#333')
+			ui.bb('', ui.bg('bg'))
 			ui.p(10)
 			ui.v(1, 0, 's', 't')
 				draw_node(id, t, t, 0)
@@ -2393,29 +2637,6 @@ ui.widget('resizer', {
 
 // color picker --------------------------------------------------------------
 
-// hsl is in (0..360, 0..1, 0..1)
-function h2rgb(m1, m2, h) {
-	if (h<0) h = h+1
-	if (h>1) h = h-1
-	if (h*6<1)
-		return m1+(m2-m1)*h*6
-	else if (h*2<1)
-		return m2
-	else if (h*3<2)
-		return m1+(m2-m1)*(2/3-h)*6
-	else
-		return m1
-}
-function hsl_to_rgb(d, i, h, s, L) {
-	h = h / 360
-	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
-	let m1 = L*2-m2
-	d[i+0] = 255 * h2rgb(m1, m2, h+1/3)
-	d[i+1] = 255 * h2rgb(m1, m2, h)
-	d[i+2] = 255 * h2rgb(m1, m2, h-1/3)
-	d[i+3] = 255
-}
-
 function get_idata(s, key, w, h) {
 	let idata = s.get(key)
 	if (!idata
@@ -2457,7 +2678,7 @@ function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum, sel_sat, sel_lum)
 				for (let x = 0; x < w; x++) {
 					let sat = lerp(x, 0, w-1, 0, 1)
 					let lum = lerp(y, 0, h-1, 1, 0)
-					hsl_to_rgb(d, (y * w + x) * 4, hue, sat, lum)
+					hsl_to_rgba(d, (y * w + x) * 4, hue, sat, lum)
 				}
 			}
 			idata.hue = hue
@@ -2491,7 +2712,7 @@ function draw_hue_bar(s, x, y, w, h, hit_hue, sel_hue) {
 			for (let y = 0; y < h; y++) {
 				for (let x = 0; x < w; x++) {
 					let hue = lerp(y, 0, h-1, 0, 360)
-					hsl_to_rgb(d, (y * w + x) * 4, hue, 1, .5)
+					hsl_to_rgba(d, (y * w + x) * 4, hue, 1, .5)
 				}
 			}
 			idata.ready = true
@@ -2602,8 +2823,8 @@ function make_frame() {
 					// ui.p(10, 10, 10, 10)
 					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
 					// ui.p(10, 10, 10, 10)
-					ui.text('t3', ( max_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
-					ui.text('t4', (last_frame_duration * 1000).dec(1)+' ms', '[', 'c', 1)
+					ui.text('t3', dec( max_frame_duration * 1000, 1)+' ms', '[', 'c', 1)
+					ui.text('t4', dec(last_frame_duration * 1000, 1)+' ms', '[', 'c', 1)
 					if (1) {
 						ui.m(0, 0, -20, 0)
 						ui.popup('p1', layer_popup, null, 'b')

@@ -3,8 +3,8 @@ TODO
 - toolbox z-index
 - toolbox move by all sides, with all alignment combinations
 - bb on text
-- bb on scrollbox
-- negative margins
+- bb on scrollbox?
+- negative margins?
 
 LIBRARIZATION
 
@@ -84,8 +84,9 @@ PROS vs WEB
 
 CONS vs WEB
 - must reimplement:
-	- text selection & clipboard ops
-	- scrollbox
+	* scrollbox
+	- text selection
+	- clipboard ops
 	- word-wrapping
 	- inline layouting with:
 		- u, b, i, strike, sub, sup, h1..6, p, br, hr, float
