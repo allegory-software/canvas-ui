@@ -264,7 +264,7 @@ ui.bg_style = function(theme, name, state, h, s, L, a, is_dark) {
 
 ui.bg = function(name, state) {
 	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
-	return assert(theme.bg[state_i][name] ?? theme.bg[0][name])
+	return theme.bg[state_i][name] ?? theme.bg[0][name]
 }
 
 //           theme    name      state       h     s     L     a
@@ -332,16 +332,29 @@ ui.bg_style('light', 'new'             , 'normal', 240, 1.00, 0.97)
 ui.bg_style('light', 'modified'        , 'normal', 120, 1.00, 0.93)
 ui.bg_style('light', 'new-modified'    , 'normal', 180, 0.55, 0.87)
 
+ui.bg_style('dark' , 'new'             , 'normal', 240, 0.35, 0.27)
+ui.bg_style('dark' , 'modified'        , 'normal', 120, 0.59, 0.24)
+ui.bg_style('dark' , 'new-modified'    , 'normal', 157, 0.18, 0.20)
+
 // item interaction states. these need to be opaque!
-ui.bg_style('light', 'unfocused'          , 0, 0, 0.91)
-ui.bg_style('light', 'focused'            , 0, 0, 0.87)
-ui.bg_style('light', 'unfocused-selected' , 0, 0, 0.87)
-ui.bg_style('light', 'focused-selected'   , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_style('light', 'focused-error'      , 0, 1, 0.60)
-ui.bg_style('light', 'unselected'         , 0, 0, 0.93)
-ui.bg_style('light', 'selected'           , 139 / 239 * 360, 150 / 240, 217 / 240)
-ui.bg_style('light', 'row-focused'        , 139 / 239 * 360, 150 / 240, 231 / 240)
-ui.bg_style('light', 'row-unfocused'      , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.bg_style('light', 'unfocused'          , 'normal', 0, 0, 0.91)
+ui.bg_style('light', 'focused'            , 'normal', 0, 0, 0.87)
+ui.bg_style('light', 'unfocused-selected' , 'normal', 0, 0, 0.87)
+ui.bg_style('light', 'focused-selected'   , 'normal', 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_style('light', 'focused-error'      , 'normal', 0, 1, 0.60)
+ui.bg_style('light', 'unselected'         , 'normal', 0, 0, 0.93)
+ui.bg_style('light', 'selected'           , 'normal', 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.bg_style('light', 'row-focused'        , 'normal', 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.bg_style('light', 'row-unfocused'      , 'normal', 139 / 239 * 360,   0 / 240, 231 / 240)
+
+ui.bg_style('dark' , 'unfocused'          , 'normal',   0, 0.00, 0.20)
+ui.bg_style('dark' , 'unfocused-selected' , 'normal', 208, 0.11, 0.23)
+ui.bg_style('dark' , 'focused-selected'   , 'normal', 211, 0.62, 0.24)
+ui.bg_style('dark' , 'unfocused'          , 'normal', 216, 0.05, 0.19)
+ui.bg_style('dark' , 'unselected'         , 'normal', 195, 0.06, 0.12)
+ui.bg_style('dark' , 'selected'           , 'normal', 211, 0.62, 0.19)
+ui.bg_style('dark' , 'row-focused'        , 'normal', 212, 0.61, 0.13)
+ui.bg_style('dark' , 'row-unfocused'      , 'normal',   0, 0.00, 0.13)
 
 // canvas --------------------------------------------------------------------
 
@@ -675,7 +688,7 @@ ui.font_size_normal = 14
 
 function reset_all() {
 	theme = ui.default_theme
-	color = ui.fg('text')
+	color = ui.fg('text')[0]
 	font = ui.default_font
 	font_size = ui.font_size_normal
 	reset_paddings()
@@ -1023,10 +1036,17 @@ const BB_CT_I = 1
 
 const CMD_BB = cmd('bb') // border-background
 ui.bb = function(id, bg_color, sides, border_color, border_radius) {
+	let s = bg_color
+	if (isstr(bg_color))
+		bg_color = ui.bg(bg_color) ?? bg_color
 	if (isarray(bg_color)) {
 		set_theme_dark(bg_color[5] ?? bg_color[3] < .5)
 		bg_color = bg_color[0]
 	}
+	if (isstr(border_color))
+		border_color = ui.border(border_color) ?? border_color
+	if (isarray(border_color))
+		border_color = border_color[0]
 	let ct_i = assert(ct_stack.at(-1), 'bb outside container')
 	ui_cmd(CMD_BB, id, ct_i, bg_color, parse_border_sides(sides), border_color, border_radius)
 }
@@ -1057,7 +1077,11 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
 }
 
 const CMD_COLOR = cmd('color')
-ui.color = function(s) {
+ui.color = function(s, state) {
+	if (isstr(s))
+		s = ui.fg(s, state) ?? s
+	if (isarray(s))
+		s = s[0]
 	if (color == s) return
 	scope_set('color', s)
 	ui_cmd(CMD_COLOR, s)
@@ -1741,7 +1765,7 @@ draw[CMD_TEXT] = function(a, i) {
 	}
 
 	cx.textAlign = 'left'
-	cx.fillStyle = color[0]
+	cx.fillStyle = color
 	cx.fillText(s, x, y + abs(asc))
 
 	if (clip)
@@ -2353,8 +2377,8 @@ function draw_node(id, t_t, t, depth) {
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
 		if (sel)
-			ui.bb('', 'blue')
-		ui.color(ui.fg('text', hit ? 'hover' : 'normal'))
+			ui.bb('', 'selected')
+		ui.color('text', hit ? 'hover' : 'normal')
 		ui.text('', t.t, 'l', 'c', 1)
 	ui.end_stack()
 	if (t.e)
@@ -2811,7 +2835,7 @@ function make_frame() {
 	ui.h(1, 20)
 		ui.text('t1', 'Hello1!')
 		ui.stack('', 1)
-			ui.bb('', 'hsl(0deg 0% 16%)')
+			ui.bb('', ui.bg('bg2'))
 			if (1) {
 			ui.scrollbox('sb1', 1)
 				ui.m(50, 50, 0, 0)
@@ -2819,7 +2843,7 @@ function make_frame() {
 				ui.v(1, 20, 'c', 'c')
 					// ui.bg('hsl(0deg 0% 16%)')
 					ui.shadow('black', 5, 2, 2)
-					ui.bb('', 'blue', 1, 'hsl(0 0% 100%)', 20)
+					ui.bb('', 'bg1', 1, 'light', 20)
 					// ui.p(10, 10, 10, 10)
 					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
 					// ui.p(10, 10, 10, 10)
