@@ -28,9 +28,8 @@ let isbool = b => typeof b == 'boolean'
 let isfunc = f => typeof f == 'function'
 
 function assert(ret, err, ...args) {
-	if (ret == null || ret === false) {
+	if (!ret)
 		throw ((err && subst(err, ...args) || 'assertion failed'))
-	}
 	return ret
 }
 
@@ -172,9 +171,14 @@ ui.hsl = function(h, s, L, a) {
 
 // themes --------------------------------------------------------------------
 
+ui.scrollbar_thickness = 6
+ui.scrollbar_thickness_active = 12
+
 function theme_make(default_color) {
 	return {
 		default_color : default_color,
+		scrollbar_thickness        : ui.scrollbar_thickness,
+		scrollbar_thickness_active : ui.scrollbar_thickness_active,
 		fg     : [[], [], []], // normal, hover, active
 		border : [[], [], []], // normal, hover, active
 		bg     : [[], [], []], // normal, hover, active
@@ -279,6 +283,7 @@ ui.bg_style('light', 'bg2'   , 'normal' ,   0, 0.00, 0.85)
 ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
 ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
 ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
+ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
 ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 1.08)
 ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
 ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
@@ -294,13 +299,22 @@ ui.bg_style('dark' , 'bg1'   , 'hover'  , 216, 0.28, 0.19)
 ui.bg_style('dark' , 'bg1'   , 'active' , 216, 0.28, 0.22)
 ui.bg_style('dark' , 'bg2'   , 'normal' , 216, 0.28, 0.22)
 ui.bg_style('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
-ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.25)
-ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.27)
+ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
+ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
+ui.bg_style('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
 ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.11)
 ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
 ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
+
+ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
+ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
+ui.bg_style('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
+
+ui.bg_style('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
+ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
+ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
 ui.bg_style('light', 'button-primary', 'normal' , ui.fg('link', 'normal', 'light'))
 ui.bg_style('light', 'button-primary', 'hover'  , ui.fg('link', 'hover' , 'light'))
@@ -537,6 +551,7 @@ function end_scope() {
 		end_font(ended_scope)
 		end_font_size(ended_scope)
 		end_font_weight(ended_scope)
+		end_line_gap(ended_scope)
 		scope_freelist(ended_scope)
 	}
 }
@@ -693,7 +708,7 @@ ui.box_widget = function(cmd_name, t) {
 	}, t))
 }
 
-let color, font, font_size, font_weight
+let color, font, font_size, font_weight, line_gap
 
 ui.default_theme = themes.dark
 ui.default_font = 'Arial'
@@ -705,12 +720,14 @@ function reset_all() {
 	font = ui.default_font
 	font_size = ui.font_size_normal
 	font_weight = 'normal'
+	line_gap = 0.5
 	reset_paddings()
 	scope_set('color', color)
 	scope_set('theme', theme)
 	scope_set('font', font)
 	scope_set('font_size', font_size)
 	scope_set('font_weight', font_weight)
+	scope_set('line_gap', line_gap)
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
 }
 
@@ -892,6 +909,7 @@ const SB_SX       =  S+5 // scroll x,y
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
+	assert(id, 'scrollbox must have an id')
 	let ss = ui.state(id)
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
@@ -1001,6 +1019,7 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		force_font(font)
 		force_font_size(font_size)
 		force_font_weight(font_weight)
+		force_line_gap(line_gap)
 	}
 	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
 		id,
@@ -1106,23 +1125,31 @@ ui.shadow = function(x, y, blur, spread, inset, color) {
 	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset, color)
 }
 
-const TEXT_ASC = S-1
-const TEXT_X   = S+0
-const TEXT_W   = S+1
-const TEXT_ID  = S+2
-const TEXT_S   = S+3
+const TEXT_ASC  = S-1
+const TEXT_DSC  = S-0
+const TEXT_X    = S+1
+const TEXT_W    = S+2
+const TEXT_ID   = S+3
+const TEXT_S    = S+4
+const TEXT_WRAP = S+5
+
+const TEXT_WRAP_LINE = 1
+const TEXT_WRAP_WORD = 2
 
 const CMD_TEXT = cmd('text')
-ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
+ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap) {
 	// NOTE: min_w and min_h are measured, not given.
+	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? -1, // -1=auto
 		min_h ?? -1, // -1=auto
 		0, // ascent
+		0, // descent
 		0, // text_x
 		max_min_w ?? -1, // -1=inf
 		id,
-		s,
+		wrap == TEXT_WRAP_LINE && s.includes('\n') ? s.split('\n') : s,
+		wrap,
 	)
 }
 
@@ -1216,6 +1243,24 @@ ui.bold = function() {
 	ui.font_weight('bold')
 }
 
+const CMD_LINE_GAP = cmd('line_gap')
+function force_line_gap(s) {
+	scope_set('line_gap', s)
+	ui_cmd(CMD_LINE_GAP, s)
+	line_gap = s
+}
+function end_line_gap(ended_scope) {
+	let s = scope_prev_var(ended_scope, 'line_gap')
+	if (s === undefined) return
+	ui_cmd(CMD_LINE_GAP, s)
+	line_gap = s
+}
+ui.line_gap = function(s) {
+	if (line_gap == s) return
+	force_line_gap(s)
+}
+ui.lh = line_gap
+
 function set_font(a, i) {
 	font = a[i]
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
@@ -1229,6 +1274,10 @@ function set_font_size(a, i) {
 function set_font_weight(a, i) {
 	font_weight = a[i]
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
+}
+
+function set_line_gap(a, i) {
+	line_gap = a[i]
 }
 
 function get_next_ext_i(a, i) {
@@ -1277,16 +1326,37 @@ function add_ct_min_wh(a, axis, w, fr) {
 measure[CMD_FONT] = set_font
 measure[CMD_FONT_SIZE] = set_font_size
 measure[CMD_FONT_WEIGHT] = set_font_weight
+measure[CMD_LINE_GAP] = set_line_gap
 
 measure[CMD_TEXT] = function(a, i, axis) {
 	let fr = a[i+FR]
 	if (!axis) { // measure once
 		let s = a[i+TEXT_S]
-		let m = cx.measureText(s)
-		let asc = m.fontBoundingBoxAscent
-		let dsc = m.fontBoundingBoxDescent
-		let text_w = ceil(m.width)
-		let text_h = ceil(asc+dsc)
+		let wrap = a[i+TEXT_WRAP]
+		let asc
+		let dsc
+		let text_w
+		let text_h
+		if (isstr(s)) {
+			let m = cx.measureText(s)
+			asc = m.fontBoundingBoxAscent
+			dsc = m.fontBoundingBoxDescent
+			text_w = ceil(m.width)
+			text_h = ceil(asc+dsc)
+		} else if (wrap == TEXT_WRAP_LINE) {
+			text_w = 0
+			text_h = 0
+			for (let ss of s) {
+				let m = cx.measureText(ss)
+				asc = m.fontBoundingBoxAscent
+				dsc = m.fontBoundingBoxDescent
+				text_w = max(text_w, ceil(m.width))
+				text_h += ceil(asc+dsc)
+			}
+			text_h += (s.length-1) * line_gap * font_size
+		} else if (wrap == TEXT_WRAP_WORD) {
+			//
+		}
 		let min_w = a[i+2]
 		let min_h = a[i+3]
 		let max_min_w = a[i+TEXT_W]
@@ -1297,6 +1367,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		a[i+2] = min_w
 		a[i+3] = min_h
 		a[i+TEXT_ASC] = round(asc)
+		a[i+TEXT_DSC] = round(dsc)
 		a[i+TEXT_W] = text_w + paddings(a, i, 0)
 	}
 	a[i+2+axis] += paddings(a, i, axis)
@@ -1857,10 +1928,13 @@ draw[CMD_TEXT] = function(a, i) {
 	let x   = a[i+0]
 	let y   = a[i+1]
 	let w   = a[i+2]
+	let h   = a[i+3]
 	let s   = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
+	let dsc = a[i+TEXT_DSC]
 	let sx  = a[i+TEXT_X]
 	let sw  = a[i+TEXT_W]
+	let wrap= a[i+TEXT_WRAP]
 	let clip = w > sw
 
 	if (clip) {
@@ -1873,7 +1947,17 @@ draw[CMD_TEXT] = function(a, i) {
 
 	cx.textAlign = 'left'
 	cx.fillStyle = color
-	cx.fillText(s, x, y + abs(asc))
+
+	if (isstr(s)) {
+		cx.fillText(s, x, y + abs(asc))
+	} else if (wrap == TEXT_WRAP_LINE) {
+		for (let ss of s) {
+			cx.fillText(ss, x, y + abs(asc))
+			y += asc + dsc + line_gap * font_size
+		}
+	} else if (wrap == TEXT_WRAP_WORD) {
+
+	}
 
 	if (clip)
 		cx.restore()
@@ -1884,7 +1968,7 @@ draw[CMD_TEXT] = function(a, i) {
 let scrollbar_rect
 {
 let r = [false, 0, 0, 0, 0]
-scrollbar_rect = function(a, i, axis) {
+scrollbar_rect = function(a, i, axis, active) {
 	let x  = a[i+0]
 	let y  = a[i+1]
 	let w  = a[i+2]
@@ -1899,7 +1983,7 @@ scrollbar_rect = function(a, i, axis) {
 	let psy = sy / (ch - h)
 	let pw = w / cw
 	let ph = h / ch
-	let thickness = 10
+	let thickness = active ? theme.scrollbar_thickness_active : theme.scrollbar_thickness
 	let visible, tx, ty, tw, th
 	let h_visible = pw < 1
 	let v_visible = ph < 1
@@ -1963,9 +2047,12 @@ draw[CMD_END] = function(a, end_i) {
 			let cs = ui.captured(sbar_id)
 			let hs = ui.hovers(sbar_id)
 
+			if (cs || hs)
+				[visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
+
 			cx.beginPath()
 			cx.rect(tx, ty, tw, th)
-			cx.fillStyle = cs && 'green' || hs && 'red' || 'gray'
+			cx.fillStyle = ui.bg('scrollbar', cs && 'active' || hs && 'hover' || 'normal')[0]
 			cx.fill()
 
 		}
@@ -2070,6 +2157,7 @@ draw[CMD_COLOR] = function(a, i) {
 draw[CMD_FONT] = set_font
 draw[CMD_FONT_SIZE] = set_font_size
 draw[CMD_FONT_WEIGHT] = set_font_weight
+draw[CMD_LINE_GAP] = set_line_gap
 
 function draw_all() {
 	for (layer of a.layers) {
@@ -2175,8 +2263,6 @@ function hit_children(a, i) {
 
 hit[CMD_SCROLLBOX] = function(a, i) {
 	let id = a[i+SB_ID]
-	if (!id)
-		return
 
 	// fast-test the outer box since we're clipping the contents.
 	if (!hit_box(a, i))
@@ -2188,7 +2274,7 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 
 	// test the scrollbars
 	for (let axis = 0; axis < 2; axis++) {
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
 		if (!visible)
 			continue
 		if (!hit_rect(tx, ty, tw, th))
@@ -2652,17 +2738,19 @@ function split(hv, id, fixed_side, size, unit,
 ) {
 
 	let snap_px = 50
+	let splitter_w = 1
 
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h'
 	let [state, dx, dy] = ui.drag(id)
 	let s = ui.state(id)
 	let cs = ui.captured(id)
-	let max_size = cs?.get(W) ?? s.get(W)
+	let max_size = (cs?.get(W) ?? s.get(W) ?? 1/0) - splitter_w
+	assert(!unit || unit == 'px' || unit == '%')
 	let fixed = unit == 'px'
 	size = s.get('size') ?? size
-	let fr = fixed ? null : (size ?? 0.5)
-	let min_size = fixed ? (size ?? 0) : null
+	let fr = fixed ? 0 : (size ?? 0.5)
+	let min_size = fixed ? size ?? 0 : 0
 	if (state && state != 'hover') {
 		if (state == 'drag')
 			cs.set(W, s.get(W))
@@ -2697,9 +2785,9 @@ function split(hv, id, fixed_side, size, unit,
 	scope_set('split'   , hv)
 	scope_set('split_id', id)
 	scope_set('split_collapsed', collapsed)
-	scope_set('split_fr2', 1 - fr)
+	scope_set('split_fr2', fixed ? 1 : 1 - fr)
 
-	ui.sb('', fr, null, null, null, null, min_size)
+	ui.sb(id+'.scrollbox1', fr, null, null, null, null, min_size)
 
 	return size
 }
@@ -2750,7 +2838,7 @@ ui.splitter = function() {
 		ui.end_stack()
 	}
 
-	ui.sb('', fr2)
+	ui.sb(id+'.scrollbox2', fr2)
 }
 
 function end_split(hv) {
@@ -3188,21 +3276,27 @@ function make_frame() {
 			ui.color_picker('cp1')
 			if (ui.button('btn1', 'Wasup?'))
 				pr('clicked!')
-			ui.hsplit('hsplit1')
+			ui.hsplit('hsplit1', '[', 200, 'px')
 					ui.stack()
 						ui.bb('', 'bg2')
-						ui.text('', 'Hello1')
+						ui.text('', 'Hello1 Hello1 Hello1 Hello1')
 					ui.end_stack()
 				ui.splitter()
-					ui.vsplit('vsplit1')
+					ui.vsplit('vsplit1', '[')
 							ui.stack()
 								ui.bb('', 'input')
-								ui.text('', 'Hello2')
+								// (id, s, align, valign, fr, max_min_w, min_w, min_h, wrap)
+								ui.text('', `
+				Hello2 Hello2 Hello2 Hello2
+				Hello2 Hello2 Hello2
+				Hello2 Hello2
+				Hello2
+		`, null, null, null, null, null, null, 'line')
 							ui.end_stack()
 						ui.splitter()
 							ui.stack()
 								ui.bb('', 'bg1')
-								ui.text('', 'Hello3')
+								ui.text('', 'Hello3 Hello3 Hello3 Hello3')
 							ui.end_stack()
 					ui.end_vsplit()
 			ui.end_hsplit()
