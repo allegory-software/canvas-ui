@@ -132,20 +132,12 @@ function map_freelist() {
 // when using capture_pointer(), setting the cursor for the element that
 // is hovered doesn't work anymore, so use this hack instead.
 {
-let cursor_style
+let style = document.createElement('style')
+document.documentElement.appendChild(style)
 ui.set_cursor = function(cursor) {
-	if (cursor) {
-		if (!cursor_style) {
-			cursor_style = document.createElement('style')
-			cursor_style.innerHTML = '* {cursor: '+cursor+' !important; }'
-			document.documentElement.appendChild(cursor_style)
-		} else {
-			cursor_style.innerHTML = '* {cursor: '+cursor+' !important; }'
-		}
-	} else if (cursor_style) {
-		cursor_style.remove()
-		cursor_style = null
-	}
+	// TODO: use style API here, it's probably faster.
+	style.innerHTML = cursor && captured_id ? `.ui-canvas {cursor: ${cursor} !important; }` : ''
+	canvas.style.cursor = cursor ?? 'initial'
 }
 }
 
@@ -306,9 +298,9 @@ ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.25)
 ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.27)
 ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.11)
 ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
-ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.98)
-ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.94)
-ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.90)
+ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
+ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
+ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
 ui.bg_style('light', 'button-primary', 'normal' , ui.fg('link', 'normal', 'light'))
 ui.bg_style('light', 'button-primary', 'hover'  , ui.fg('link', 'hover' , 'light'))
@@ -445,8 +437,10 @@ canvas.on('pointermove', function(ev) {
 })
 
 canvas.on('pointerleave', function(ev) {
-	mx = null
-	my = null
+	if (!captured_id) {
+		mx = null
+		my = null
+	}
 	ui.set_cursor()
 	hit_all()
 	redraw()
@@ -1014,7 +1008,7 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? POPUP_TARGET_PARENT,
 		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
-		popup_parse_flags(flags ?? 'change_side constrain'),
+		popup_parse_flags(flags ?? ''),
 	)
 	begin_layer(layer1, i)
 }
@@ -2511,7 +2505,7 @@ function draw_node(id, t_t, t, depth) {
 }
 function template_editor(id, t, ch_t) {
 
-	ui.begin_toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
+	ui.toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
 		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.p(10)
 			ui.v(1, 0, 's', 't')
@@ -2520,7 +2514,7 @@ function template_editor(id, t, ch_t) {
 		ui.end_scrollbox()
 	ui.end_toolbox(id+'.tree_toolbox')
 
-	ui.begin_toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
+	ui.toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
 		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.v(1, 0, 's', 't')
 			let defs = tprops[ch_t.t]
@@ -2653,38 +2647,59 @@ ui.button = function(id, s, style, align, valign) {
 
 // split ---------------------------------------------------------------------
 
-function split(hv, id, fixed_side, size0, unit,
-	fr, gap, align, valign, min_w, min_h,
+function split(hv, id, fixed_side, size, unit,
+	split_fr, gap, align, valign, min_w, min_h,
 ) {
 
+	let snap_px = 50
+
+	let horiz = hv == 'h'
+	let W = horiz ? 'w' : 'h'
 	let [state, dx, dy] = ui.drag(id)
 	let s = ui.state(id)
 	let cs = ui.captured(id)
-	let min_size = 0
-	let max_size = cs?.get('w') ?? s.get('w') ?? 1/0
-	let size = s.get('size') ?? size0 ?? 0
-	if (state == 'drag') {
-		cs.set('w', s.get('w'))
-	}
-	if (state) {
-		size += dx
-		if (size < 20)
-			size = 0
-		ui.set_cursor('ew-resize')
-	}
-	size = clamp(size, min_size, max_size)
-	if (state == 'drop') {
-		ui.state(id).set('size', size)
+	let max_size = cs?.get(W) ?? s.get(W)
+	let fixed = unit == 'px'
+	size = s.get('size') ?? size
+	let fr = fixed ? null : (size ?? 0.5)
+	let min_size = fixed ? (size ?? 0) : null
+	if (state && state != 'hover') {
+		if (state == 'drag')
+			cs.set(W, s.get(W))
+		let size_px = fixed ? min_size : round(fr * max_size)
+		size_px += horiz ? dx : dy
+		if (size_px < snap_px)
+			size_px = 0
+		else if (size_px > max_size - snap_px)
+			size_px = max_size
+		size_px = min(size_px, max_size)
+		if (fixed)
+			min_size = size_px
+		else
+			fr = size_px / max_size
+		if (state == 'drop')
+			s.set('size', fixed ? min_size : fr)
 	}
 
-	ui.h(fr, gap, align, valign, min_w, min_h)
-	ui.measure(id)
+	ui[hv](split_fr, gap, align, valign, min_w, min_h)
+
+	if (state) {
+		ui.set_cursor(horiz ? 'ew-resize' : 'ns-resize')
+		ui.measure(id)
+	}
+
+	// TODO: because max_size is not available on the first frame,
+	// the `collapsed` state can be wrong on the first frame! find a way...
+	let collapsed = fixed
+		? min_size == 0 || (max_size != null && min_size == max_size)
+		: fr == 0 || fr == 1
 
 	scope_set('split'   , hv)
 	scope_set('split_id', id)
-	scope_set('split_size', size)
+	scope_set('split_collapsed', collapsed)
+	scope_set('split_fr2', 1 - fr)
 
-	ui.sb('', 0, null, null, null, null, size)
+	ui.sb('', fr, null, null, null, null, min_size)
 
 	return size
 }
@@ -2693,35 +2708,54 @@ ui.splitter = function() {
 
 	ui.end_sb()
 
-	let hv   = scope_get('split')
-	let id   = scope_get('split_id')
-	let size = scope_get('split_size')
+	let hit_distance = 10
 
-	ui.stack('', 0, 'l', 's', 10)
-		ui.popup('', layer_popup, null, 'it', '[]')
-			ui.ml(-5)
-			ui.stack(id, 0, 'l', 's', 10)
-				let b = ui.border('intense', ui.hit(id) ? 'hover' : 'normal')
-				ui.stack('', 1, 'c', 's')
-					ui.bb('', null, 'l', b)
-				ui.end_stack()
-				if (!size) {
-					ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
-						ui.bb('', null, 'lr', b)
+	let hv = scope_get('split')
+	let id = scope_get('split_id')
+	let collapsed = scope_get('split_collapsed')
+	let fr2 = scope_get('split_fr2')
+	let b = ui.border('intense', ui.hit(id) ? 'hover' : 'normal')
+
+	if (hv == 'h') {
+		ui.stack('', 0, 'l', 's', 1, 0)
+			ui.popup('', layer_popup, null, 'it', '[]')
+				ui.ml(-hit_distance / 2)
+				ui.stack(id, 0, 'l', 's', hit_distance)
+					ui.stack('', 1, 'c', 's')
+						ui.bb('', null, 'l', b)
 					ui.end_stack()
-				}
-			ui.end_stack()
-		ui.end_popup()
-	ui.end_stack()
+					if (collapsed) {
+						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
+							ui.bb('', null, 'lr', b)
+						ui.end_stack()
+					}
+				ui.end_stack()
+			ui.end_popup()
+		ui.end_stack()
+	} else {
+		ui.stack('', 0, 's', 't', 0, 1)
+			ui.popup('', layer_popup, null, 'it', '[]')
+				ui.mt(-hit_distance / 2)
+				ui.stack(id, 0, 's', 't', 0, hit_distance)
+					ui.stack('', 1, 's', 'c')
+						ui.bb('', null, 't', b)
+					ui.end_stack()
+					if (collapsed) {
+						ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
+							ui.bb('', null, 'tb', b)
+						ui.end_stack()
+					}
+				ui.end_stack()
+			ui.end_popup()
+		ui.end_stack()
+	}
 
-	ui.sb()
+	ui.sb('', fr2)
 }
 
 function end_split(hv) {
 
 	ui.end_sb()
-
-	assert(scope_get('split') == hv)
 
 	if (hv == 'h')
 		ui.end_h()
@@ -2783,7 +2817,7 @@ ui.drag = function(id, move, dx0, dy0) {
 
 // toolbox widget ------------------------------------------------------------
 
-ui.begin_toolbox = function(id, title, align, x0, y0) {
+ui.toolbox = function(id, title, align, x0, y0) {
 
 	let align_start = parse_align(align || '[') == ALIGN_START
 	let [dstate, dx, dy] = ui.drag(id+'.title')
@@ -3147,24 +3181,31 @@ function make_frame() {
 	}
 
 	if (1) {
-		//ui.m(10)
-		//ui.p(10)
-
+		ui.m(10)
+		ui.p(10)
 		ui.v()
 			ui.bb('', 'bg1')
 			ui.color_picker('cp1')
 			if (ui.button('btn1', 'Wasup?'))
 				pr('clicked!')
-			ui.h(1, 0)
-				ui.hsplit('hsplit1', '[')
-						ui.stack()
-							ui.bb('', 'bg2')
-							ui.text('', 'Hello1')
-						ui.end_stack()
-					ui.splitter()
-						ui.text('', 'Hello2')
-				ui.end_hsplit()
-			ui.end_h()
+			ui.hsplit('hsplit1')
+					ui.stack()
+						ui.bb('', 'bg2')
+						ui.text('', 'Hello1')
+					ui.end_stack()
+				ui.splitter()
+					ui.vsplit('vsplit1')
+							ui.stack()
+								ui.bb('', 'input')
+								ui.text('', 'Hello2')
+							ui.end_stack()
+						ui.splitter()
+							ui.stack()
+								ui.bb('', 'bg1')
+								ui.text('', 'Hello3')
+							ui.end_stack()
+					ui.end_vsplit()
+			ui.end_hsplit()
 		ui.end_v()
 	}
 
