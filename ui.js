@@ -1362,12 +1362,14 @@ measure[CMD_FONT_WEIGHT] = set_font_weight
 measure[CMD_LINE_GAP] = set_line_gap
 
 let word_wrapper_freelist = freelist(function() {
+
 	let s
 	let words  = [] // [word1,...]
 	let widths = [] // [w1,...]
 	let lines  = [] // [line1_i,line1_w,...]
 	let sp_w // width of a single space character.
 	let ww = {lines: lines, words: words, widths: widths}
+
 	ww.set_text = function(s1) {
 		s1 = s1.trim()
 		if (s1 == s)
@@ -1375,6 +1377,9 @@ let word_wrapper_freelist = freelist(function() {
 		ww.clear()
 		s = s1
 	}
+
+	// skip spaces, advancing i1 to the first non-space char and i2
+	// to first space char after that, or to 1/0 if no space char was found.
 	let i1
 	function skip_spaces(s) {
 		while (1) {
@@ -1419,6 +1424,7 @@ let word_wrapper_freelist = freelist(function() {
 			ww.min_w = max(ww.min_w, m.width)
 		}
 	}
+
 	let last_ct_w, last_line_gap
 	ww.wrap = function(ct_w, align) {
 		if (!s)
@@ -1432,9 +1438,9 @@ let word_wrapper_freelist = freelist(function() {
 		let max_line_w = 0
 		let line_i = 0
 		let sep_w = 0
-		for (let i = 0, n = widths.length; i < n; i++) {
-			let w = widths[i]
-			if (i == n-1 || ceil(line_w + sep_w + w) > ct_w) {
+		for (let i = 0, n = widths.length; i <= n; i++) {
+			let w = i < n ? widths[i] : 0
+			if (i == n || ceil(line_w + sep_w + w) > ct_w) {
 				line_w = ceil(line_w)
 				max_line_w = max(max_line_w, line_w)
 				lines.push(line_i)
@@ -1451,6 +1457,7 @@ let word_wrapper_freelist = freelist(function() {
 		ww.h = line_count * ceil(ww.asc + ww.dsc)
 			+ (line_count-1) * round(line_gap * font_size)
 	}
+
 	ww.clear = function() {
 		s = null
 		words .length = 0
@@ -1460,6 +1467,7 @@ let word_wrapper_freelist = freelist(function() {
 		last_ct_w = null
 		last_line_gap = null
 	}
+
 	return ww
 })
 
@@ -2159,6 +2167,7 @@ draw[CMD_TEXT] = function(a, i) {
 				cx.fillText(s1, x, y + asc)
 				x += w1 + ww.sp_w
 			}
+
 			y += asc + dsc + round(line_gap * font_size)
 		}
 	}
