@@ -1365,7 +1365,7 @@ let word_wrapper_freelist = freelist(function() {
 	let s
 	let words  = [] // [word1,...]
 	let widths = [] // [w1,...]
-	let lines  = [] // [line1_i,...]
+	let lines  = [] // [line1_i,line1_w,...]
 	let sp_w // width of a single space character.
 	let ww = {lines: lines, words: words, widths: widths}
 	ww.set_text = function(s1) {
@@ -1420,7 +1420,7 @@ let word_wrapper_freelist = freelist(function() {
 		}
 	}
 	let last_ct_w, last_line_gap
-	ww.wrap = function(ct_w) {
+	ww.wrap = function(ct_w, align) {
 		if (!s)
 			return
 		if (ct_w == last_ct_w && line_gap * font_size == last_line_gap)
@@ -1438,6 +1438,7 @@ let word_wrapper_freelist = freelist(function() {
 				line_w = ceil(line_w)
 				max_line_w = max(max_line_w, line_w)
 				lines.push(line_i)
+				lines.push(line_w)
 				line_w = 0
 				sep_w = 0
 				line_i = i
@@ -1445,9 +1446,10 @@ let word_wrapper_freelist = freelist(function() {
 			line_w += sep_w + w
 			sep_w = sp_w
 		}
+		let line_count = lines.length / 2
 		ww.w = ceil(max_line_w)
-		ww.h = lines.length * ceil(ww.asc + ww.dsc)
-			+ (lines.length-1) * round(line_gap * font_size)
+		ww.h = line_count * ceil(ww.asc + ww.dsc)
+			+ (line_count-1) * round(line_gap * font_size)
 	}
 	ww.clear = function() {
 		s = null
@@ -2105,7 +2107,6 @@ draw[CMD_TEXT] = function(a, i) {
 	let x   = a[i+0]
 	let y   = a[i+1]
 	let w   = a[i+2]
-	let h   = a[i+3]
 	let s   = a[i+TEXT_S]
 	let asc = a[i+TEXT_ASC]
 	let dsc = a[i+TEXT_DSC]
@@ -2133,19 +2134,32 @@ draw[CMD_TEXT] = function(a, i) {
 			y += asc + dsc + round(line_gap * font_size)
 		}
 	} else if (wrap == TEXT_WRAP_WORD) {
+
+		let align = a[i+ALIGN]
 		let x0 = x
 		let ww = s
-		for (let k = 0, n = ww.lines.length; k < n; k++) {
-			let i1 = ww.lines[k]
-			let i2 = ww.lines[k+1] ?? ww.words.length
+
+		for (let k = 0, n = ww.lines.length; k < n; k += 2) {
+
+			let i1     = ww.lines[k]
+			let line_w = ww.lines[k+1]
+			let i2     = ww.lines[k+2] ?? ww.words.length
+
+			let x
+			if (align == ALIGN_END)
+				x = x0 + w - line_w
+			else if (align == ALIGN_CENTER)
+				x = x0 + round((w - line_w) / 2)
+			else
+				x = x0
+
 			for (let i = i1; i < i2; i++) {
-				let w = ww.widths[i]
-				let s = ww.words[i]
-				cx.fillText(s, x, y + asc)
-				x += w + ww.sp_w
+				let s1 = ww.words [i]
+				let w1 = ww.widths[i]
+				cx.fillText(s1, x, y + asc)
+				x += w1 + ww.sp_w
 			}
 			y += asc + dsc + round(line_gap * font_size)
-			x = x0
 		}
 	}
 
@@ -3480,7 +3494,7 @@ function make_frame() {
 							in these circumstances would not be theft. Property rights are not
 							applicable to things of infinite abundance, because there cannot be
 							conflict over such things.
-						`, 'l')
+						`, 'c')
 					ui.end_stack()
 				ui.splitter()
 					ui.vsplit('vsplit1', '[')
