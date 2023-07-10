@@ -115,17 +115,21 @@ function hash32(s) {
 	return hash
 }
 
-function map_freelist() {
+function freelist(cons) {
 	let fl = []
-	return function(m) {
-		if (m) {
-			m.clear()
-			fl.push(m)
+	return function(o) {
+		if (o) {
+			o.clear()
+			fl.push(o)
 		} else {
-			m = fl.pop()
-			return m || map()
+			o = fl.pop()
+			return o || cons()
 		}
 	}
+}
+
+function map_freelist() {
+	return freelist(map)
 }
 
 // when using capture_pointer(), setting the cursor for the element that
@@ -420,8 +424,8 @@ function reset_mouse() {
 }
 
 canvas.on('pointerdown', function(ev) {
-	mx = ev.clientX * dpr
-	my = ev.clientY * dpr
+	mx = round(ev.clientX * dpr)
+	my = round(ev.clientY * dpr)
 	if (ev.which == 1) {
 		click = true
 		pressed = true
@@ -432,8 +436,8 @@ canvas.on('pointerdown', function(ev) {
 })
 
 canvas.on('pointerup', function(ev) {
-	mx = ev.clientX * dpr
-	my = ev.clientY * dpr
+	mx = round(ev.clientX * dpr)
+	my = round(ev.clientY * dpr)
 	if (ev.which == 1) {
 		pressed = false
 		clickup = true
@@ -444,8 +448,8 @@ canvas.on('pointerup', function(ev) {
 })
 
 canvas.on('pointermove', function(ev) {
-	mx = ev.clientX * dpr
-	my = ev.clientY * dpr
+	mx = round(ev.clientX * dpr)
+	my = round(ev.clientY * dpr)
 	hit_all()
 	redraw()
 })
@@ -590,7 +594,7 @@ function scope_prev_var(ended_scope, k) {
 // id state maps -------------------------------------------------------------
 
 let id_state_map_freelist = map_freelist()
-let id_state_maps = map() // {id->map}
+let id_state_maps  = map() // {id->map}
 let id_current_set = set() // {id}
 let id_remove_set  = set() // {id}
 
@@ -614,6 +618,9 @@ ui.state = function(id) {
 function id_state_gc() {
 	for (let id of id_remove_set) {
 		let m = id_state_maps.get(id)
+		let free = m.get('free')
+		if (free)
+			free(id, m)
 		id_state_maps.delete(id)
 		id_state_map_freelist(m)
 	}
@@ -621,6 +628,19 @@ function id_state_gc() {
 	let empty = id_remove_set
 	id_remove_set = id_current_set
 	id_current_set = empty
+}
+
+ui.on_free = function(id, free1) {
+	let s = ui.state(id)
+	let free0 = s.get('free')
+	if (!free0) {
+		s.set('free', free1)
+	} else {
+		s.set('free', function(id, m) {
+			free0(id, m)
+			free1(id, m)
+		})
+	}
 }
 
 // measure state -------------------------------------------------------------
@@ -1140,6 +1160,13 @@ const CMD_TEXT = cmd('text')
 ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap) {
 	// NOTE: min_w and min_h are measured, not given.
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
+	if (wrap == TEXT_WRAP_LINE) {
+ 		if (s.includes('\n'))
+			s = s.split('\n')
+	} else if (wrap == TEXT_WRAP_WORD) {
+		assert(id, 'wrapped text needs id')
+		s = word_wrapper(id, s)
+	}
 	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? 'c', valign ?? 'c',
 		min_w ?? -1, // -1=auto
 		min_h ?? -1, // -1=auto
@@ -1148,9 +1175,15 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap) {
 		0, // text_x
 		max_min_w ?? -1, // -1=inf
 		id,
-		wrap == TEXT_WRAP_LINE && s.includes('\n') ? s.split('\n') : s,
+		s,
 		wrap,
 	)
+}
+ui.text_lines = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
+	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'line')
+}
+ui.text_wrapped = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
+	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'word')
 }
 
 const CMD_COLOR = cmd('color')
@@ -1328,22 +1361,161 @@ measure[CMD_FONT_SIZE] = set_font_size
 measure[CMD_FONT_WEIGHT] = set_font_weight
 measure[CMD_LINE_GAP] = set_line_gap
 
+let word_wrapper_freelist = freelist(function() {
+	let s
+	let words  = [] // [word1,...]
+	let widths = [] // [w1,...]
+	let lines  = [] // [line1_i,...]
+	let sp_w // width of a single space character.
+	let ww = {lines: lines, words: words, widths: widths}
+	ww.set_text = function(s1) {
+		s1 = s1.trim()
+		if (s1 == s)
+			return
+		ww.clear()
+		s = s1
+	}
+	let i1
+	function skip_spaces(s) {
+		while (1) {
+			let i3 = s.indexOf(' ' , i1); if (i3 == i1) { i1++; continue; }
+			let i4 = s.indexOf('\n', i1); if (i4 == i1) { i1++; continue; }
+			let i5 = s.indexOf('\r', i1); if (i5 == i1) { i1++; continue; }
+			let i6 = s.indexOf('\t', i1); if (i6 == i1) { i1++; continue; }
+			return min(
+				i3 == -1 ? 1/0 : i3,
+				i4 == -1 ? 1/0 : i4,
+				i5 == -1 ? 1/0 : i5,
+				i6 == -1 ? 1/0 : i6,
+			)
+		}
+	}
+	let last_font
+	ww.measure = function() {
+		if (cx.font == last_font)
+			return
+		last_font = cx.font
+		let m = cx.measureText(' ') // makes garbage!
+		sp_w = m.width
+		ww.sp_w = sp_w
+		ww.asc = m.fontBoundingBoxAscent
+		ww.dsc = m.fontBoundingBoxDescent
+		if (!s) {
+			ww.w = 0
+			ww.h = ceil(ww.asc + ww.dsc)
+			return
+		}
+		i1 = 0
+		while (i1 < 1/0) {
+			let i2 = skip_spaces(s)
+			let word = s.substring(i1, i2)
+			words.push(word)
+			i1 = i2
+		}
+		ww.min_w = 0
+		for (let s of words) {
+			let m = cx.measureText(s) // makes garbage!
+			widths.push(m.width)
+			ww.min_w = max(ww.min_w, m.width)
+		}
+	}
+	let last_ct_w, last_line_gap
+	ww.wrap = function(ct_w) {
+		if (!s)
+			return
+		if (ct_w == last_ct_w && line_gap * font_size == last_line_gap)
+			return
+		last_ct_w = ct_w
+		last_line_gap = line_gap * font_size
+		lines.length = 0
+		let line_w = 0
+		let max_line_w = 0
+		let line_i = 0
+		let sep_w = 0
+		for (let i = 0, n = widths.length; i < n; i++) {
+			let w = widths[i]
+			if (i == n-1 || ceil(line_w + sep_w + w) > ct_w) {
+				line_w = ceil(line_w)
+				max_line_w = max(max_line_w, line_w)
+				lines.push(line_i)
+				line_w = 0
+				sep_w = 0
+				line_i = i
+			}
+			line_w += sep_w + w
+			sep_w = sp_w
+		}
+		ww.w = ceil(max_line_w)
+		ww.h = lines.length * ceil(ww.asc + ww.dsc)
+			+ (lines.length-1) * round(line_gap * font_size)
+	}
+	ww.clear = function() {
+		s = null
+		words .length = 0
+		widths.length = 0
+		lines .length = 0
+		last_font = null
+		last_ct_w = null
+		last_line_gap = null
+	}
+	return ww
+})
+
+function free_word_wrapper(id, s) {
+	let ww = s.get('ww')
+	word_wrapper_freelist(ww)
+}
+
+function word_wrapper(id, text) {
+	let s = ui.state(id)
+	let ww = s.get('ww')
+	if (!ww) {
+		ww = word_wrapper_freelist()
+		s.set('ww', ww)
+		ui.on_free(id, free_word_wrapper)
+	}
+	ww.set_text(text)
+	return ww
+}
+
 measure[CMD_TEXT] = function(a, i, axis) {
-	let fr = a[i+FR]
-	if (!axis) { // measure once
+	let wrap = a[i+TEXT_WRAP]
+	if (wrap == TEXT_WRAP_WORD) {
+		// word-wrapping is the reason for splitting the layouting algorithm
+		// into interlaced per-axis measuring and positioning phases.
+		let id = a[i+TEXT_ID]
+		let ww = a[i+TEXT_S]
+		if (!axis) {
+			ww.measure()
+			let min_w = a[i+2]
+			let max_min_w = a[i+TEXT_W]
+			if (min_w == -1)
+				min_w = ww.min_w
+			if (max_min_w != -1)
+				min_w = min(max_min_w, min_w)
+			a[i+2] = min_w
+			a[i+TEXT_ASC] = round(ww.asc)
+			a[i+TEXT_DSC] = round(ww.dsc)
+		} else {
+			let min_h = a[i+3]
+			if (min_h == -1)
+				min_h = ww.h
+			a[i+3] = min_h
+		}
+	} else if (!axis) {
+		// measure everything once on the x-axis phase.
 		let s = a[i+TEXT_S]
-		let wrap = a[i+TEXT_WRAP]
 		let asc
 		let dsc
 		let text_w
 		let text_h
-		if (isstr(s)) {
-			let m = cx.measureText(s)
+		if (isstr(s)) { // single-line
+			let m = cx.measureText(s) // makes garbage!
 			asc = m.fontBoundingBoxAscent
 			dsc = m.fontBoundingBoxDescent
 			text_w = ceil(m.width)
 			text_h = ceil(asc+dsc)
-		} else if (wrap == TEXT_WRAP_LINE) {
+		} else { // multi-line, pre-wrapped
 			text_w = 0
 			text_h = 0
 			for (let ss of s) {
@@ -1353,9 +1525,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 				text_w = max(text_w, ceil(m.width))
 				text_h += ceil(asc+dsc)
 			}
-			text_h += (s.length-1) * line_gap * font_size
-		} else if (wrap == TEXT_WRAP_WORD) {
-			//
+			text_h += (s.length-1) * round(line_gap * font_size)
 		}
 		let min_w = a[i+2]
 		let min_h = a[i+3]
@@ -1372,7 +1542,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 	}
 	a[i+2+axis] += paddings(a, i, axis)
 	let min_w = a[i+2+axis]
-	add_ct_min_wh(a, axis, min_w, fr)
+	add_ct_min_wh(a, axis, min_w, a[i+FR])
 }
 
 function ct_stack_push(a, i) {
@@ -1464,8 +1634,15 @@ function inner_w(a, i, axis, ct_w) {
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	if (!axis) {
-		a[i+2] = a[i+TEXT_W] // we're positioning text_w, not min_w!
-		// store the segment we're clipping the text to, if we have to.
+		let wrap = a[i+TEXT_WRAP]
+		if (wrap == TEXT_WRAP_WORD) {
+			let ww = a[i+TEXT_S]
+			ww.wrap(sw)
+			a[i+2] = ww.w
+		} else {
+			a[i+2] = a[i+TEXT_W] // we're positioning text_w, not min_w!
+		}
+		// store the segment we might have to clip the text to.
 		a[i+TEXT_X] = sx + a[i+MX1] + a[i+PX1]
 		a[i+TEXT_W] = sw - paddings(a, i, 0)
 	}
@@ -1949,14 +2126,27 @@ draw[CMD_TEXT] = function(a, i) {
 	cx.fillStyle = color
 
 	if (isstr(s)) {
-		cx.fillText(s, x, y + abs(asc))
+		cx.fillText(s, x, y + asc)
 	} else if (wrap == TEXT_WRAP_LINE) {
 		for (let ss of s) {
-			cx.fillText(ss, x, y + abs(asc))
-			y += asc + dsc + line_gap * font_size
+			cx.fillText(ss, x, y + asc)
+			y += asc + dsc + round(line_gap * font_size)
 		}
 	} else if (wrap == TEXT_WRAP_WORD) {
-
+		let x0 = x
+		let ww = s
+		for (let k = 0, n = ww.lines.length; k < n; k++) {
+			let i1 = ww.lines[k]
+			let i2 = ww.lines[k+1] ?? ww.words.length
+			for (let i = i1; i < i2; i++) {
+				let w = ww.widths[i]
+				let s = ww.words[i]
+				cx.fillText(s, x, y + asc)
+				x += w + ww.sp_w
+			}
+			y += asc + dsc + round(line_gap * font_size)
+			x = x0
+		}
 	}
 
 	if (clip)
@@ -3277,9 +3467,20 @@ function make_frame() {
 			if (ui.button('btn1', 'Wasup?'))
 				pr('clicked!')
 			ui.hsplit('hsplit1', '[', 200, 'px')
+					ui.p(20)
 					ui.stack()
 						ui.bb('', 'bg2')
-						ui.text('', 'Hello1 Hello1 Hello1 Hello1')
+						ui.text_wrapped('text1', `
+							Were we in a Garden of Eden where land and other goods were infinitely
+							abundant, there would be no scarcity and, therefore, no need
+							for property rules; property concepts would be meaningless. The idea
+							of conflict, and the idea of rights, would not even arise. For example,
+							your taking my lawnmower would not really deprive me of it if I
+							could conjure up another in the blink of an eye. Lawnmower-taking
+							in these circumstances would not be theft. Property rights are not
+							applicable to things of infinite abundance, because there cannot be
+							conflict over such things.
+						`, 'l')
 					ui.end_stack()
 				ui.splitter()
 					ui.vsplit('vsplit1', '[')
