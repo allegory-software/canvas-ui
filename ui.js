@@ -97,15 +97,6 @@ let json = JSON.stringify
 
 function clock() { return performance.now() / 1000 }
 
-EventTarget.prototype.on = function(event, f, on) {
-	if (on == null)
-		on = true
-	if (on)
-		this.addEventListener(event, f)
-	else
-		this.removeEventListener(event, f)
-}
-
 function hash32(s) {
 	let hash = 0
 	for (let i = 0, n = s.length; i < n; i++) {
@@ -139,9 +130,39 @@ let style = document.createElement('style')
 document.documentElement.appendChild(style)
 ui.set_cursor = function(cursor) {
 	// TODO: use style API here, it's probably faster.
-	style.innerHTML = cursor && captured_id ? `.ui-canvas {cursor: ${cursor} !important; }` : ''
+	style.innerHTML = cursor && captured_id ? `* {cursor: ${cursor} !important; }` : ''
 	canvas.style.cursor = cursor ?? 'initial'
 }
+}
+
+// styles --------------------------------------------------------------------
+
+{
+let style = document.createElement('style')
+document.documentElement.appendChild(style)
+style.innerHTML = `
+
+.ui-screen {
+	box-sizing: border-box;
+	position: relative; /* all inner elements are positioned relative to it */
+	overflow: hidden; /* because hidden <input> elements go out of screen */
+}
+
+.ui-canvas {
+	box-sizing: border-box;
+	position: absolute;
+}
+
+.ui-input, .ui-input:focus {
+	box-sizing: border-box;
+	position: absolute;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	background: none;
+	outline: none;
+}
+`
 }
 
 // colors --------------------------------------------------------------------
@@ -364,18 +385,47 @@ ui.bg_style('dark' , 'row-unfocused'      , 'normal',   0, 0.00, 0.13)
 
 // canvas --------------------------------------------------------------------
 
+ui.screen = function() {
+
+	let screen = document.createElement('div')
+	screen.classList.add('ui-screen')
+	screen.style.boxSizing = 'border-box'
+	screen.style.position = 'relative' // for absolute inner elements
+	screen.style.overflow = 'hidden' // because hidden <input> elements go out of screen
+
+	let canvas = document.createElement('div')
+	screen.classList.add('ui-canvas')
+	screen.appendChild(canvas)
+	screen.canvas = canvas
+
+	let cx = canvas.getContext('2d')
+	screen.cx = cx
+
+	let resize_observer = new ResizeObserver(function(entries) {
+		for (let entry of entries)
+			resize_canvas(entry.target, entry.contentRect)
+	})
+
+	resize_observer.observe(screen)
+
+	screen.free = function() {
+		resize_observer.unobserve(this)
+	}
+
+	return screen
+}
+
 let a = []
 
 let dpr
 
-function resize_canvas() {
+function resize_canvas(screen, screen_rect) {
 	dpr = devicePixelRatio
-	let window_w = window.innerWidth
-	let window_h = window.innerHeight
-	let screen_w = floor(window_w * dpr)
-	let screen_h = floor(window_h * dpr)
-	canvas.style.width  = screen_w / dpr + 'px'
-	canvas.style.height = screen_h / dpr + 'px'
+	let screen_r = ui_screen.getBoundingClientRect()
+	let screen_w = floor(screen_r.width  * dpr)
+	let screen_h = floor(screen_r.height * dpr)
+	canvas.style.width  = (screen_w / dpr) + 'px'
+	canvas.style.height = (screen_h / dpr) + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
 	a.w = screen_w
@@ -402,7 +452,7 @@ function redraw() {
 	want_redraw = true
 	raf_id = requestAnimationFrame(raf_redraw)
 }
-window.on('resize', resize_canvas)
+window.addEventListener('resize', resize_canvas)
 
 // input event handling ------------------------------------------------------
 
@@ -423,7 +473,7 @@ function reset_mouse() {
 	trackpad = false
 }
 
-canvas.on('pointerdown', function(ev) {
+canvas.addEventListener('pointerdown', function(ev) {
 	mx = round(ev.clientX * dpr)
 	my = round(ev.clientY * dpr)
 	if (ev.which == 1) {
@@ -435,7 +485,7 @@ canvas.on('pointerdown', function(ev) {
 	}
 })
 
-canvas.on('pointerup', function(ev) {
+canvas.addEventListener('pointerup', function(ev) {
 	mx = round(ev.clientX * dpr)
 	my = round(ev.clientY * dpr)
 	if (ev.which == 1) {
@@ -447,14 +497,14 @@ canvas.on('pointerup', function(ev) {
 	}
 })
 
-canvas.on('pointermove', function(ev) {
+canvas.addEventListener('pointermove', function(ev) {
 	mx = round(ev.clientX * dpr)
 	my = round(ev.clientY * dpr)
 	hit_all()
 	redraw()
 })
 
-canvas.on('pointerleave', function(ev) {
+canvas.addEventListener('pointerleave', function(ev) {
 	if (!captured_id) {
 		mx = null
 		my = null
@@ -464,7 +514,7 @@ canvas.on('pointerleave', function(ev) {
 	redraw()
 })
 
-canvas.on('wheel', function(ev) {
+canvas.addEventListener('wheel', function(ev) {
 	wheel_dy = ev.wheelDeltaY
 	if (!wheel_dy)
 		return
@@ -500,6 +550,10 @@ ui.captured = function(id) {
 		return
 	return capture_state
 }
+
+canvas.addEventListener('keydown', function(ev) {
+	// TODO
+})
 
 // z-layers ------------------------------------------------------------------
 
@@ -603,7 +657,7 @@ function id_touch(id) {
 	id_remove_set.delete(id)
 }
 
-ui.state = function(id) {
+ui.state_map = function(id) {
 	if (!id)
 		return
 	id_touch(id)
@@ -615,12 +669,25 @@ ui.state = function(id) {
 	return m
 }
 
+ui.state = function(id, k) {
+	if (!id)
+		return
+	let m = id_state_maps.get(id)
+	if (!m)
+		return
+	return m.get(k)
+}
+
+ui.set_state = function(id, k, v) {
+	ui.state_map(id).set(k, v)
+}
+
 function id_state_gc() {
 	for (let id of id_remove_set) {
 		let m = id_state_maps.get(id)
 		let free = m.get('free')
 		if (free)
-			free(id, m)
+			free(m, id)
 		id_state_maps.delete(id)
 		id_state_map_freelist(m)
 	}
@@ -631,14 +698,14 @@ function id_state_gc() {
 }
 
 ui.on_free = function(id, free1) {
-	let s = ui.state(id)
+	let s = ui.state_map(id)
 	let free0 = s.get('free')
 	if (!free0) {
 		s.set('free', free1)
 	} else {
-		s.set('free', function(id, m) {
-			free0(id, m)
-			free1(id, m)
+		s.set('free', function(s, id) {
+			free0(s, id)
+			free1(s, id)
 		})
 	}
 }
@@ -656,7 +723,7 @@ function measure_req_all() {
 	for (let k = 0, n = measure_req.length; k < n; k += 2) {
 		let id = measure_req[k+0]
 		let i  = measure_req[k+1]
-		let s = ui.state(id)
+		let s = ui.state_map(id)
 		s.set('x', a[i+0])
 		s.set('y', a[i+1])
 		s.set('w', a[i+2])
@@ -930,7 +997,7 @@ const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
 	assert(id, 'scrollbox must have an id')
-	let ss = ui.state(id)
+	let ss = ui.state_map(id)
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
 
@@ -1145,19 +1212,21 @@ ui.shadow = function(x, y, blur, spread, inset, color) {
 	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset, color)
 }
 
-const TEXT_ASC  = S-1
-const TEXT_DSC  = S-0
-const TEXT_X    = S+1
-const TEXT_W    = S+2
-const TEXT_ID   = S+3
-const TEXT_S    = S+4
-const TEXT_WRAP = S+5
+const TEXT_ASC      = S-1
+const TEXT_DSC      = S-0
+const TEXT_X        = S+1
+const TEXT_W        = S+2
+const TEXT_ID       = S+3
+const TEXT_S        = S+4
+const TEXT_FLAGS    = S+5
 
-const TEXT_WRAP_LINE = 1
-const TEXT_WRAP_WORD = 2
+const TEXT_WRAP      = 3 // bits 0 and 1
+const TEXT_WRAP_LINE = 1 // bit 1
+const TEXT_WRAP_WORD = 2 // bit 2
+const TEXT_EDITABLE  = 4 // bit 3
 
 const CMD_TEXT = cmd('text')
-ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap) {
+ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap, editable) {
 	// NOTE: min_w and min_h are measured, not given.
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
@@ -1175,15 +1244,18 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap) {
 		0, // text_x
 		max_min_w ?? -1, // -1=inf
 		id,
-		s,
-		wrap,
+		ui.state(id, 'text') ?? s,
+		wrap | (editable ? TEXT_EDITABLE : 0),
 	)
 }
-ui.text_lines = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
-	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'line')
+ui.text_input = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
+	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, null, true)
 }
-ui.text_wrapped = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
-	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'word')
+ui.text_lines = function(id, s, align, valign, fr, max_min_w, min_w, min_h, editable) {
+	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'line', editable)
+}
+ui.text_wrapped = function(id, s, align, valign, fr, max_min_w, min_w, min_h, editable) {
+	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'word', editable)
 }
 
 const CMD_COLOR = cmd('color')
@@ -1471,13 +1543,13 @@ let word_wrapper_freelist = freelist(function() {
 	return ww
 })
 
-function free_word_wrapper(id, s) {
+function free_word_wrapper(s) {
 	let ww = s.get('ww')
 	word_wrapper_freelist(ww)
 }
 
 function word_wrapper(id, text) {
-	let s = ui.state(id)
+	let s = ui.state_map(id)
 	let ww = s.get('ww')
 	if (!ww) {
 		ww = word_wrapper_freelist()
@@ -1489,7 +1561,7 @@ function word_wrapper(id, text) {
 }
 
 measure[CMD_TEXT] = function(a, i, axis) {
-	let wrap = a[i+TEXT_WRAP]
+	let wrap = a[i+TEXT_FLAGS] & TEXT_WRAP
 	if (wrap == TEXT_WRAP_WORD) {
 		// word-wrapping is the reason for splitting the layouting algorithm
 		// into interlaced per-axis measuring and positioning phases.
@@ -1644,7 +1716,7 @@ function inner_w(a, i, axis, ct_w) {
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	if (!axis) {
-		let wrap = a[i+TEXT_WRAP]
+		let wrap = a[i+TEXT_FLAGS] & TEXT_WRAP
 		if (wrap == TEXT_WRAP_WORD) {
 			let ww = a[i+TEXT_S]
 			ww.wrap(sw)
@@ -1914,9 +1986,9 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 			// wheel scrolling
 			if (axis && wheel_dy && ui.hit(id)) {
-				let sy0 = ui.state(id).get('scroll_y') ?? 0
+				let sy0 = ui.state_map(id).get('scroll_y') ?? 0
 				sy = clamp(sy - wheel_dy, 0, ch - h)
-				ui.state(id).set('scroll_y', sy)
+				ui.state_map(id).set('scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
 
@@ -1928,13 +2000,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 					let psx0 = cs.get('ps0')
 					let dpsx = (mx - mx0) / (w - tw)
 					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
-					ui.state(id).set('scroll_x', sx)
+					ui.state_map(id).set('scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
 					let psy0 = cs.get('ps0')
 					let dpsy = (my - my0) / (h - th)
 					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
-					ui.state(id).set('scroll_y', sy)
+					ui.state_map(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
 				break
@@ -2110,17 +2182,82 @@ draw[CMD_POPUP] = function(a, i) {
 		return true
 }
 
+function input_free(s) {
+	let input = s.get('input')
+	input.remove()
+}
+
+function input_focus(ev) {
+	ui.focused_id = this._ui_id
+	redraw()
+}
+
+function input_blur(ev) {
+	ui.focused_id = null
+	redraw()
+}
+
+function input_input(ev) {
+	let id = this._ui_id
+	ui.set_state(id, 'text', this.value)
+	redraw()
+}
+
+function input_keydown(ev) {
+	if (ev.key == 'Tab') {
+		// ev.preventDefault()
+	}
+}
+
+
 draw[CMD_TEXT] = function(a, i) {
 
-	let x   = a[i+0]
-	let y   = a[i+1]
-	let w   = a[i+2]
-	let s   = a[i+TEXT_S]
-	let asc = a[i+TEXT_ASC]
-	let dsc = a[i+TEXT_DSC]
-	let sx  = a[i+TEXT_X]
-	let sw  = a[i+TEXT_W]
-	let wrap= a[i+TEXT_WRAP]
+	let x        = a[i+0]
+	let y        = a[i+1]
+	let w        = a[i+2]
+	let s        = a[i+TEXT_S]
+	let asc      = a[i+TEXT_ASC]
+	let dsc      = a[i+TEXT_DSC]
+	let sx       = a[i+TEXT_X]
+	let sw       = a[i+TEXT_W]
+	let id       = a[i+TEXT_ID]
+	let flags    = a[i+TEXT_FLAGS]
+	let wrap     = flags & TEXT_WRAP
+	let editable = flags & TEXT_EDITABLE
+
+	if (editable) {
+		let state = ui.state_map(id)
+		let input = state.get('input')
+		if (!input) {
+
+			input = document.createElement('input')
+			input._ui_id = id
+			input.classList.add('ui-input')
+			input.addEventListener('focus', input_focus)
+			input.addEventListener('blur' , input_blur)
+			input.addEventListener('input', input_input)
+			input.addEventListener('keydown', input_keydown)
+			ui_screen.appendChild(input)
+
+			state.set('input', input)
+			ui.on_free(id, input_free)
+		}
+
+		input.value = s
+		input.style.fontFamily = font
+		input.style.fontWeight = font_weight
+		input.style.fontSize   = (font_size / dpr)+'px'
+		input.style.color      = color
+		input.style.left   = (x / dpr)+'px'
+		input.style.top    = (y / dpr)+'px'
+		input.style.width  = (w / dpr)+'px'
+
+		input.style.opacity = ui.focused(id) ? 1 : 0
+
+		if (ui.focused(id))
+			return
+	}
+
 	let clip = w > sw
 
 	if (clip) {
@@ -2135,12 +2272,16 @@ draw[CMD_TEXT] = function(a, i) {
 	cx.fillStyle = color
 
 	if (isstr(s)) {
+
 		cx.fillText(s, x, y + asc)
+
 	} else if (wrap == TEXT_WRAP_LINE) {
+
 		for (let ss of s) {
 			cx.fillText(ss, x, y + asc)
 			y += asc + dsc + round(line_gap * font_size)
 		}
+
 	} else if (wrap == TEXT_WRAP_WORD) {
 
 		let align = a[i+ALIGN]
@@ -2607,10 +2748,28 @@ function redraw_all() {
 			draw_all()
 		reset_all()
 		reset_mouse()
+		focusing_id = null
 	}
 }
 
 reset_all()
+
+// focusing ------------------------------------------------------------------
+
+let focusing_id
+
+ui.focus = function(id) {
+	ui.focused_id = id
+	focusing_id = id
+}
+
+ui.focused = function(id) {
+	return id && ui.focused_id == id
+}
+
+ui.focusing = function(id) {
+	return id && focusing_id == id
+}
 
 // template widget -----------------------------------------------------------
 
@@ -2956,7 +3115,7 @@ function split(hv, id, fixed_side, size, unit,
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h'
 	let [state, dx, dy] = ui.drag(id)
-	let s = ui.state(id)
+	let s = ui.state_map(id)
 	let cs = ui.captured(id)
 	let max_size = (cs?.get(W) ?? s.get(W) ?? 1/0) - splitter_w
 	assert(!unit || unit == 'px' || unit == '%')
@@ -3071,7 +3230,6 @@ ui.vsplit = function(...args) { return split('v', ...args) }
 ui.end_hsplit = function() { end_split('h') }
 ui.end_vsplit = function() { end_split('v') }
 
-
 // list ----------------------------------------------------------------------
 
 ui.list = function(id, items) {
@@ -3122,7 +3280,7 @@ ui.toolbox = function(id, title, align, x0, y0) {
 
 	let align_start = parse_align(align || '[') == ALIGN_START
 	let [dstate, dx, dy] = ui.drag(id+'.title')
-	let s = ui.state(id)
+	let s = ui.state_map(id)
 	let mx1 =  align_start ? (s.get('mx1') ?? x0) + dx : 0
 	let mx2 = !align_start ? (s.get('mx2') ?? x0) - dx : 0
 	let my1 = (s.get('my1') ?? y0) + dy
@@ -3262,11 +3420,11 @@ ui.widget('resizer', {
 			ui.set_cursor(cursors[side])
 			if (side == 'right' || side == 'bottom_right') {
 				let min_w = cs.get('min_w')
-				ui.state(ct_id).set('min_w', min_w + dx)
+				ui.state_map(ct_id).set('min_w', min_w + dx)
 			}
 			if (side == 'bottom' || side == 'bottom_right') {
 				let min_h = cs.get('min_h')
-				ui.state(ct_id).set('min_h', min_h + dy)
+				ui.state_map(ct_id).set('min_h', min_h + dy)
 			}
 		}
 
@@ -3380,7 +3538,7 @@ ui.box_widget('color_picker', {
 		let sw = a[i+2]
 		let sh = a[i+3]
 		let id = a[i+S-1]
-		let s = ui.state(id)
+		let s = ui.state_map(id)
 
 		let hs = ui.hovers(id)
 		let hit = hs && hs.get('hit')
@@ -3520,7 +3678,10 @@ function make_frame() {
 						ui.splitter()
 							ui.stack()
 								ui.bb('', 'bg1')
-								ui.text('', 'Hello3 Hello3 Hello3 Hello3')
+								ui.v(1, 0, 's', 'c')
+									ui.text_input('input1', 'Hello3 Hello3 Hello3 Hello3')
+									ui.text_input('input2', 'Hello3 Hello3')
+								ui.end_v()
 							ui.end_stack()
 					ui.end_vsplit()
 			ui.end_hsplit()
@@ -3530,6 +3691,15 @@ function make_frame() {
 	// redraw()
 
 }
+
+ui.focus('input1')
+
+let blink
+setInterval(function() {
+	return
+	ui.focus(blink ? 'input1' : null)
+	blink = !blink
+}, 1000)
 
 // debugging -----------------------------------------------------------------
 

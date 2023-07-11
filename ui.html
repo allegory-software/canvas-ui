@@ -15,16 +15,22 @@ html, body {
 }
 body {
 	display: flex;
-	position: relative;
-	background: black;
+	padding:
 }
-.ui-canvas {
-	position: absolute;
+
+#ui_screen {
+	flex: 1; /* stretch it */
 }
+
 </style>
 </head>
 <body>
-<canvas class=ui-canvas id=canvas></canvas>
+<div id=ui_screen class=ui-screen>
+	<canvas class=ui-canvas id=canvas></canvas>
+</div>
+<div>
+	something else
+</div>
 <script src=ui.js></script>
 </body>
 </html>
