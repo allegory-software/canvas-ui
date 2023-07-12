@@ -1,6 +1,6 @@
 /*
 
-	JavaScript IMGUI library with flexbox, popups, widgets and a RAD UI designer.
+	Canvas IMGUI library with flexbox, widgets and UI designer.
 	Written by Cosmin Apreutesei. Public Domain.
 
 */
@@ -11,6 +11,7 @@ let G = window
 
 // declare `ui = window` to get rid of the ui namespace.
 let ui = G.ui || {}
+G.ui = ui
 
 ui.DEBUG = 0
 
@@ -96,6 +97,17 @@ function noop() {}
 let json = JSON.stringify
 
 function clock() { return performance.now() / 1000 }
+
+function memoize(f) {
+	let t = map()
+	return function(x) {
+		if (t.has(x))
+			return t.get(x)
+		let y = f(x)
+		t.set(x, y)
+		return y
+	}
+}
 
 function hash32(s) {
 	let hash = 0
@@ -199,21 +211,29 @@ ui.hsl = function(h, s, L, a) {
 ui.scrollbar_thickness = 6
 ui.scrollbar_thickness_active = 12
 
-function theme_make(default_color) {
-	return {
+function array_of_arrays(n) {
+	let a = []
+	for (let i = 0; i < n; i++)
+		a.push([])
+	return a
+}
+
+function theme_make(name, default_color) {
+	themes[name] = {
+		name   : name,
 		default_color : default_color,
 		scrollbar_thickness        : ui.scrollbar_thickness,
 		scrollbar_thickness_active : ui.scrollbar_thickness_active,
-		fg     : [[], [], []], // normal, hover, active
-		border : [[], [], []], // normal, hover, active
-		bg     : [[], [], []], // normal, hover, active
+		fg     : array_of_arrays(63),
+		border : array_of_arrays(63),
+		bg     : array_of_arrays(63),
 		shadow : [],
 	}
 }
-let themes = {
-	light: theme_make('black'),
-	dark : theme_make('white'),
-}
+let themes = {}
+theme_make('light', 'black')
+theme_make('dark' , 'white')
+
 let theme = themes.dark
 
 ui.dark_mode = function(on) {
@@ -221,15 +241,44 @@ ui.dark_mode = function(on) {
 	ui.redraw()
 }
 
+// state parsing -------------------------------------------------------------
+
+const STATE_NORMAL        =  0
+const STATE_HOVER         =  1
+const STATE_ACTIVE        =  2
+const STATE_FOCUSED       =  4
+const STATE_ITEM_SELECTED =  8
+const STATE_ITEM_FOCUSED  = 16
+const STATE_ITEM_ERROR    = 32
+
+let parse_state_combis = memoize(function(s) {
+	s = ' '+s
+	let b = 0
+	if (s.includes(' normal'       )) b |= STATE_NORMAL
+	if (s.includes(' hover'        )) b |= STATE_HOVER
+	if (s.includes(' active'       )) b |= STATE_ACTIVE
+	if (s.includes(' focused'      )) b |= STATE_FOCUSED
+	if (s.includes(' item-selected')) b |= STATE_ITEM_SELECTED
+	if (s.includes(' item-focused' )) b |= STATE_ITEM_FOCUSED
+	if (s.includes(' item-error'   )) b |= STATE_ITEM_ERROR
+	return b
+})
+function parse_state(s) {
+	if (!s || s == 'normal') return STATE_NORMAL
+	if (s == 'hover') return STATE_HOVER
+	if (s == 'active') return STATE_ACTIVE
+	return parse_state_combis(s)
+}
+
 // text colors ---------------------------------------------------------------
 
 ui.fg_style = function(theme, name, state, h, s, L, a) {
-	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	let state_i = parse_state(state)
 	themes[theme].fg[state_i][name] = isarray(h) ? h : [ui.hsl(h, s, L, a), h, s, L, a]
 }
 
 ui.fg = function(name, state, theme1) {
-	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	let state_i = parse_state(state)
 	theme1 = theme1 ? themes[theme1] : theme
 	return theme1.fg[state_i][name] ?? theme.fg[0][name]
 }
@@ -260,12 +309,12 @@ ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 // border colors -------------------------------------------------------------
 
 ui.border_style = function(theme, name, state, h, s, L, a) {
-	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	let state_i = parse_state(state)
 	themes[theme].border[state_i][name] = isarray(h) ? h : [ui.hsl(h, s, L, a), h, s, L, a]
 }
 
 ui.border = function(name, state, theme1) {
-	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	let state_i = parse_state(state)
 	theme1 = theme1 ? themes[theme1] : theme
 	return theme1.border[state_i][name] ?? theme.border[0][name]
 }
@@ -285,12 +334,12 @@ ui.border_style('dark' , 'intense' , 'hover'  ,   0,   0,   1, 0.40)
 // background colors ---------------------------------------------------------
 
 ui.bg_style = function(theme, name, state, h, s, L, a, is_dark) {
-	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	let state_i = parse_state(state)
 	themes[theme].bg[state_i][name] = isarray(h) ? h : [ui.hsl(h, s, L, a), h, s, L, a, is_dark]
 }
 
 ui.bg = function(name, state, theme1) {
-	let state_i = state == 'hover' ? 1 : state == 'active' ? 2 : 0
+	let state_i = parse_state(state)
 	theme1 = theme1 ? themes[theme1] : theme
 	return theme1.bg[state_i][name] ?? theme.bg[0][name]
 }
@@ -363,25 +412,28 @@ ui.bg_style('dark' , 'new'             , 'normal', 240, 0.35, 0.27)
 ui.bg_style('dark' , 'modified'        , 'normal', 120, 0.59, 0.24)
 ui.bg_style('dark' , 'new-modified'    , 'normal', 157, 0.18, 0.20)
 
-// item interaction states. these need to be opaque!
-ui.bg_style('light', 'unfocused'          , 'normal', 0, 0, 0.91)
-ui.bg_style('light', 'focused'            , 'normal', 0, 0, 0.87)
-ui.bg_style('light', 'unfocused-selected' , 'normal', 0, 0, 0.87)
-ui.bg_style('light', 'focused-selected'   , 'normal', 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_style('light', 'focused-error'      , 'normal', 0, 1, 0.60)
-ui.bg_style('light', 'unselected'         , 'normal', 0, 0, 0.93)
-ui.bg_style('light', 'selected'           , 'normal', 139 / 239 * 360, 150 / 240, 217 / 240)
-ui.bg_style('light', 'row-focused'        , 'normal', 139 / 239 * 360, 150 / 240, 231 / 240)
-ui.bg_style('light', 'row-unfocused'      , 'normal', 139 / 239 * 360,   0 / 240, 231 / 240)
+// grid cell & row states. these need to be opaque!
+ui.bg_style('light', 'cell', 'item-focused'                       ,   0, 0.00, 0.93)
+ui.bg_style('light', 'cell', 'item-selected'                      ,   0, 0.00, 0.91)
+ui.bg_style('light', 'cell', 'item-focused item-selected'         ,   0, 0.00, 0.87)
+ui.bg_style('light', 'cell', 'item-focused focused'               ,   0, 0.00, 0.87)
+ui.bg_style('light', 'cell', 'item-focused item-selected focus'   , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_style('light', 'cell', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
 
-ui.bg_style('dark' , 'unfocused'          , 'normal',   0, 0.00, 0.20)
-ui.bg_style('dark' , 'unfocused-selected' , 'normal', 208, 0.11, 0.23)
-ui.bg_style('dark' , 'focused-selected'   , 'normal', 211, 0.62, 0.24)
-ui.bg_style('dark' , 'unfocused'          , 'normal', 216, 0.05, 0.19)
-ui.bg_style('dark' , 'unselected'         , 'normal', 195, 0.06, 0.12)
-ui.bg_style('dark' , 'selected'           , 'normal', 211, 0.62, 0.19)
-ui.bg_style('dark' , 'row-focused'        , 'normal', 212, 0.61, 0.13)
-ui.bg_style('dark' , 'row-unfocused'      , 'normal',   0, 0.00, 0.13)
+ui.bg_style('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
+ui.bg_style('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
+ui.bg_style('light', 'row' , 'item-focused item-error'            ,   0, 1.00, 0.60)
+
+ui.bg_style('dark' , 'cell', 'item-focused'                       , 195, 0.06, 0.12)
+ui.bg_style('dark' , 'cell', 'item-selected'                      ,   0, 0.00, 0.20)
+ui.bg_style('dark' , 'cell', 'item-focused item-selected'         , 208, 0.11, 0.23)
+ui.bg_style('dark' , 'cell', 'item-focused focused'               ,   0, 0.00, 0.23)
+ui.bg_style('dark' , 'cell', 'item-focused item-selected focused' , 211, 0.62, 0.24)
+ui.bg_style('dark' , 'cell', 'item-selected focused'              , 211, 0.62, 0.19)
+
+ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
+ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
+ui.bg_style('dark' , 'row' , 'item-focused item-error'            ,   0, 1.00, 0.60)
 
 // canvas --------------------------------------------------------------------
 
@@ -397,6 +449,7 @@ ui.screen = function() {
 	screen.classList.add('ui-canvas')
 	screen.appendChild(canvas)
 	screen.canvas = canvas
+	screen.canvas.setAttribute('tabindex', 0)
 
 	let cx = canvas.getContext('2d')
 	screen.cx = cx
@@ -417,11 +470,13 @@ ui.screen = function() {
 
 let a = []
 
-let dpr
+let screen_x, screen_y, dpr
 
 function resize_canvas(screen, screen_rect) {
 	dpr = devicePixelRatio
 	let screen_r = ui_screen.getBoundingClientRect()
+	screen_x = floor(screen_r.x * dpr)
+	screen_y = floor(screen_r.y * dpr)
 	let screen_w = floor(screen_r.width  * dpr)
 	let screen_h = floor(screen_r.height * dpr)
 	canvas.style.width  = (screen_w / dpr) + 'px'
@@ -463,6 +518,8 @@ let clickup = false
 let captured_id
 let wheel_dy = 0
 let trackpad = false
+let mouseenter = false
+let mouseleave = false
 
 function reset_mouse() {
 	if (clickup)
@@ -471,11 +528,13 @@ function reset_mouse() {
 	clickup = false
 	wheel_dy = 0
 	trackpad = false
+	mouseenter = false
+	mouseleave = false
 }
 
 canvas.addEventListener('pointerdown', function(ev) {
-	mx = round(ev.clientX * dpr)
-	my = round(ev.clientY * dpr)
+	mx = round(ev.clientX * dpr - screen_x)
+	my = round(ev.clientY * dpr - screen_y)
 	if (ev.which == 1) {
 		click = true
 		pressed = true
@@ -486,8 +545,8 @@ canvas.addEventListener('pointerdown', function(ev) {
 })
 
 canvas.addEventListener('pointerup', function(ev) {
-	mx = round(ev.clientX * dpr)
-	my = round(ev.clientY * dpr)
+	mx = round(ev.clientX * dpr - screen_x)
+	my = round(ev.clientY * dpr - screen_y)
 	if (ev.which == 1) {
 		pressed = false
 		clickup = true
@@ -498,16 +557,22 @@ canvas.addEventListener('pointerup', function(ev) {
 })
 
 canvas.addEventListener('pointermove', function(ev) {
-	mx = round(ev.clientX * dpr)
-	my = round(ev.clientY * dpr)
+	mx = round(ev.clientX * dpr - screen_x)
+	my = round(ev.clientY * dpr - screen_y)
 	hit_all()
 	redraw()
+})
+
+canvas.addEventListener('pointerenter', function(ev) {
+	if (!captured_id)
+		mouseenter = true
 })
 
 canvas.addEventListener('pointerleave', function(ev) {
 	if (!captured_id) {
 		mx = null
 		my = null
+		mouseleave = true
 	}
 	ui.set_cursor()
 	hit_all()
@@ -519,8 +584,8 @@ canvas.addEventListener('wheel', function(ev) {
 	if (!wheel_dy)
 		return
 	trackpad = ev.wheelDeltaY === -ev.deltaY * 3
-	mx = ev.clientX * dpr
-	my = ev.clientY * dpr
+	mx = ev.clientX * dpr - screen_x
+	my = ev.clientY * dpr - screen_y
 	hit_all()
 	redraw()
 })
@@ -551,9 +616,29 @@ ui.captured = function(id) {
 	return capture_state
 }
 
+let key_state = map()
+
 canvas.addEventListener('keydown', function(ev) {
-	// TODO
+	key_state.set(ev.key.toLowerCase(), 'down')
+	redraw()
 })
+
+canvas.addEventListener('keyup', function(ev) {
+	key_state.set(ev.key.toLowerCase(), 'up')
+	redraw()
+})
+
+ui.keydown = function(id, key) {
+	return ui.focused_id == id && key_state.get(key) == 'down'
+}
+
+ui.keyup = function(key) {
+	return ui.focused_id == id && key_state.get(key) == 'up'
+}
+
+function reset_keys() {
+	key_state.clear()
+}
 
 // z-layers ------------------------------------------------------------------
 
@@ -652,7 +737,7 @@ let id_state_maps  = map() // {id->map}
 let id_current_set = set() // {id}
 let id_remove_set  = set() // {id}
 
-function id_touch(id) {
+function keepalive(id) {
 	id_current_set.add(id)
 	id_remove_set.delete(id)
 }
@@ -660,7 +745,7 @@ function id_touch(id) {
 ui.state_map = function(id) {
 	if (!id)
 		return
-	id_touch(id)
+	keepalive(id)
 	let m = id_state_maps.get(id)
 	if (!m) {
 		m = id_state_map_freelist()
@@ -675,10 +760,11 @@ ui.state = function(id, k) {
 	let m = id_state_maps.get(id)
 	if (!m)
 		return
+	keepalive(id)
 	return m.get(k)
 }
 
-ui.set_state = function(id, k, v) {
+ui.state_set = function(id, k, v) {
 	ui.state_map(id).set(k, v)
 }
 
@@ -978,6 +1064,10 @@ const CMD_V = cmd_ct('v')
 
 ui.h = function(...args) { return ui_hv(CMD_H, ...args) }
 ui.v = function(...args) { return ui_hv(CMD_V, ...args) }
+ui.hv = function(hv, ...args) {
+	let cmd = assert(hv == 'h' ? CMD_H : hv == 'v' ? CMD_V : 0)
+	return ui_hv(cmd, ...args)
+}
 
 const STACK_ID = S+0
 
@@ -1226,7 +1316,7 @@ const TEXT_WRAP_WORD = 2 // bit 2
 const TEXT_EDITABLE  = 4 // bit 3
 
 const CMD_TEXT = cmd('text')
-ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap, editable) {
+ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap, editable, input_type) {
 	// NOTE: min_w and min_h are measured, not given.
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
@@ -1247,9 +1337,11 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap, edit
 		ui.state(id, 'text') ?? s,
 		wrap | (editable ? TEXT_EDITABLE : 0),
 	)
+	if (editable)
+		input_create(id, input_type)
 }
-ui.text_input = function(id, s, align, valign, fr, max_min_w, min_w, min_h) {
-	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, null, true)
+ui.text_editable = function(id, s, align, valign, fr, max_min_w, min_w, min_h, input_type) {
+	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, null, true, input_type)
 }
 ui.text_lines = function(id, s, align, valign, fr, max_min_w, min_w, min_h, editable) {
 	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'line', editable)
@@ -2182,9 +2274,10 @@ draw[CMD_POPUP] = function(a, i) {
 		return true
 }
 
-function input_free(s) {
+function input_free(s, id) {
 	let input = s.get('input')
 	input.remove()
+	pr('input free', id)
 }
 
 function input_focus(ev) {
@@ -2199,7 +2292,7 @@ function input_blur(ev) {
 
 function input_input(ev) {
 	let id = this._ui_id
-	ui.set_state(id, 'text', this.value)
+	ui.state_set(id, 'text', this.value)
 	redraw()
 }
 
@@ -2209,6 +2302,24 @@ function input_keydown(ev) {
 	}
 }
 
+function input_create(id, input_type) {
+	let input = ui.state(id, 'input')
+	if (input)
+		return
+	input = document.createElement('input')
+	input._ui_id = id
+	if (input_type)
+		input.setAttribute('type', input_type)
+	input.classList.add('ui-input')
+	input.addEventListener('focus', input_focus)
+	input.addEventListener('blur' , input_blur)
+	input.addEventListener('input', input_input)
+	input.addEventListener('keydown', input_keydown)
+	ui_screen.appendChild(input)
+	ui.state_set(id, 'input', input)
+	ui.on_free(id, input_free)
+	return input
+}
 
 draw[CMD_TEXT] = function(a, i) {
 
@@ -2226,31 +2337,16 @@ draw[CMD_TEXT] = function(a, i) {
 	let editable = flags & TEXT_EDITABLE
 
 	if (editable) {
-		let state = ui.state_map(id)
-		let input = state.get('input')
-		if (!input) {
-
-			input = document.createElement('input')
-			input._ui_id = id
-			input.classList.add('ui-input')
-			input.addEventListener('focus', input_focus)
-			input.addEventListener('blur' , input_blur)
-			input.addEventListener('input', input_input)
-			input.addEventListener('keydown', input_keydown)
-			ui_screen.appendChild(input)
-
-			state.set('input', input)
-			ui.on_free(id, input_free)
-		}
+		let input = ui.state(id, 'input')
 
 		input.value = s
 		input.style.fontFamily = font
 		input.style.fontWeight = font_weight
 		input.style.fontSize   = (font_size / dpr)+'px'
 		input.style.color      = color
-		input.style.left   = (x / dpr)+'px'
-		input.style.top    = (y / dpr)+'px'
-		input.style.width  = (w / dpr)+'px'
+		input.style.left   = (x  / dpr)+'px'
+		input.style.top    = (y  / dpr)+'px'
+		input.style.width  = (sw / dpr)+'px'
 
 		input.style.opacity = ui.focused(id) ? 1 : 0
 
@@ -2514,6 +2610,7 @@ draw[CMD_FONT_WEIGHT] = set_font_weight
 draw[CMD_LINE_GAP] = set_line_gap
 
 function draw_all() {
+	ui_screen.style.background = ui.bg('bg')[0]
 	for (layer of a.layers) {
 		for (let i of layer) {
 			let next_ext_i = get_next_ext_i(a, i)
@@ -2748,6 +2845,7 @@ function redraw_all() {
 			draw_all()
 		reset_all()
 		reset_mouse()
+		reset_keys()
 		focusing_id = null
 	}
 }
@@ -3230,14 +3328,61 @@ ui.vsplit = function(...args) { return split('v', ...args) }
 ui.end_hsplit = function() { end_split('h') }
 ui.end_vsplit = function() { end_split('v') }
 
-// list ----------------------------------------------------------------------
+// text-input ----------------------------------------------------------------
 
-ui.list = function(id, items) {
-
+ui.input = function(id, s, fr, min_w, min_h) {
+	ui.stack('', 0, 's', 's')
+		ui.bb('', 'input', 1, ui.border('intense', ui.focused(id) ? 'hover' : 'normal'))
+		ui.p(ui.sp1())
+		ui.text(id, s, 'l', 'c', fr, null, min_w ?? ui.em(10), min_h, null, true)
+	ui.end_stack()
 }
 
-ui.end_list = function() {
+ui.label = function(for_id, s) {
+	ui.p(ui.sp1())
+	ui.text('', s, 'l', 'c', 1)
+}
 
+// list ----------------------------------------------------------------------
+
+ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, item_fr, hv) {
+	ui.hv(hv ?? 'v', fr, gap, align, valign, 120)
+	let focused_item_i = ui.state(id, 'focused_item_i') ?? 0
+	let d =
+		ui.keydown(id, 'arrowdown') &&  1 ||
+		ui.keydown(id, 'arrowup'  ) && -1 || 0
+	if (d) {
+		focused_item_i = clamp(focused_item_i + d, 0, items.length-1)
+		ui.state_set(id, 'focused_item_i', focused_item_i)
+	}
+	let i = 0
+	for (let item of items) {
+		let item_id = id+'.'+i
+		if (ui.hit(item_id) && click) {
+			ui.focus(id)
+			focused_item_i = i
+			ui.state_set(id, 'focused_item_i', i)
+		}
+		i++
+	}
+	let list_focused = ui.focused(id)
+	i = 0
+	for (let item of items) {
+		let item_id = id+'.'+i
+		ui.p(ui.sp05())
+		ui.stack(item_id, 0)
+			let item_focused = focused_item_i == i
+			ui.bb('',
+				item_focused
+					? ui.bg('cell', list_focused
+							? 'item-focused item-selected focused'
+							: 'item-focused item-selected')
+					: 'bg')
+			ui.text('', item, item_align ?? 'l', item_valign ?? 'c', item_fr ?? 1)
+		ui.end_stack()
+		i++
+	}
+	ui.end()
 }
 
 // drag & drop ---------------------------------------------------------------
@@ -3605,6 +3750,15 @@ let test_template = {
 
 function make_frame() {
 
+	ui.h()
+
+	ui.p(ui.sp1())
+	ui.list('demos', [
+		'demo1',
+		'demo2',
+		'demo3',
+	], 0)
+
 	if (0) {
 	ui.m(50, null, 50)
 	ui.h(1, 20)
@@ -3678,9 +3832,15 @@ function make_frame() {
 						ui.splitter()
 							ui.stack()
 								ui.bb('', 'bg1')
-								ui.v(1, 0, 's', 'c')
-									ui.text_input('input1', 'Hello3 Hello3 Hello3 Hello3')
-									ui.text_input('input2', 'Hello3 Hello3')
+								ui.v(1, ui.sp1(), 'l', 'c')
+									ui.h(1, ui.sp1())
+										ui.label('input1', 'First Input')
+										ui.input('input1', 'Hello3 Hello3 Hello3 Hello3')
+									ui.end_h()
+									ui.h(1, ui.sp1())
+										ui.label('input2', 'Second Input')
+										ui.input('input2', 'Hello3 Hello3')
+									ui.end_h()
 								ui.end_v()
 							ui.end_stack()
 					ui.end_vsplit()
@@ -3688,8 +3848,7 @@ function make_frame() {
 		ui.end_v()
 	}
 
-	// redraw()
-
+	ui.end_h()
 }
 
 ui.focus('input1')
