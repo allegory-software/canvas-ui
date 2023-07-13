@@ -20,19 +20,18 @@ ui.DEBUG = 0
 // single-value filter.
 let repl = function(x, v, z) { return x === v ? z : x }
 
-let isobject = e => e != null && typeof e == 'object' // includes arrays, HTMLElements, etc.
 let isarray = Array.isArray
-let isobj = t => isobject(t) && (t.constructor == Object || t.constructor === undefined)
 let isstr = s => typeof s == 'string'
 let isnum = n => typeof n == 'number'
 let isbool = b => typeof b == 'boolean'
 let isfunc = f => typeof f == 'function'
 
-function assert(ret, err, ...args) {
+function assert(ret, ...args) {
 	if (!ret)
-		throw ((err && subst(err, ...args) || 'assertion failed'))
+		throw (args.length ? args.join('') : 'assertion failed')
 	return ret
 }
+ui.assert = assert
 
 let pr = console.log
 let trace = console.trace
@@ -43,10 +42,6 @@ let round = Math.round
 let max   = Math.max
 let min   = Math.min
 let abs   = Math.abs
-
-let PI  = Math.PI
-let rad = PI / 180
-let deg = 180 / PI
 
 // NOTE: returns x1 if x1 < x0, which enables the idiom
 // `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
@@ -67,28 +62,9 @@ function num(s) {
 
 let str = String
 
-// usage:
-//	 '{1} of {0}'.subst(total, current)
-//	 '{1} of {0}'.subst([total, current])
-//	 '{1} of {0:foo:foos}'.subst([total, current])
-//	 '{current} of {total}'.subst({'current': current, 'total': total})
-function subst(s, ...args) {
-	if (!args.length)
-		return s.valueOf()
-	if (isarray(args[0]))
-		args = args[0]
-	if (isobject(args[0]))
-		args = args[0]
-	return s.replace(/{(\w+)\:(\w+)\:(\w+)}/g, function(match, s, singular, plural) {
-		let v = num(args[s])
-		return v != null ? v + ' ' + (v > 1 ? plural : singular) : s
-	}).replace(/{([\w\:]+)}/g, (match, s) => args[s])
-}
-
 let obj = () => Object.create(null)
 let set = (iter) => new Set(iter)
 let map = (iter) => new Map(iter)
-let array = (...args) => new Array(...args)
 
 let assign = Object.assign
 
@@ -154,19 +130,32 @@ let style = document.createElement('style')
 document.documentElement.appendChild(style)
 style.innerHTML = `
 
+* { box-sizing: border-box; }
+
+html, body {
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	overflow: hidden;
+}
+
+body {
+	display: flex;
+}
+
 .ui-screen {
-	box-sizing: border-box;
 	position: relative; /* all inner elements are positioned relative to it */
 	overflow: hidden; /* because hidden <input> elements go out of screen */
+	flex: 1; /* stretch it */
 }
 
 .ui-canvas {
-	box-sizing: border-box;
 	position: absolute;
 }
 
 .ui-input, .ui-input:focus {
-	box-sizing: border-box;
 	position: absolute;
 	padding: 0;
 	margin: 0;
@@ -206,6 +195,9 @@ ui.hsl = function(h, s, L, a) {
 	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
 }
 
+ui.hsl_adjust = function(c, h, s, L, a) {
+	return ui.hsl(c[1] * h, c[2] * s, c[3] * L, c[4] * a)
+}
 // themes --------------------------------------------------------------------
 
 ui.scrollbar_thickness = 6
@@ -234,7 +226,7 @@ let themes = {}
 theme_make('light', 'black')
 theme_make('dark' , 'white')
 
-let theme = themes.dark
+let theme
 
 ui.dark_mode = function(on) {
 	theme = on ? themes.dark : themes.light
@@ -390,6 +382,14 @@ ui.bg_style('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
 ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
 ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
+ui.bg_style('light', 'button', 'normal' , ui.bg('bg', 'normal', 'light'))
+ui.bg_style('light', 'button', 'hover'  , ui.bg('bg', 'hover' , 'light'))
+ui.bg_style('light', 'button', 'active' , ui.bg('bg', 'active', 'light'))
+
+ui.bg_style('dark' , 'button', 'normal' , ui.bg('bg', 'normal', 'dark'))
+ui.bg_style('dark' , 'button', 'hover'  , ui.bg('bg', 'hover' , 'dark'))
+ui.bg_style('dark' , 'button', 'active' , ui.bg('bg', 'active', 'dark'))
+
 ui.bg_style('light', 'button-primary', 'normal' , ui.fg('link', 'normal', 'light'))
 ui.bg_style('light', 'button-primary', 'hover'  , ui.fg('link', 'hover' , 'light'))
 ui.bg_style('light', 'button-primary', 'active' , ui.fg('link', 'active', 'light'))
@@ -437,157 +437,146 @@ ui.bg_style('dark' , 'row' , 'item-focused item-error'            ,   0, 1.00, 0
 
 // canvas --------------------------------------------------------------------
 
-ui.screen = function() {
+let screen = document.createElement('div')
+screen.classList.add('ui-screen')
 
-	let screen = document.createElement('div')
-	screen.classList.add('ui-screen')
-	screen.style.boxSizing = 'border-box'
-	screen.style.position = 'relative' // for absolute inner elements
-	screen.style.overflow = 'hidden' // because hidden <input> elements go out of screen
+let canvas = document.createElement('canvas')
+canvas.classList.add('ui-canvas')
+canvas.setAttribute('tabindex', 0)
+screen.appendChild(canvas)
 
-	let canvas = document.createElement('div')
-	screen.classList.add('ui-canvas')
-	screen.appendChild(canvas)
-	screen.canvas = canvas
-	screen.canvas.setAttribute('tabindex', 0)
+document.body.appendChild(screen)
 
-	let cx = canvas.getContext('2d')
-	screen.cx = cx
-
-	let resize_observer = new ResizeObserver(function(entries) {
-		for (let entry of entries)
-			resize_canvas(entry.target, entry.contentRect)
-	})
-
-	resize_observer.observe(screen)
-
-	screen.free = function() {
-		resize_observer.unobserve(this)
-	}
-
-	return screen
-}
+let cx = canvas.getContext('2d')
+ui.cx = cx
 
 let a = []
 
-let screen_x, screen_y, dpr
+let screen_w, screen_h, dpr
 
-function resize_canvas(screen, screen_rect) {
-	dpr = devicePixelRatio
-	let screen_r = ui_screen.getBoundingClientRect()
-	screen_x = floor(screen_r.x * dpr)
-	screen_y = floor(screen_r.y * dpr)
-	let screen_w = floor(screen_r.width  * dpr)
-	let screen_h = floor(screen_r.height * dpr)
+function resize_canvas() {
+	let dpr1 = devicePixelRatio
+	let screen_r = screen.getBoundingClientRect()
+	let w = floor(screen_r.width  * dpr1)
+	let h = floor(screen_r.height * dpr1)
+	if (screen_w == w && screen_h == h && dpr == dpr1)
+		return
+	dpr = dpr1
+	screen_w = w
+	screen_h = h
 	canvas.style.width  = (screen_w / dpr) + 'px'
 	canvas.style.height = (screen_h / dpr) + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
 	a.w = screen_w
 	a.h = screen_h
-	redraw()
-}
-let cx = canvas.getContext('2d')
-let raf_id
-let max_frame_duration = 0
-let last_frame_duration = 0
-function raf_redraw() {
-	raf_id = null
-	let t0 = clock()
-	cx.clearRect(0, 0, canvas.width, canvas.height)
-	redraw_all()
-	last_frame_duration = clock() - t0
-	if (max_frame_duration)
-		max_frame_duration = max(last_frame_duration, max_frame_duration)
-	else
-		max_frame_duration = 0.000001
-}
-function redraw() {
-	if (raf_id) return
-	want_redraw = true
-	raf_id = requestAnimationFrame(raf_redraw)
+	animate()
 }
 window.addEventListener('resize', resize_canvas)
 
+let raf_id
+ui.max_frame_duration = 0
+ui.last_frame_duration = 0
+function raf_animate() {
+	raf_id = null
+	let t0 = clock()
+	cx.clearRect(0, 0, canvas.width, canvas.height)
+	want_redraw = true
+	redraw_all()
+	ui.last_frame_duration = clock() - t0
+	if (ui.max_frame_duration)
+		ui.max_frame_duration = max(ui.last_frame_duration, ui.max_frame_duration)
+	else
+		ui.max_frame_duration = 0.000001
+}
+function animate() {
+	if (raf_id) return
+	raf_id = requestAnimationFrame(raf_animate)
+}
+ui.animate = animate
+
+document.addEventListener('DOMContentLoaded', resize_canvas)
+
 // input event handling ------------------------------------------------------
 
-let mx, my, mx0, my0
-let pressed = false
-let click = false
-let clickup = false
-let captured_id
-let wheel_dy = 0
-let trackpad = false
-let mouseenter = false
-let mouseleave = false
+ui.pressed = false
+ui.click = false
+ui.clickup = false
+let captured_id = null
+ui.wheel_dy = 0
+ui.trackpad = false
+ui.mouseenter = false
+ui.mouseleave = false
 
 function reset_mouse() {
-	if (clickup)
+	if (ui.clickup)
 		captured_id = null
-	click = false
-	clickup = false
-	wheel_dy = 0
-	trackpad = false
-	mouseenter = false
-	mouseleave = false
+	ui.click = false
+	ui.clickup = false
+	ui.wheel_dy = 0
+	ui.trackpad = false
+	ui.mouseenter = false
+	ui.mouseleave = false
+}
+
+function update_mouse(ev) {
+	ui.mx = round(ev.clientX * dpr)
+	ui.my = round(ev.clientY * dpr)
 }
 
 canvas.addEventListener('pointerdown', function(ev) {
-	mx = round(ev.clientX * dpr - screen_x)
-	my = round(ev.clientY * dpr - screen_y)
+	update_mouse(ev)
 	if (ev.which == 1) {
-		click = true
-		pressed = true
+		ui.click = true
+		ui.pressed = true
 		this.setPointerCapture(ev.pointerId)
 		hit_all()
-		redraw()
+		animate()
 	}
 })
 
 canvas.addEventListener('pointerup', function(ev) {
-	mx = round(ev.clientX * dpr - screen_x)
-	my = round(ev.clientY * dpr - screen_y)
+	update_mouse(ev)
 	if (ev.which == 1) {
-		pressed = false
-		clickup = true
+		ui.pressed = false
+		ui.clickup = true
 		this.releasePointerCapture(ev.pointerId)
 		hit_all()
-		redraw()
+		animate()
 	}
 })
 
 canvas.addEventListener('pointermove', function(ev) {
-	mx = round(ev.clientX * dpr - screen_x)
-	my = round(ev.clientY * dpr - screen_y)
+	update_mouse(ev)
 	hit_all()
-	redraw()
+	animate()
 })
 
 canvas.addEventListener('pointerenter', function(ev) {
+	update_mouse(ev)
 	if (!captured_id)
-		mouseenter = true
+		ui.mouseenter = true
 })
 
 canvas.addEventListener('pointerleave', function(ev) {
 	if (!captured_id) {
-		mx = null
-		my = null
-		mouseleave = true
+		ui.mx = null
+		ui.my = null
+		ui.mouseleave = true
 	}
 	ui.set_cursor()
 	hit_all()
-	redraw()
+	animate()
 })
 
 canvas.addEventListener('wheel', function(ev) {
-	wheel_dy = ev.wheelDeltaY
-	if (!wheel_dy)
+	ui.wheel_dy = ev.wheelDeltaY
+	if (!ui.wheel_dy)
 		return
-	trackpad = ev.wheelDeltaY === -ev.deltaY * 3
-	mx = ev.clientX * dpr - screen_x
-	my = ev.clientY * dpr - screen_y
+	ui.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
+	update_mouse(ev)
 	hit_all()
-	redraw()
+	animate()
 })
 
 let capture_state = map()
@@ -597,14 +586,14 @@ ui.capture = function(id) {
 		return
 	if (captured_id)
 		return
-	if (!pressed)
+	if (!ui.pressed)
 		return
 	if (!ui.realhit(id))
 		return
 	captured_id = id
 	capture_state.clear()
-	mx0 = mx
-	my0 = my
+	ui.mx0 = ui.mx
+	ui.my0 = ui.my
 	return capture_state
 }
 
@@ -620,12 +609,12 @@ let key_state = map()
 
 canvas.addEventListener('keydown', function(ev) {
 	key_state.set(ev.key.toLowerCase(), 'down')
-	redraw()
+	animate()
 })
 
 canvas.addEventListener('keyup', function(ev) {
 	key_state.set(ev.key.toLowerCase(), 'up')
-	redraw()
+	animate()
 })
 
 ui.keydown = function(id, key) {
@@ -729,6 +718,9 @@ function scope_prev_var(ended_scope, k) {
 	if (v === v0) return
 	return v0
 }
+
+ui.scope = begin_scope
+ui.end_scope = end_scope
 
 // id state maps -------------------------------------------------------------
 
@@ -834,7 +826,7 @@ let hit       = []
 function cmd(name, is_ct) {
 	let code = hash32(name)
 	code = (is_ct ? -1 : 1) * abs(code)
-	assert(!cmd_names[code], 'duplicate command code {0} for {1}', code, name)
+	assert(!cmd_names[code], 'duplicate command code ',code,' for ',name)
 	cmd_names[code] = name
 	cmd_name_map.set(name, code)
 	return code
@@ -910,6 +902,7 @@ function ui_cmd(cmd, ...args) {
 	a.push(i1, cmd, ...args, i0)
 	return i0
 }
+ui.cmd = ui_cmd
 
 let ct_stack = [] // [ct_i1,...]
 
@@ -956,7 +949,7 @@ function parse_align(s) {
 	if (s == 'center' ) return ALIGN_CENTER
 	if (s == 'left'   ) return ALIGN_START
 	if (s == 'right'  ) return ALIGN_END
-	assert(false, 'invalid align {0}', s)
+	assert(false, 'invalid align ', s)
 }
 
 function parse_valign(s) {
@@ -970,7 +963,7 @@ function parse_valign(s) {
 	if (s == 'center' ) return ALIGN_CENTER
 	if (s == 'top'    ) return ALIGN_START
 	if (s == 'bottom' ) return ALIGN_END
-	assert(false, 'invalid valign {0}', s)
+	assert(false, 'invalid valign ', s)
 }
 
 // paddings and margins, applied to the next box cmd and then they are reset.
@@ -1148,7 +1141,7 @@ function popup_parse_side(s) {
 	if (s == 'inner-right' ) return POPUP_SIDE_INNER_RIGHT
 	if (s == 'inner-top'   ) return POPUP_SIDE_INNER_TOP
 	if (s == 'inner-bottom') return POPUP_SIDE_INNER_BOTTOM
-	assert(false, 'invalid popup side {0}', s)
+	assert(false, 'invalid popup side ', s)
 }
 
 function popup_parse_align(s) {
@@ -1161,7 +1154,7 @@ function popup_parse_align(s) {
 	if (s == 'start'  ) return POPUP_ALIGN_START
 	if (s == 'end'    ) return POPUP_ALIGN_END
 	if (s == 'stretch') return POPUP_ALIGN_STRETCH
-	assert(false, 'invalid align {0}', s)
+	assert(false, 'invalid align ', s)
 }
 
 const POPUP_FIT_CHANGE_SIDE = 1
@@ -1214,7 +1207,7 @@ ui.end = function(cmd) {
 	end_scope()
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd && a[i-1] != cmd)
-		assert(false, 'closing {0} instead of {1}', cmd_names[cmd], C(a, i))
+		assert(false, 'closing ', cmd_names[cmd], ' instead of ', C(a, i))
 	let end_i = ui_cmd(CMD_END, i)
 	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
 
@@ -1316,7 +1309,7 @@ const TEXT_WRAP_WORD = 2 // bit 2
 const TEXT_EDITABLE  = 4 // bit 3
 
 const CMD_TEXT = cmd('text')
-ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap, editable, input_type) {
+ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
 	// NOTE: min_w and min_h are measured, not given.
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
@@ -1340,14 +1333,14 @@ ui.text = function(id, s, align, valign, fr, max_min_w, min_w, min_h, wrap, edit
 	if (editable)
 		input_create(id, input_type)
 }
-ui.text_editable = function(id, s, align, valign, fr, max_min_w, min_w, min_h, input_type) {
-	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, null, true, input_type)
+ui.text_editable = function(id, s, fr, align, valign, max_min_w, min_w, min_h, input_type) {
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, null, true, input_type)
 }
-ui.text_lines = function(id, s, align, valign, fr, max_min_w, min_w, min_h, editable) {
-	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'line', editable)
+ui.text_lines = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'line', editable)
 }
-ui.text_wrapped = function(id, s, align, valign, fr, max_min_w, min_w, min_h, editable) {
-	return ui.text(id, s, align, valign, fr, max_min_w, min_w, min_h, 'word', editable)
+ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
 }
 
 const CMD_COLOR = cmd('color')
@@ -1371,7 +1364,7 @@ function end_color(ended_scope) {
 function set_theme_dark(dark) {
 	theme = dark ? themes.dark : themes.light
 	scope_set('theme', theme)
-	ui.color(ui.fg('text')[0])
+	ui.color('text')
 }
 function end_theme(ended_scope) {
 	let s = scope_prev_var(ended_scope, 'theme')
@@ -2077,9 +2070,9 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 				continue
 
 			// wheel scrolling
-			if (axis && wheel_dy && ui.hit(id)) {
+			if (axis && ui.wheel_dy && ui.hit(id)) {
 				let sy0 = ui.state_map(id).get('scroll_y') ?? 0
-				sy = clamp(sy - wheel_dy, 0, ch - h)
+				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
 				ui.state_map(id).set('scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
@@ -2090,13 +2083,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			if (cs) {
 				if (!axis) {
 					let psx0 = cs.get('ps0')
-					let dpsx = (mx - mx0) / (w - tw)
+					let dpsx = (ui.mx - ui.mx0) / (w - tw)
 					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
 					ui.state_map(id).set('scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
 					let psy0 = cs.get('ps0')
-					let dpsy = (my - my0) / (h - th)
+					let dpsy = (ui.my - ui.my0) / (h - th)
 					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
 					ui.state_map(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
@@ -2282,18 +2275,18 @@ function input_free(s, id) {
 
 function input_focus(ev) {
 	ui.focused_id = this._ui_id
-	redraw()
+	animate()
 }
 
 function input_blur(ev) {
 	ui.focused_id = null
-	redraw()
+	animate()
 }
 
 function input_input(ev) {
 	let id = this._ui_id
 	ui.state_set(id, 'text', this.value)
-	redraw()
+	animate()
 }
 
 function input_keydown(ev) {
@@ -2315,7 +2308,7 @@ function input_create(id, input_type) {
 	input.addEventListener('blur' , input_blur)
 	input.addEventListener('input', input_input)
 	input.addEventListener('keydown', input_keydown)
-	ui_screen.appendChild(input)
+	screen.appendChild(input)
 	ui.state_set(id, 'input', input)
 	ui.on_free(id, input_free)
 	return input
@@ -2412,7 +2405,6 @@ draw[CMD_TEXT] = function(a, i) {
 	if (clip)
 		cx.restore()
 
-	draw_debug_box(a, i)
 }
 
 let scrollbar_rect
@@ -2508,7 +2500,6 @@ draw[CMD_END] = function(a, end_i) {
 		}
 	}
 
-	draw_debug_box(a, i)
 }
 
 let border_paths; {
@@ -2610,7 +2601,7 @@ draw[CMD_FONT_WEIGHT] = set_font_weight
 draw[CMD_LINE_GAP] = set_line_gap
 
 function draw_all() {
-	ui_screen.style.background = ui.bg('bg')[0]
+	screen.style.background = ui.bg('bg')[0]
 	for (layer of a.layers) {
 		for (let i of layer) {
 			let next_ext_i = get_next_ext_i(a, i)
@@ -2665,8 +2656,8 @@ ui.hovers = function(id) {
 
 function hit_rect(x, y, w, h) {
 	return (
-		(mx >= x && mx < x + w) &&
-		(my >= y && my < y + h)
+		(ui.mx >= x && ui.mx < x + w) &&
+		(ui.my >= y && ui.my < y + h)
 	)
 }
 
@@ -2791,7 +2782,7 @@ function hit_all() {
 	hit_state_maps.clear()
 	hit_set.clear()
 
-	if (mx == null)
+	if (ui.mx == null)
 		return
 
 	// iterate layers in reverse order.
@@ -2832,7 +2823,7 @@ function redraw_all() {
 		let i = ui.stack()
 		begin_layer(layer_base, i)
 		ui.set_cursor()
-		make_frame()
+		ui.frame()
 		ui.end()
 		end_layer()
 		id_state_gc()
@@ -2950,7 +2941,7 @@ function hit_template(a, i) {
 		let root_t = hs.get('root')
 		let node_t = template_find_node(a, i, root_t, hit_template_i0)
 		hs.set('node', node_t)
-		if (clickup)
+		if (ui.clickup)
 			template_select_node(id, root_t, node_t)
 		return true
 	}
@@ -2958,7 +2949,7 @@ function hit_template(a, i) {
 
 function template_add(t) {
 	let cmd = cmd_name_map.get(t.t)
-	let targs_f = assert(targs[t.t], 'unknown type {0}', t.t)
+	let targs_f = assert(targs[t.t], 'unknown type ', t.t)
 	let args = targs_f(t)
 	t.i = a.length + 2
 	ui[t.t](...args)
@@ -3047,13 +3038,13 @@ function draw_node(id, t_t, t, depth) {
 	ui.p(depth * 20, 0, ui.sp05(), ui.sp05())
 	ui.stack(t)
 		let hit = ui.hit(t)
-		if (hit && click)
+		if (hit && ui.click)
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
 		if (sel)
 			ui.bb('', 'selected')
 		ui.color('text', hit ? 'hover' : 'normal')
-		ui.text('', t.t, 'l', 'c', 1)
+		ui.text('', t.t, 1, 'l')
 	ui.end_stack()
 	if (t.e)
 		for (let ct of t.e)
@@ -3082,7 +3073,7 @@ function template_editor(id, t, ch_t) {
 					let vs = v != null ? str(v) : (def.default ?? '')
 					ui.mb(1)
 					ui.p(8, 8, 5, 5)
-					ui.text('', k , 'l', null, 1, 20)
+					ui.text('', k , 1, 'l', 'c', 20)
 					ui.mb(1)
 					ui.p(8, 8, 5, 5)
 					ui.stack()
@@ -3091,7 +3082,7 @@ function template_editor(id, t, ch_t) {
 						} else {
 							ui.bb('', null, 'l', '#888')
 							ui.color(v != null ? '#fff' : '#888')
-							ui.text('', vs, 'l', null, 1, 20)
+							ui.text('', vs, 1, 'l', 'c', 20)
 						}
 					ui.end_stack()
 				ui.end_h()
@@ -3142,18 +3133,23 @@ ui.widget('drag_point', {
 
 ui.button = function(id, s, style, align, valign) {
 	let hit = ui.hit(id)
-	let state = hit ? pressed ? 'active' : 'hover' : 'normal'
-	style = style ?? 'button-primary'
+	let state = hit ? ui.pressed ? 'active' : 'hover' : 'normal'
+	style = style ?? 'button'
 	ui.p(ui.sp2(), null, ui.sp1())
 	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
 		ui.shadow('button')
 		ui.bb('', ui.bg(style, state), 1, ui.border('light', state), ui.sp05())
 		ui.bold()
 		ui.color('text', state)
-		ui.text('', s, 'c', 'c', 0)
+		ui.text('', s, 0, 'c', 'c')
 	ui.end_stack()
-	return hit && clickup
+	return hit && ui.clickup
 }
+ui.button_primary = function(id, s, align, valign) {
+	return ui.button(id, s, 'button-primary', align, valign)
+}
+ui.btn = ui.button
+ui.btn_pri = ui.button_primary
 
 /*
 
@@ -3203,7 +3199,7 @@ ui.button = function(id, s, style, align, valign) {
 
 // split ---------------------------------------------------------------------
 
-function split(hv, id, fixed_side, size, unit,
+function split(hv, id, size, unit, fixed_side,
 	split_fr, gap, align, valign, min_w, min_h,
 ) {
 
@@ -3334,13 +3330,13 @@ ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', 0, 's', 's')
 		ui.bb('', 'input', 1, ui.border('intense', ui.focused(id) ? 'hover' : 'normal'))
 		ui.p(ui.sp1())
-		ui.text(id, s, 'l', 'c', fr, null, min_w ?? ui.em(10), min_h, null, true)
+		ui.text(id, s, fr, 'l', 'c', null, min_w ?? ui.em(10), min_h, null, true)
 	ui.end_stack()
 }
 
 ui.label = function(for_id, s) {
 	ui.p(ui.sp1())
-	ui.text('', s, 'l', 'c', 1)
+	ui.text('', s, 1, 'l', 'c')
 }
 
 // list ----------------------------------------------------------------------
@@ -3358,7 +3354,7 @@ ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, i
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
-		if (ui.hit(item_id) && click) {
+		if (ui.hit(item_id) && ui.click) {
 			ui.focus(id)
 			focused_item_i = i
 			ui.state_set(id, 'focused_item_i', i)
@@ -3378,11 +3374,12 @@ ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, i
 							? 'item-focused item-selected focused'
 							: 'item-focused item-selected')
 					: 'bg')
-			ui.text('', item, item_align ?? 'l', item_valign ?? 'c', item_fr ?? 1)
+			ui.text('', item, item_fr ?? 1, item_align ?? 'l', item_valign ?? 'c')
 		ui.end_stack()
 		i++
 	}
 	ui.end()
+	return items[focused_item_i]
 }
 
 // drag & drop ---------------------------------------------------------------
@@ -3397,12 +3394,12 @@ ui.drag = function(id, move, dx0, dy0) {
 	let cs = ui.captured(id)
 	let state
 	if (cs) {
-		if (move_x) { dx = cs.get('drag_x0') + (mx - mx0) }
-		if (move_y) { dy = cs.get('drag_y0') + (my - my0) }
-		state = clickup ? 'drop' : 'dragging'
+		if (move_x) { dx = cs.get('drag_x0') + (ui.mx - ui.mx0) }
+		if (move_y) { dy = cs.get('drag_y0') + (ui.my - ui.my0) }
+		state = ui.clickup ? 'drop' : 'dragging'
 		cs.set('drag_state', state)
 	} else if (ui.hit(id)) {
-		if (click) {
+		if (ui.click) {
 			let cs = ui.capture(id)
 			if (cs) {
 				if (move_x) cs.set('drag_x0', dx)
@@ -3528,7 +3525,7 @@ ui.widget('resizer', {
 
 		let borders = 2
 
-		let side = hit_sides(mx, my, 5, 5, x, y, w, h)
+		let side = hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h)
 		if (side) {
 			hit_set_id(id)
 			let rs = ui.hovers(id)
@@ -3672,23 +3669,27 @@ let w = 256
 let h = 256
 ui.box_widget('color_picker', {
 
-	create: function(cmd, id) {
-		return ui_cmd_box(cmd, 1, 'c', 'c', 200, 200, id)
+	create: function(cmd, id, align, valign) {
+		return ui_cmd_box(cmd, 1, align ?? 'c', valign ?? 'c', 200, 200, id)
 	},
 
 	draw: function(a, i) {
 
-		let x = a[i+0]
-		let y = a[i+1]
+		let x  = a[i+0]
+		let y  = a[i+1]
 		let sw = a[i+2]
 		let sh = a[i+3]
 		let id = a[i+S-1]
 		let s = ui.state_map(id)
 
+		let cs = ui.captured(id)
 		let hs = ui.hovers(id)
-		let hit = hs && hs.get('hit')
+		let hit = cs?.get('hit') ?? hs?.get('hit')
 
-		if (click) {
+		if (ui.click || cs) {
+			let cs = ui.capture(id)
+			if (ui.click && cs)
+				cs.set('hit', hit)
 			if (hit == 'hue_bar') {
 				s.set('hue', hs.get('hue'))
 			} else if (hit == 'hsl_square') {
@@ -3718,10 +3719,10 @@ ui.box_widget('color_picker', {
 
 		if (hit_rect(x, y, w, h)) {
 			hit_set_id(id)
-			let hs = ui.hovers(id)
+			let hs = ui.captured(id) ?? ui.hovers(id)
 			hs.set('hit', 'hsl_square')
-			hs.set('sat', lerp(mx - x, 0, w-1, 0, 1))
-			hs.set('lum', lerp(my - y, 0, h-1, 0, 1))
+			hs.set('sat', lerp(ui.mx - x, 0, w-1, 0, 1))
+			hs.set('lum', lerp(ui.my - y, 0, h-1, 0, 1))
 			return true
 		}
 
@@ -3729,7 +3730,7 @@ ui.box_widget('color_picker', {
 			hit_set_id(id)
 			let hs = ui.hovers(id)
 			hs.set('hit', 'hue_bar')
-			hs.set('hue', lerp(my-y, 0, h-1, 0, 360))
+			hs.set('hue', lerp(ui.my-y, 0, h-1, 0, 360))
 			return true
 		}
 
@@ -3738,186 +3739,10 @@ ui.box_widget('color_picker', {
 })
 }
 
-// testbed -------------------------------------------------------------------
+// init ----------------------------------------------------------------------
 
-let test_template = {
-	t: 'v', fr: 2, gap: 20, e: [
-		{t: 'text', id: 't1', s: 'TP Hello!'},
-		{t: 'stack', id: 'st1', fr: 1, e: [
-			{t: 'bb', id: 'r1', bg_color: 'hsl(120deg 50% 16%)'},
-		]},
-	]}
-
-function make_frame() {
-
-	ui.h()
-
-	ui.p(ui.sp1())
-	ui.list('demos', [
-		'demo1',
-		'demo2',
-		'demo3',
-	], 0)
-
-	if (0) {
-	ui.m(50, null, 50)
-	ui.h(1, 20)
-		ui.text('t1', 'Hello1!')
-		ui.stack('', 1)
-			ui.bb('', ui.bg('bg2'))
-			ui.scrollbox('sb1', 1)
-				ui.m(50, 50, 0, 0)
-				ui.p(20)
-				ui.v(1, 20, 'c', 'c')
-					// ui.bg('hsl(0deg 0% 16%)')
-					ui.shadow(2, 2, 5, 0, false, 'black')
-					ui.bb('', 'bg1', 1, 'light', 20)
-					// ui.p(10, 10, 10, 10)
-					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
-					// ui.p(10, 10, 10, 10)
-					ui.text('t3', dec( max_frame_duration * 1000, 1)+' ms', '[', 'c', 1)
-					ui.text('t4', dec(last_frame_duration * 1000, 1)+' ms', '[', 'c', 1)
-					if (1) {
-						ui.m(0, 0, -20, 0)
-						ui.popup('p1', layer_popup, null, 'b')
-							ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
-							ui.p(20)
-							ui.text('tp1', 'Wasup?')
-						ui.end_popup()
-					}
-				ui.end_v()
-			ui.end_scrollbox()
-		ui.end_stack()
-		ui.template('tpl1', test_template)
-		// ui.text('t3', '...and again.', 'c', 'c', 1)
-	ui.end_h()
-	}
-
-	if (1) {
-		ui.m(10)
-		ui.p(10)
-		ui.v()
-			ui.bb('', 'bg1')
-			ui.color_picker('cp1')
-			if (ui.button('btn1', 'Wasup?'))
-				pr('clicked!')
-			ui.hsplit('hsplit1', '[', 200, 'px')
-					ui.p(20)
-					ui.stack()
-						ui.bb('', 'bg2')
-						ui.text_wrapped('text1', `
-							Were we in a Garden of Eden where land and other goods were infinitely
-							abundant, there would be no scarcity and, therefore, no need
-							for property rules; property concepts would be meaningless. The idea
-							of conflict, and the idea of rights, would not even arise. For example,
-							your taking my lawnmower would not really deprive me of it if I
-							could conjure up another in the blink of an eye. Lawnmower-taking
-							in these circumstances would not be theft. Property rights are not
-							applicable to things of infinite abundance, because there cannot be
-							conflict over such things.
-						`, 'c')
-					ui.end_stack()
-				ui.splitter()
-					ui.vsplit('vsplit1', '[')
-							ui.stack()
-								ui.bb('', 'input')
-								// (id, s, align, valign, fr, max_min_w, min_w, min_h, wrap)
-								ui.text('', `
-				Hello2 Hello2 Hello2 Hello2
-				Hello2 Hello2 Hello2
-				Hello2 Hello2
-				Hello2
-		`, null, null, null, null, null, null, 'line')
-							ui.end_stack()
-						ui.splitter()
-							ui.stack()
-								ui.bb('', 'bg1')
-								ui.v(1, ui.sp1(), 'l', 'c')
-									ui.h(1, ui.sp1())
-										ui.label('input1', 'First Input')
-										ui.input('input1', 'Hello3 Hello3 Hello3 Hello3')
-									ui.end_h()
-									ui.h(1, ui.sp1())
-										ui.label('input2', 'Second Input')
-										ui.input('input2', 'Hello3 Hello3')
-									ui.end_h()
-								ui.end_v()
-							ui.end_stack()
-					ui.end_vsplit()
-			ui.end_hsplit()
-		ui.end_v()
-	}
-
-	ui.end_h()
-}
-
-ui.focus('input1')
-
-let blink
-setInterval(function() {
-	return
-	ui.focus(blink ? 'input1' : null)
-	blink = !blink
-}, 1000)
-
-// debugging -----------------------------------------------------------------
-
-function draw_debug_box(a, i) {
-	if (!ui.DEBUG) return
-	// if (a[i-1] != CMD_POPUP) return
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	let mx1 = a[i+MX1+0]
-	let my1 = a[i+MX1+1]
-	let mx2 = a[i+MX2+0]
-	let my2 = a[i+MX2+1]
-	let px1 = a[i+PX1+0]
-	let py1 = a[i+PX1+1]
-	let px2 = a[i+PX2+0]
-	let py2 = a[i+PX2+1]
-	cx.beginPath()
-	cx.fillStyle = 'hsl(240deg 100% 50% / .4)'
-	cx.rect(x, y, w, h)
-	cx.fill()
-	cx.beginPath()
-	cx.fillStyle = 'hsl(120deg 100% 50% / .4)'
-	cx.rect(x+mx1, y+my1, w-mx1-mx2, h-my1-my2)
-	cx.fill()
-	cx.beginPath()
-	cx.fillStyle = 'hsl(0deg 100% 50% / .4)'
-	cx.rect(x+mx1+px1, y+my1+py1, w-mx1-mx2-px1-px2, h-my1-my2-py1-py2)
-	cx.fill()
-}
-
-function pr_layer(a) {
-	let i = 2
-	let depth = 0
-	let n = a.length
-	let pr1 = pr
-	while (i < n) {
-		let cmd = a[i-1]
-		if (cmd == CMD_END)
-			depth--
-		let indent = (' ').repeat(depth)
-		let cmd_s = cmd_names[cmd]
-		if (cmd < 0) {
-			let next_ext_i = a[i+NEXT_EXT_I]
-			let next_ext_cmd_s = cmd_names[a[next_ext_i-1]]
-			pr1(indent + '(' + cmd_s, i)
-			depth++
-		} else if (cmd == CMD_END) {
-			pr1(indent + ')', i)
-		} else {
-			pr1(indent + cmd_s, i)
-		}
-		let next_i = a[i-2]
-		i = next_i
-	}
-	assert(depth == 0)
-}
-
-resize_canvas()
+// prevent flicker
+theme = ui.default_theme
+screen.style.background = ui.bg('bg')[0]
 
 }()) // module function

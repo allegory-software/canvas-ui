@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* {
+	box-sizing: border-box;
+}
+</style>
+</head>
+<body>
+<script src=ui.js></script>
+<script src=bg_dots.js></script>
+<script>
+
+let pr = console.log
+
+let demos = []
+
+demos.flex = `
+ui.v()
+	ui.h()
+		ui.v()
+		ui.end_v()
+	ui.end_h()
+ui.end_v()
+`
+
+demos.split = `
+ui.hsplit('hsplit1', .5)
+		ui.vsplit('vsplit1')
+				ui.hsplit('hsplit2', 100, 'px')
+						ui.text('', 'Here1')
+					ui.splitter()
+						ui.text('', 'Here2')
+				ui.end_hsplit()
+			ui.splitter()
+				ui.hsplit('hsplit3', 0.3, '%')
+						ui.text('', 'Here3')
+					ui.splitter()
+						ui.text('', 'Here4')
+				ui.end_hsplit()
+		ui.end_vsplit()
+	ui.splitter()
+		ui.vsplit('vsplit2')
+				ui.hsplit('hsplit4', 100, 'px', ']')
+						ui.text('', 'Here1')
+					ui.splitter()
+						ui.text('', 'Here2')
+				ui.end_hsplit()
+			ui.splitter()
+				ui.hsplit('hsplit5', 0.3, '%', ']')
+						ui.text('', 'Here3')
+					ui.splitter()
+						ui.text('', 'Here4')
+				ui.end_hsplit()
+		ui.end_vsplit()
+ui.end_hsplit()
+`
+
+demos.word_wrap = `
+ui.hsplit('hsplit1', .8)
+		ui.v()
+
+			ui.p(20)
+			ui.stack()
+				ui.bb('', 'bg2')
+				ui.text_wrapped('text1', \`
+					Were we in a Garden of Eden where land and other goods were infinitely
+					abundant, there would be no scarcity and, therefore, no need
+					for property rules; property concepts would be meaningless. The idea
+					of conflict, and the idea of rights, would not even arise. For example,
+					your taking my lawnmower would not really deprive me of it if I
+					could conjure up another in the blink of an eye. Lawnmower-taking
+					in these circumstances would not be theft. Property rights are not
+					applicable to things of infinite abundance, because there cannot be
+					conflict over such things.
+				\`, 0, 'c')
+			ui.end_stack()
+
+			ui.p(20)
+			ui.stack()
+				ui.bb('', 'bg1')
+				ui.text_wrapped('text2', \`
+					The wrapped text pushes this flex cell down.
+				\`, 0, 'l')
+			ui.end_stack()
+
+			ui.p(20)
+			ui.stack()
+				ui.bb('', 'bg2')
+				ui.text_wrapped('text3', \`
+					The wrapped text pushes this flex cell down.
+					Also, this is right-aligned.
+				\`, 0, 'r')
+			ui.end_stack()
+
+		ui.end_v()
+	ui.splitter()
+		ui.stack()
+			//
+		ui.end_stack()
+ui.end_hsplit()
+`
+
+demos.input = `
+ui.v(1, ui.sp1(), 'l', 'c')
+	ui.h(1, ui.sp1())
+		ui.label('input1', 'First Input')
+		ui.input('input1', 'Hello3 Hello3 Hello3 Hello3')
+	ui.end_h()
+	ui.h(1, ui.sp1())
+		ui.label('input2', 'Second Input')
+		ui.input('input2', 'Hello3 Hello3')
+	ui.end_h()
+ui.end_v()
+`
+
+demos.dots_bg = `
+ui.stack()
+	ui.connected_dots_bg('dots1')
+ui.end_stack()
+`
+
+demos.button = `
+ui.m(ui.sp2())
+ui.h(1, ui.sp2(), 's', 't')
+	if (ui.button_primary('btn1', 'Click me!'))
+		pr('clicked btn1!')
+	if (ui.button('btn2', 'Click me too!'))
+		pr('clicked btn2!')
+ui.end_h()
+`
+
+demos.popup = `
+
+`
+
+demos.color_picker = `
+ui.color_picker('cp1')
+`
+
+/*
+	if (0) {
+	ui.m(50, null, 50)
+	ui.h(1, 20)
+		ui.text('t1', 'Hello1!')
+		ui.stack('', 1)
+			ui.bb('', ui.bg('bg2'))
+			ui.scrollbox('sb1', 1)
+				ui.m(50, 50, 0, 0)
+				ui.p(20)
+				ui.v(1, 20, 'c', 'c')
+					// ui.bg('hsl(0deg 0% 16%)')
+					ui.shadow(2, 2, 5, 0, false, 'black')
+					ui.bb('', 'bg1', 1, 'light', 20)
+					// ui.p(10, 10, 10, 10)
+					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
+					if (1) {
+						ui.m(0, 0, -20, 0)
+						ui.popup('p1', layer_popup, null, 'b')
+							ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
+							ui.p(20)
+							ui.text('tp1', 'Wasup?')
+						ui.end_popup()
+					}
+				ui.end_v()
+			ui.end_scrollbox()
+		ui.end_stack()
+		ui.template('tpl1', test_template)
+		// ui.text('t3', '...and again.', 1, 'c', 'c')
+	ui.end_h()
+	}
+
+	if (1) {
+		ui.m(10)
+		ui.p(10)
+		ui.v()
+			ui.bb('', 'bg1')
+			if (ui.button('btn1', 'Wasup?'))
+				pr('clicked!')
+			ui.stack()
+				ui.connected_dots_bg('dots1')
+			ui.end_stack()
+			ui.hsplit('hsplit1', 200, 'px', '[')
+				ui.splitter()
+					ui.vsplit('vsplit1')
+							ui.stack()
+								ui.bb('', 'input')
+								// (id, s, align, valign, fr, max_min_w, min_w, min_h, wrap)
+								ui.text('', `
+				Hello2 Hello2 Hello2 Hello2
+				Hello2 Hello2 Hello2
+				Hello2 Hello2
+				Hello2
+		`, null, null, null, null, null, null, 'line')
+							ui.end_stack()
+						ui.splitter()
+					ui.end_vsplit()
+			ui.end_hsplit()
+		ui.end_v()
+	}
+
+*/
+
+let test_template = {
+	t: 'v', fr: 2, gap: 20, e: [
+		{t: 'text', id: 't1', s: 'TP Hello!'},
+		{t: 'stack', id: 'st1', fr: 1, e: [
+			{t: 'bb', id: 'r1', bg_color: 'hsl(120deg 50% 16%)'},
+		]},
+	]}
+
+let demos_array = Object.keys(demos)
+
+ui.frame = function() {
+
+	ui.v()
+
+		ui.p(ui.sp05())
+		ui.h(0, ui.sp2())
+			ui.bb('', null, 'b', 'light')
+			ui.text('', 'max frame')
+			ui.scope()
+				ui.color('yellow')
+				ui.text('', (ui.max_frame_duration * 1000).toFixed(1)+' ms')
+			ui.end_scope()
+			ui.text('', 'last frame')
+			ui.scope()
+				ui.color('yellow')
+				ui.text('', (ui.last_frame_duration * 1000).toFixed(1)+' ms')
+			ui.end_scope()
+		ui.end_h()
+
+		ui.h()
+
+			let demo = ui.list('demos', demos_array, 0)
+
+			let s = (demos[demo] ?? '').trim()
+
+			ui.sb('demo_code', .5)
+				ui.bb('', 'bg1', 'r', 'light')
+				ui.font('monospace')
+				ui.p(ui.sp4())
+				if (s)
+					ui.text_lines('demo_text', s, 0, 'l', 't')
+			ui.end_sb()
+
+			if (s)
+				eval(s)
+
+		ui.end_h()
+
+	ui.end_v()
+}
+
+</script>
+</body>
+</html>
