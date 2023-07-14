@@ -135,7 +135,13 @@ demos.popup = `
 `
 
 demos.color_picker = `
-ui.color_picker('cp1')
+ui.stack()
+	ui.p(ui.sp1())
+	ui.stack('', 0, 'c', 'c', 400)
+		ui.bb('', null, 1, 'light')
+		ui.color_picker('cp1')
+	ui.end_stack()
+ui.end_stack()
 `
 
 /*
@@ -211,23 +217,34 @@ let test_template = {
 
 let demos_array = Object.keys(demos)
 
+let a_length = 0
+let dark_mode = true
 ui.frame = function() {
 
 	ui.v()
 
-		ui.p(ui.sp05())
-		ui.h(0, ui.sp2())
+		ui.p(ui.sp1())
+		ui.h(0, ui.sp2(), 's')
 			ui.bb('', null, 'b', 'light')
+			ui.color('label')
 			ui.text('', 'max frame')
-			ui.scope()
-				ui.color('yellow')
-				ui.text('', (ui.max_frame_duration * 1000).toFixed(1)+' ms')
-			ui.end_scope()
+			ui.color('link')
+			ui.text('', (ui.max_frame_duration * 1000).toFixed(1)+' ms', 0, 'r', 'c', 1/0, ui.em(4))
+			ui.color('label')
 			ui.text('', 'last frame')
-			ui.scope()
-				ui.color('yellow')
-				ui.text('', (ui.last_frame_duration * 1000).toFixed(1)+' ms')
-			ui.end_scope()
+			ui.color('link')
+			ui.text('', (ui.last_frame_duration * 1000).toFixed(1)+' ms', 0, 'r', 'c', 1/0, ui.em(4))
+			ui.color('label')
+			ui.text('', 'a.length')
+			ui.color('link')
+			ui.text('', a_length+'', 0, 'r', 'c', 1/0, ui.em(3))
+			if (ui.button('btn_light', 'lights')) {
+				dark_mode = !dark_mode
+				ui.redraw()
+			}
+			ui.default_theme = dark_mode ? 'dark' : 'light'
+			ui.color('label')
+			ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')
 		ui.end_h()
 
 		ui.h()
@@ -250,6 +267,8 @@ ui.frame = function() {
 		ui.end_h()
 
 	ui.end_v()
+
+	a_length = ui.a.length
 }
 
 </script>

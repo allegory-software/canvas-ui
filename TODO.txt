@@ -1,14 +1,15 @@
-TODO
+THINK
+
+- solve the IMGUI achilles heel:
+	widgets depending on the state of other widgets that appear later in the frame.
+		solutions:
+			- cmd record buffers
 
 - toolbox z-index
 - toolbox move by all sides, with all alignment combinations
 - bb on text
 - bb on scrollbox?
 - negative margins?
-
-LIBRARIZATION
-
-- phy layers: canvas, webgl, input
 
 ------------------------------------------------------------------------------
 

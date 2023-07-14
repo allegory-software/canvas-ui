@@ -13,6 +13,7 @@ let G = window
 let ui = G.ui || {}
 G.ui = ui
 
+ui.VERSION = '0.1'
 ui.DEBUG = 0
 
 // utilities ------------------------------------------------------------------
@@ -111,8 +112,9 @@ function map_freelist() {
 	return freelist(map)
 }
 
-// when using capture_pointer(), setting the cursor for the element that
+// When using capture_pointer(), setting the cursor for the element that
 // is hovered doesn't work anymore, so use this hack instead.
+// We haven't even started yet and the DOM is already giving us trouble.
 {
 let style = document.createElement('style')
 document.documentElement.appendChild(style)
@@ -195,9 +197,23 @@ ui.hsl = function(h, s, L, a) {
 	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
 }
 
+{
+let hex = x => round(x).toString(16).padStart(2, '0')
+let d = []
+ui.rgb = function(h, s, L, a) {
+	hsl_to_rgba(d, 0, h, s, L)
+	return '#' +
+		hex(d[0]) +
+		hex(d[1]) +
+		hex(d[2]) +
+		(a ? hex(a) : '')
+}
+}
+
 ui.hsl_adjust = function(c, h, s, L, a) {
 	return ui.hsl(c[1] * h, c[2] * s, c[3] * L, c[4] * a)
 }
+
 // themes --------------------------------------------------------------------
 
 ui.scrollbar_thickness = 6
@@ -227,11 +243,6 @@ theme_make('light', 'black')
 theme_make('dark' , 'white')
 
 let theme
-
-ui.dark_mode = function(on) {
-	theme = on ? themes.dark : themes.light
-	ui.redraw()
-}
 
 // state parsing -------------------------------------------------------------
 
@@ -451,6 +462,7 @@ let cx = canvas.getContext('2d')
 ui.cx = cx
 
 let a = []
+ui.a = a
 
 let screen_w, screen_h, dpr
 
@@ -495,6 +507,7 @@ function animate() {
 }
 ui.animate = animate
 
+// delay first animation frame to after all scripts are loaded.
 document.addEventListener('DOMContentLoaded', resize_canvas)
 
 // input event handling ------------------------------------------------------
@@ -769,6 +782,12 @@ ui.state_set = function(id, k, v) {
 	ui.state_map(id).set(k, v)
 }
 
+ui.state_set_default = function(id, k, v) {
+	let s = ui.state_map(id)
+	if (s.has(k)) return
+	s.set(k, v)
+}
+
 function id_state_gc() {
 	for (let id of id_remove_set) {
 		let m = id_state_maps.get(id)
@@ -819,77 +838,16 @@ function measure_req_all() {
 	measure_req.length = 0
 }
 
-// imgui command array -------------------------------------------------------
-
-let cmd_names = []
-let cmd_name_map = map()
-
-function C(a, i) { return cmd_names[a[i-1]] }
-
-let measure   = []
-let position  = []
-let translate = []
-let draw      = []
-let hit       = []
-
-function cmd(name, is_ct) {
-	let code = hash32(name)
-	code = (is_ct ? -1 : 1) * abs(code)
-	assert(!cmd_names[code], 'duplicate command code ',code,' for ',name)
-	cmd_names[code] = name
-	cmd_name_map.set(name, code)
-	return code
-}
-function cmd_ct(name) {
-	return cmd(name, true)
-}
-
-ui.widget = function(cmd_name, t, is_ct) {
-	let _cmd = cmd(cmd_name, is_ct)
-	measure   [_cmd] = t.measure
-	position  [_cmd] = t.position
-	translate [_cmd] = t.translate
-	draw      [_cmd] = t.draw
-	hit       [_cmd] = t.hit
-	let create = t.create
-	if (create) {
-		function wrapper(...args) {
-			return create(_cmd, ...args)
-		}
-		ui[cmd_name] = wrapper
-		return wrapper
-	} else {
-		return _cmd
-	}
-}
-ui.widget_ct = function(cmd_name, t) { return ui.widget(cmd_name, t, true) }
-
-ui.box_widget = function(cmd_name, t) {
-	return ui.widget(cmd_name, assign({
-		measure: function(a, i, axis) {
-			let fr = a[i+FR]
-			let w  = a[i+2+axis]
-			add_ct_min_wh(a, axis, w, fr)
-		},
-		position: function(a, i, axis, sx, sw) {
-			a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-			a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
-		},
-		translate: function(a, i, dx, dy) {
-			a[i+0] += dx
-			a[i+1] += dy
-		},
-	}, t))
-}
+// command state -------------------------------------------------------------
 
 let color, font, font_size, font_weight, line_gap
 
-ui.default_theme = themes.dark
+ui.default_theme = 'dark'
 ui.default_font = 'Arial'
 ui.font_size_normal = 14
 
 function reset_all() {
-	theme = ui.default_theme
+	theme = themes[ui.default_theme]
 	color = ui.fg('text')[0]
 	font = ui.default_font
 	font_size = ui.font_size_normal
@@ -905,16 +863,14 @@ function reset_all() {
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
 }
 
-function ui_cmd(cmd, ...args) {
-	let i0 = a.length+2   // index of this cmd's arg#1
-	let i1 = i0+args.length+3 // index of next cmd's arg#1
-	a.push(i1, cmd, ...args, i0)
-	return i0
-}
-ui.cmd = ui_cmd
+// container stack -----------------------------------------------------------
 
 let ct_stack = [] // [ct_i1,...]
 ui.ct_stack = ct_stack
+
+ui.ct_i = function() {
+	return assert(ct_stack.at(-1), 'no container')
+}
 
 function check_stacks() {
 	if (ct_stack.length) {
@@ -930,6 +886,114 @@ function check_stacks() {
 	assert(!scope_stack.length, 'scope not closed')
 }
 
+// imgui command array -------------------------------------------------------
+
+let cmd_names = []
+let cmd_name_map = map()
+
+function C(a, i) { return cmd_names[a[i-1]] }
+
+function cmd(name, is_ct) {
+	let code = hash32(name)
+	code = (is_ct ? -1 : 1) * abs(code)
+	assert(!cmd_names[code], 'duplicate command code ',code,' for ',name)
+	cmd_names[code] = name
+	cmd_name_map.set(name, code)
+	return code
+}
+function cmd_ct(name) {
+	return cmd(name, true)
+}
+
+function ui_cmd(cmd, ...args) {
+	let i0 = a.length+2   // index of this cmd's arg#1
+	let i1 = i0+args.length+3 // index of next cmd's arg#1
+	a.push(i1, cmd, ...args, i0)
+	return i0
+}
+ui.cmd = ui_cmd
+
+// cmd buffers ---------------------------------------------------------------
+
+Array.prototype.clear = function() { this.length = 0 } // freelist needs it
+
+let cmd_buffer_freelist = freelist(() => new Array())
+
+let record_stack = []
+
+ui.record = function() {
+	let a1 = cmd_buffer_freelist()
+	record_stack.push(a)
+	a = a1
+}
+
+ui.end_record = function() {
+	let a1 = a
+	a = record_stack.pop()
+	return a1
+}
+
+let reindex = []
+
+ui.record_play = function(a1) {
+
+	// fix all indices in a1 to fit into their new place in a.
+	let offset = a.length
+	let i = 2
+	let n = a1.length
+	while (i < n) {
+		let next_i = a1[i-2]
+		a1[i-2] += offset
+		a1[next_i-3] += offset // this cmd's i0
+		let cmd = a1[i-1]
+		let reindex_f = reindex[cmd]
+		if (reindex_f)
+			reindex_f(a1, i, offset)
+		if (cmd < 0) // container
+			a1[i+NEXT_EXT_I] += offset
+		i = next_i
+	}
+
+	a.push(...a1)
+}
+
+// widget API ----------------------------------------------------------------
+
+let measure   = []
+let position  = []
+let translate = []
+let draw      = []
+let hit       = []
+
+ui.widget = function(cmd_name, t, is_ct) {
+	let _cmd = cmd(cmd_name, is_ct)
+	measure   [_cmd] = t.measure
+	position  [_cmd] = t.position
+	translate [_cmd] = t.translate
+	draw      [_cmd] = t.draw
+	hit       [_cmd] = t.hit
+	reindex   [_cmd] = t.reindex
+	let create = t.create
+	if (create) {
+		function wrapper(...args) {
+			return create(_cmd, ...args)
+		}
+		ui[cmd_name] = wrapper
+		let setstate = t.setstate
+		if (t.setstate) {
+			function wrapper(...args) {
+				return create(_cmd, ...args)
+			}
+			ui[cmd_name+'_state'] = wrapper
+		}
+		return wrapper
+	} else {
+		return _cmd
+	}
+}
+
+// box & box-container widgets -----------------------------------------------
+
 const PX1        =  4
 const PX2        =  6
 const MX1        =  8
@@ -942,6 +1006,13 @@ const S          = 16 // first index after the ui_cmd_box_ct header.
 
 const FLEX_GAP      = S+0
 const FLEX_TOTAL_FR = S+1
+
+function get_next_ext_i(a, i) {
+	let cmd = a[i-1]
+	if (cmd < 0) // container
+		return a[i+NEXT_EXT_I]
+	return a[i-2] // next_i
+}
 
 const ALIGN_STRETCH = 0
 const ALIGN_START   = 1
@@ -1003,6 +1074,8 @@ ui.padding_left   = function(p) { px1 = p }; ui.pl = ui.padding_left
 ui.padding_right  = function(p) { px2 = p }; ui.pr = ui.padding_right
 ui.padding_top    = function(p) { py1 = p }; ui.pt = ui.padding_top
 ui.padding_bottom = function(p) { py2 = p }; ui.pb = ui.padding_bottom
+ui.padding_h      = function(p1, p2) { px1 = p1; px2 = p2; }; ui.ph = ui.padding_h
+ui.padding_v      = function(p1, p2) { py1 = p1; py2 = p2; }; ui.pv = ui.padding_v
 
 ui.margin = function(_mx1, _mx2, _my1, _my2) {
 	mx1 = _mx1 ?? 0
@@ -1015,6 +1088,8 @@ ui.margin_left   = function(m) { mx1 = m }; ui.ml = ui.margin_left
 ui.margin_right  = function(m) { mx2 = m }; ui.mr = ui.margin_right
 ui.margin_top    = function(m) { my1 = m }; ui.mt = ui.margin_top
 ui.margin_bottom = function(m) { my2 = m }; ui.mb = ui.margin_bottom
+ui.margin_h      = function(m1, m2) { mx1 = m1; mx2 = m2; }; ui.mh = ui.margin_h
+ui.margin_v      = function(m1, m2) { my1 = m1; my2 = m2; }; ui.mv = ui.margin_v
 
 function reset_paddings() {
 	px1 = 0
@@ -1054,6 +1129,33 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 	return i
 }
 
+ui.box_widget = function(cmd_name, t, is_ct) {
+	return ui.widget(cmd_name, assign({
+		measure: function(a, i, axis) {
+			let fr = a[i+FR]
+			let w  = a[i+2+axis]
+			add_ct_min_wh(a, axis, w, fr)
+		},
+		position: function(a, i, axis, sx, sw) {
+			a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+			a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
+		},
+		translate: function(a, i, dx, dy) {
+			a[i+0] += dx
+			a[i+1] += dy
+		},
+	}, t), is_ct)
+}
+
+ui.box_ct_widget = function(cmd_name, t) {
+	let ret = ui.box_widget(cmd_name, t, true)
+	let cmd = cmd_name_map.get(cmd_name)
+	ui['end_'+cmd_name] = function() { ui.end(cmd) }
+	return ret
+}
+
+// flex ----------------------------------------------------------------------
+
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 	begin_scope()
 	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
@@ -1072,6 +1174,8 @@ ui.hv = function(hv, ...args) {
 	return ui_hv(cmd, ...args)
 }
 
+// stack ---------------------------------------------------------------------
+
 const STACK_ID = S+0
 
 const CMD_STACK = cmd_ct('stack')
@@ -1080,6 +1184,8 @@ ui.stack = function(id, fr, align, valign, min_w, min_h) {
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
 		id)
 }
+
+// scrollbox -----------------------------------------------------------------
 
 const SB_OVERFLOW =  S+0 // overflow x,y
 const SB_CW       =  S+2 // content w,h
@@ -1110,6 +1216,8 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 	}
 }
 ui.sb = ui.scrollbox
+
+// popup ---------------------------------------------------------------------
 
 const POPUP_SIDE_CENTER       = 0 // only POPUP_SIDE_INNER_CENTER is valid!
 const POPUP_SIDE_HORIZ        = 2
@@ -1212,6 +1320,12 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 	begin_layer(layer1, i)
 }
 
+reindex[CMD_POPUP] = function(a, i, offset) {
+	a[i+POPUP_TARGET_I] += offset
+}
+
+// common end command for all containers -------------------------------------
+
 const CMD_END = cmd('end')
 ui.end = function(cmd) {
 	end_scope()
@@ -1231,6 +1345,12 @@ ui.end_stack     = function() { ui.end(CMD_STACK) }
 ui.end_scrollbox = function() { ui.end(CMD_SCROLLBOX) }
 ui.end_popup     = function() { ui.end(CMD_POPUP) }
 ui.end_sb = ui.end_scrollbox
+
+reindex[CMD_END] = function(a, i, offset) {
+	a[i+0] += offset
+}
+
+// border & background -------------------------------------------------------
 
 const BORDER_SIDE_T = 1
 const BORDER_SIDE_R = 2
@@ -1270,9 +1390,25 @@ ui.bb = function(id, bg_color, sides, border_color, border_radius) {
 		border_color = ui.border(border_color) ?? border_color
 	if (isarray(border_color))
 		border_color = border_color[0]
-	let ct_i = assert(ct_stack.at(-1), 'bb outside container')
-	ui_cmd(CMD_BB, id, ct_i, bg_color, parse_border_sides(sides), border_color, border_radius)
+	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, parse_border_sides(sides), border_color, border_radius)
 }
+
+reindex[CMD_BB] = function(a, i, offset) {
+	a[i+BB_CT_I] += offset
+}
+
+function set_theme_dark(dark) {
+	theme = dark ? themes.dark : themes.light
+	scope_set('theme', theme)
+	ui.color('text')
+}
+function end_theme(ended_scope) {
+	let s = scope_prev_var(ended_scope, 'theme')
+	if (s === undefined) return
+	theme = s
+}
+
+// box shadow ----------------------------------------------------------------
 
 ui.shadow_style = function(theme, name, x, y, blur, spread, inset, h, s, L, a) {
 	themes[theme].shadow[name] = [x, y, blur, spread, inset, ui.hsl(h, s, L, a), h, s, L, a]
@@ -1304,6 +1440,8 @@ ui.shadow = function(x, y, blur, spread, inset, color) {
 		[x, y, blur, spread, inset, color] = x
 	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset, color)
 }
+
+// text box ------------------------------------------------------------------
 
 const TEXT_ASC      = S-1
 const TEXT_DSC      = S-0
@@ -1353,6 +1491,8 @@ ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, ed
 	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
 }
 
+// text state ----------------------------------------------------------------
+
 const CMD_COLOR = cmd('color')
 ui.color = function(s, state) {
 	if (isstr(s))
@@ -1369,17 +1509,6 @@ function end_color(ended_scope) {
 	if (s === undefined) return
 	ui_cmd(CMD_COLOR, s)
 	color = s
-}
-
-function set_theme_dark(dark) {
-	theme = dark ? themes.dark : themes.light
-	scope_set('theme', theme)
-	ui.color('text')
-}
-function end_theme(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'theme')
-	if (s === undefined) return
-	theme = s
 }
 
 const CMD_FONT = cmd('font')
@@ -1478,13 +1607,6 @@ function set_font_weight(a, i) {
 
 function set_line_gap(a, i) {
 	line_gap = a[i]
-}
-
-function get_next_ext_i(a, i) {
-	let cmd = a[i-1]
-	if (cmd < 0) // container
-		return a[i+NEXT_EXT_I]
-	return a[i-2] // next_i
 }
 
 // measuring phase (per-axis) ------------------------------------------------
@@ -2663,6 +2785,13 @@ ui.hovers = function(id) {
 	return m
 }
 
+ui.hitstate = function(id, k) {
+	if (!id)
+		return
+	let m = hit_state_maps.get(id)
+	return m && m.get(k)
+}
+
 function hit_rect(x, y, w, h) {
 	return (
 		(ui.mx >= x && ui.mx < x + w) &&
@@ -3147,7 +3276,7 @@ ui.button = function(id, s, style, align, valign) {
 	ui.p(ui.sp2(), null, ui.sp1())
 	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
 		ui.shadow('button')
-		ui.bb('', ui.bg(style, state), 1, ui.border('light', state), ui.sp05())
+		ui.bb('', ui.bg(style, state), 1, ui.border('intense', state), ui.sp05())
 		ui.bold()
 		ui.color('text', state)
 		ui.text('', s, 0, 'c', 'c')
@@ -3336,16 +3465,16 @@ ui.end_vsplit = function() { end_split('v') }
 // text-input ----------------------------------------------------------------
 
 ui.input = function(id, s, fr, min_w, min_h) {
-	ui.stack('', 0, 's', 's')
+	ui.stack('', fr, 's', 's')
 		ui.bb('', 'input', 1, ui.border('intense', ui.focused(id) ? 'hover' : 'normal'))
 		ui.p(ui.sp1())
-		ui.text(id, s, fr, 'l', 'c', null, min_w ?? ui.em(10), min_h, null, true)
+		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(10), min_h, null, true)
 	ui.end_stack()
 }
 
-ui.label = function(for_id, s) {
+ui.label = function(for_id, s, fr, align, valign) {
 	ui.p(ui.sp1())
-	ui.text('', s, 1, 'l', 'c')
+	ui.text('', s, fr ?? 1, align ?? 'l', valign ?? 'c')
 }
 
 // list ----------------------------------------------------------------------
@@ -3353,7 +3482,6 @@ ui.label = function(for_id, s) {
 ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, item_fr, hv) {
 	ui.hv(hv ?? 'v', fr, gap, align, valign, 120)
 	let focused_item_i = ui.state(id, 'focused_item_i') ?? 0
-	pr( ui.focused(id))
 	let d = ui.focused(id) && (
 			ui.keydown('arrowdown') &&  1 ||
 			ui.keydown('arrowup'  ) && -1
@@ -3586,10 +3714,10 @@ ui.widget('resizer', {
 
 }
 
-// color picker --------------------------------------------------------------
+// blit'able -----------------------------------------------------------------
 
-{
-function get_idata(s, key, w, h) {
+ui.image_data = function(id, key, w, h) {
+	let s = ui.state_map(id)
 	let idata = s.get(key)
 	if (!idata
 		|| s.get(key+'.w') != w
@@ -3602,6 +3730,8 @@ function get_idata(s, key, w, h) {
 	}
 	return idata
 }
+
+// sat-lum square ------------------------------------------------------------
 
 function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	if (sat == null) return
@@ -3618,9 +3748,53 @@ function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	cx.stroke()
 }
 
-function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum, sel_sat, sel_lum) {
+ui.widget('sat_lum_square', {
 
-		let idata = get_idata(s, 'hsl_square', w, h)
+	create: function(cmd, id, hue, sat, lum) {
+
+		hue = hue ?? 0
+		sat = sat ?? .5
+		lum = lum ?? .5
+
+		ui.state_set_default(id, 'sat', sat)
+		ui.state_set_default(id, 'lum', lum)
+
+		// doesn't look too good...
+		// if (ui.hit(id))
+		// 	ui.set_cursor('crosshair')
+
+		if (ui.focused(id)) {
+			let lum_step = ui.keydown('arrowup'   ) && 1 || ui.keydown('arrowdown') && -1
+			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
+			if (lum_step) {
+				let lum = ui.state(id, 'lum')
+				ui.state_set(id, 'lum', lum + (ui.key('shift') ? 0.1 : 1) * 0.1 * lum_step)
+			}
+			if (sat_step) {
+				let sat = ui.state(id, 'sat')
+				ui.state_set(id, 'sat', sat + (ui.key('shift') ? 0.1 : 1) * 0.1 * sat_step)
+			}
+		}
+
+		return ui_cmd(cmd, id, ui.ct_i(), hue)
+	},
+
+	reindex: function(a, i, offset) {
+		a[i+1] += offset
+	},
+
+	draw: function(a, i) {
+
+		let id   = a[i+0]
+		let ct_i = a[i+1]
+		let hue  = a[i+2]
+
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
+
+		let idata = ui.image_data(id, 'square', w, h)
 
 		if (idata.hue != hue) {
 			let d = idata.data
@@ -3638,9 +3812,49 @@ function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum, sel_sat, sel_lum)
 
 		cx.putImageData(idata, x, y)
 
+		let hit_sat = ui.hitstate(id, 'sat')
+		let hit_lum = ui.hitstate(id, 'lum')
+		let sel_sat = ui.state(id, 'sat')
+		let sel_lum = ui.state(id, 'lum')
+
 		draw_cross(x, y, w, h, hue, hit_sat, hit_lum, 0.3)
 		draw_cross(x, y, w, h, hue, sel_sat, sel_lum, 1.0)
-}
+
+	},
+
+	hit: function(a, i) {
+
+		let id   = a[i+0]
+		let ct_i = a[i+1]
+
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
+
+		let cs = ui.captured(id)
+		if (cs || (!captured_id && hit_rect(x, y, w, h)))
+			hit_set_id(id)
+		let hs = ui.hovers(id)
+		if (hs) {
+			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
+			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
+		}
+		if (!cs && hs && ui.click) {
+			ui.focus(id)
+			cs = ui.capture(id)
+		}
+		if (cs) {
+			ui.state_set(id, 'sat', hs.get('sat'))
+			ui.state_set(id, 'lum', hs.get('lum'))
+		}
+
+		return !!hs
+	},
+
+})
+
+// hue bar -------------------------------------------------------------------
 
 function draw_hue_line(x, y, h, w, hue, alpha) {
 	if (hue == null) return
@@ -3653,9 +3867,38 @@ function draw_hue_line(x, y, h, w, hue, alpha) {
 	cx.stroke()
 }
 
-function draw_hue_bar(s, x, y, w, h, hit_hue, sel_hue) {
+ui.widget('hue_bar', {
 
-		let idata = get_idata(s, 'hue_bar', w, h)
+	create: function(cmd, id, hue) {
+
+		ui.state_set_default(id, 'hue', hue)
+
+		if (ui.focused(id)) {
+			let step = ui.keydown('arrowup') && 1 || ui.keydown('arrowdown') && -1
+			if (step) {
+				let hue = ui.state(id, 'hue')
+				ui.state_set(id, 'hue', hue + (ui.key('shift') ? 0.1 : 1) * 0.1 * step)
+			}
+		}
+
+		return ui_cmd(cmd, id, ui.ct_i())
+	},
+
+	reindex: function(a, i, offset) {
+		a[i+1] += offset
+	},
+
+	draw: function(a, i) {
+
+		let id   = a[i+0]
+		let ct_i = a[i+1]
+
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
+
+		let idata = ui.image_data(id, 'bar', w, h)
 
 		if (!idata.ready) {
 			let d = idata.data
@@ -3672,118 +3915,100 @@ function draw_hue_bar(s, x, y, w, h, hit_hue, sel_hue) {
 
 		cx.putImageData(idata, x, y)
 
+		let sel_hue = ui.state(id, 'hue')
+		let hit_hue = ui.hovers(id)?.get('hue')
+
 		draw_hue_line(x, y, h, w, hit_hue, 0.3)
 		draw_hue_line(x, y, h, w, sel_hue, 1.0)
-}
-
-let w = 200
-let h = 200
-ui.box_widget('color_picker', {
-
-	create: function(cmd, id, align, valign) {
-
-		if (ui.focused(id)) {
-			let lum_step = ui.keydown('arrowup'   ) && 1 || ui.keydown('arrowdown') && -1
-			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
-			if (lum_step) {
-				let lum = ui.state(id, 'lum') ?? .5
-				ui.state_set(id, 'lum', lum + (ui.key('shift') ? 0.1 : 1) * 0.1 * lum_step)
-			}
-			if (sat_step) {
-				let sat = ui.state(id, 'sat') ?? .5
-				ui.state_set(id, 'sat', sat + (ui.key('shift') ? 0.1 : 1) * 0.1 * sat_step)
-			}
-		}
-
-		return ui_cmd_box(cmd, 1, align ?? 'c', valign ?? 'c', 200, 200, id)
-	},
-
-	draw: function(a, i) {
-
-		let x  = a[i+0]
-		let y  = a[i+1]
-		let sw = a[i+2]
-		let sh = a[i+3]
-		let id = a[i+S-1]
-		let s = ui.state_map(id)
-
-		let cs = ui.captured(id)
-		let hs = ui.hovers(id)
-		let hit
-		if (!cs && hs && ui.click) {
-			ui.focus(id)
-			hit = hs.get('hit')
-			cs = ui.capture(id)
-			if (cs)
-				cs.set('hit', hit)
-		} else if (cs)
-			hit = cs.get('hit')
-
-		if (hit == 'hue_bar') {
-			s.set('hue', hs.get('hue'))
-		} else if (hit == 'hsl_square') {
-			s.set('sat', hs.get('sat'))
-			s.set('lum', hs.get('lum'))
-		}
-
-		let hue = s.get('hue') ?? 0
-		let sat = s.get('sat') ?? .5
-		let lum = s.get('lum') ?? .5
-
-		draw_hsl_square(s, x, y, w, h,
-			hue,
-			hs?.get('sat'),
-			hs?.get('lum'),
-			sat, lum,
-		)
-
-		draw_hue_bar(s, x+w+10, y, 20, h,
-			hs?.get('hue'),
-			hue,
-		)
-
-		cx.beginPath()
-		cx.rect(x, y+sh+10, sw / 2, ui.em(2))
-		cx.fillStyle = ui.hsl(hue, sat, lum)
-		cx.fill()
-
-		cx.textAlign = 'left'
-		cx.fillStyle = color
-		let c = 'H:'+dec(hue)+'\u00B0  S:'+dec(sat*100)+'%  L:'+dec(lum*100)+'%'
-		let m = cx.measureText(c)
-		let asc = m.fontBoundingBoxAscent
-		let dsc = m.fontBoundingBoxDescent
-		cx.fillText(c, x+sw/2+10, y+sh+10+((ui.em(2)-(asc+dsc))/2)+asc)
 
 	},
 
 	hit: function(a, i) {
-		let id = a[i+S-1]
-		let x = a[i+0]
-		let y = a[i+1]
+
+		let id   = a[i+0]
+		let ct_i = a[i+1]
+
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
 
 		let cs = ui.captured(id)
-
-		if (cs ? cs.get('hit') == 'hsl_square' : hit_rect(x, y, w, h)) {
+		if (cs || (!captured_id && hit_rect(x, y, w, h)))
 			hit_set_id(id)
-			let hs = ui.hovers(id)
-			hs.set('hit', 'hsl_square')
-			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
-			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
-			return true
+		let hs = ui.hovers(id)
+		if (hs)
+			hs.set('hue', clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360))
+		if (!cs && hs && ui.click) {
+			ui.focus(id)
+			cs = ui.capture(id)
 		}
-
-		if (cs ? cs.get('hit') == 'hue_bar' : hit_rect(x+w+10, y, 20, w)) {
-			hit_set_id(id)
-			let hs = ui.hovers(id)
-			hs.set('hit', 'hue_bar')
-			hs.set('hue', clamp(lerp(ui.my - y, 0, h-1, 0, 360), 0, 360))
-			return true
-		}
+		if (cs)
+			ui.state_set(id, 'hue', hs.get('hue'))
 
 	},
 
 })
+
+// aspect box ----------------------------------------------------------------
+
+ui.box_ct_widget('aspect_box', {
+	create: function(cmd, aspect, fr, align, valign, min_w, min_h) {
+		return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, aspect ?? 1)
+	},
+	measure: function(a, i, axis) {
+		ct_stack_push(a, i)
+		let fr = a[i+FR]
+		let w  = a[i+2+axis]
+		if (axis) {
+			let aspect = a[i+S+0]
+			w = round(a[i+2] / aspect)
+		}
+		add_ct_min_wh(a, axis, w, fr)
+	},
+})
+
+// color picker --------------------------------------------------------------
+
+ui.color_picker = function(id, hue, sat, lum) {
+	hue = hue ?? 0
+	sat = sat ?? .5
+	lum = lum ?? .5
+	ui.v(1, ui.sp1())
+		ui.h(1, ui.sp05())
+			ui.record()
+				ui.stack('', 0, null, null, ui.em(1))
+				 	ui.hue_bar(id+'.hb', hue)
+				ui.end_stack()
+			let hue_bar = ui.end_record()
+			ui.record()
+				ui.stack()
+					hue = ui.state(id+'.hb', 'hue')
+					ui.sat_lum_square(id+'.sl', hue, sat, lum)
+				ui.end_stack()
+			let sl_square = ui.end_record()
+			sat = ui.state(id+'.sl', 'sat') ?? sat
+			lum = ui.state(id+'.sl', 'lum') ?? lum
+			ui.aspect_box(1, 1, 's', 't')
+				ui.bb('', ui.hsl(hue, sat, lum))
+			ui.end_aspect_box()
+			ui.record_play(sl_square)
+			ui.record_play(hue_bar)
+		ui.end_h()
+		ui.h(0, 0, 's')
+			ui.label(id+'.input_hsl', 'HSL', .5)
+			let s =
+				dec(hue)+'\u00B0, '+
+				dec(sat*100)+'%, '+
+				dec(lum*100)+'%'
+			ui.input(id+'.input_hsl', s, 1)
+		ui.end_h()
+		ui.h(0, 0, 's')
+			ui.label(id+'.input_rgb', 'HEX', .5)
+			s = ui.rgb(hue, sat, lum)
+			ui.input(id+'.input_rgb', s, 1)
+		ui.end_h()
+	ui.end_v()
 }
 
 // bg_dots -------------------------------------------------------------------
@@ -3808,8 +4033,8 @@ function coinflip(a, b) {
 ui.widget('dots_bg', {
 
 	create: function(cmd, id) {
-		let ct_i = ui.assert(ct_stack.at(-1), 'dots_bg outside container')
 		assert(id, 'id required')
+		let ct_i = ui.ct_i()
 		return ui_cmd(cmd, id, ct_i)
 	},
 
@@ -3915,7 +4140,7 @@ ui.widget('dots_bg', {
 // init ----------------------------------------------------------------------
 
 // prevent flicker
-theme = ui.default_theme
+theme = themes[ui.default_theme]
 screen.style.background = ui.bg('bg')[0]
 
 }()) // module function
