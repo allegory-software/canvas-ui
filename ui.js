@@ -605,28 +605,37 @@ ui.captured = function(id) {
 	return capture_state
 }
 
-let key_state = map()
+let key_state_now = map()
+let key_state = set()
 
 canvas.addEventListener('keydown', function(ev) {
-	key_state.set(ev.key.toLowerCase(), 'down')
+	let key = ev.key.toLowerCase()
+	key_state_now.set(key, 'down')
+	key_state.add(key)
 	animate()
 })
 
 canvas.addEventListener('keyup', function(ev) {
-	key_state.set(ev.key.toLowerCase(), 'up')
+	let key = ev.key.toLowerCase()
+	key_state_now.set(key, 'up')
+	key_state.delete(key)
 	animate()
 })
 
-ui.keydown = function(id, key) {
-	return ui.focused_id == id && key_state.get(key) == 'down'
+ui.keydown = function(key) {
+	return key_state_now.get(key) == 'down'
 }
 
 ui.keyup = function(key) {
-	return ui.focused_id == id && key_state.get(key) == 'up'
+	return key_state_now.get(key) == 'up'
+}
+
+ui.key = function(key) {
+	return key_state.has(key)
 }
 
 function reset_keys() {
-	key_state.clear()
+	key_state_now.clear()
 }
 
 // z-layers ------------------------------------------------------------------
@@ -905,6 +914,7 @@ function ui_cmd(cmd, ...args) {
 ui.cmd = ui_cmd
 
 let ct_stack = [] // [ct_i1,...]
+ui.ct_stack = ct_stack
 
 function check_stacks() {
 	if (ct_stack.length) {
@@ -2270,7 +2280,6 @@ draw[CMD_POPUP] = function(a, i) {
 function input_free(s, id) {
 	let input = s.get('input')
 	input.remove()
-	pr('input free', id)
 }
 
 function input_focus(ev) {
@@ -3344,9 +3353,11 @@ ui.label = function(for_id, s) {
 ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, item_fr, hv) {
 	ui.hv(hv ?? 'v', fr, gap, align, valign, 120)
 	let focused_item_i = ui.state(id, 'focused_item_i') ?? 0
-	let d =
-		ui.keydown(id, 'arrowdown') &&  1 ||
-		ui.keydown(id, 'arrowup'  ) && -1 || 0
+	pr( ui.focused(id))
+	let d = ui.focused(id) && (
+			ui.keydown('arrowdown') &&  1 ||
+			ui.keydown('arrowup'  ) && -1
+		) || 0
 	if (d) {
 		focused_item_i = clamp(focused_item_i + d, 0, items.length-1)
 		ui.state_set(id, 'focused_item_i', focused_item_i)
@@ -3577,6 +3588,7 @@ ui.widget('resizer', {
 
 // color picker --------------------------------------------------------------
 
+{
 function get_idata(s, key, w, h) {
 	let idata = s.get(key)
 	if (!idata
@@ -3591,12 +3603,12 @@ function get_idata(s, key, w, h) {
 	return idata
 }
 
-function draw_cross(x0, y0, w, h, sat, lum, color) {
+function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	if (sat == null) return
 	let x = round(x0 + lerp(sat, 0, 1, 0, w-1)) + .5
-	let y = round(y0 + lerp(lum, 0, 1, 0, h-1)) + .5
-	let d = 10
-	cx.strokeStyle = color
+	let y = round(y0 + lerp(lum, 1, 0, 0, h-1)) + .5
+	let d = 10.5
+	cx.strokeStyle = ui.hsl(360-hue, sat, lum > .5 ? 0 : 1, alpha)
 	cx.lineWidth = 1
 	cx.beginPath()
 	cx.moveTo(x, y); cx.lineTo(x+d, y)
@@ -3626,18 +3638,18 @@ function draw_hsl_square(s, x, y, w, h, hue, hit_sat, hit_lum, sel_sat, sel_lum)
 
 		cx.putImageData(idata, x, y)
 
-		draw_cross(x, y, w, h, hit_sat, hit_lum, '#888')
-		draw_cross(x, y, w, h, sel_sat, sel_lum, '#000')
+		draw_cross(x, y, w, h, hue, hit_sat, hit_lum, 0.3)
+		draw_cross(x, y, w, h, hue, sel_sat, sel_lum, 1.0)
 }
 
-function draw_hue_line(x, y, h, w, hue, color) {
+function draw_hue_line(x, y, h, w, hue, alpha) {
 	if (hue == null) return
-	cx.strokeStyle = color
+	cx.strokeStyle = ui.hsl(0, 0, 0, alpha)
 	cx.lineWidth = 1
 	cx.beginPath()
 	let hue_y = lerp(hue, 0, 360, 0, h-1)
-	cx.moveTo(x    , y + hue_y - 1 + .5)
-	cx.lineTo(x + w, y + hue_y - 1 + .5)
+	cx.moveTo(x    , y + hue_y + .5)
+	cx.lineTo(x + w, y + hue_y + .5)
 	cx.stroke()
 }
 
@@ -3660,16 +3672,29 @@ function draw_hue_bar(s, x, y, w, h, hit_hue, sel_hue) {
 
 		cx.putImageData(idata, x, y)
 
-		draw_hue_line(x, y, h, w, hit_hue, '#888')
-		draw_hue_line(x, y, h, w, sel_hue, '#000')
+		draw_hue_line(x, y, h, w, hit_hue, 0.3)
+		draw_hue_line(x, y, h, w, sel_hue, 1.0)
 }
 
-{
-let w = 256
-let h = 256
+let w = 200
+let h = 200
 ui.box_widget('color_picker', {
 
 	create: function(cmd, id, align, valign) {
+
+		if (ui.focused(id)) {
+			let lum_step = ui.keydown('arrowup'   ) && 1 || ui.keydown('arrowdown') && -1
+			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
+			if (lum_step) {
+				let lum = ui.state(id, 'lum') ?? .5
+				ui.state_set(id, 'lum', lum + (ui.key('shift') ? 0.1 : 1) * 0.1 * lum_step)
+			}
+			if (sat_step) {
+				let sat = ui.state(id, 'sat') ?? .5
+				ui.state_set(id, 'sat', sat + (ui.key('shift') ? 0.1 : 1) * 0.1 * sat_step)
+			}
+		}
+
 		return ui_cmd_box(cmd, 1, align ?? 'c', valign ?? 'c', 200, 200, id)
 	},
 
@@ -3684,31 +3709,51 @@ ui.box_widget('color_picker', {
 
 		let cs = ui.captured(id)
 		let hs = ui.hovers(id)
-		let hit = cs?.get('hit') ?? hs?.get('hit')
-
-		if (ui.click || cs) {
-			let cs = ui.capture(id)
-			if (ui.click && cs)
+		let hit
+		if (!cs && hs && ui.click) {
+			ui.focus(id)
+			hit = hs.get('hit')
+			cs = ui.capture(id)
+			if (cs)
 				cs.set('hit', hit)
-			if (hit == 'hue_bar') {
-				s.set('hue', hs.get('hue'))
-			} else if (hit == 'hsl_square') {
-				s.set('sat', hs.get('sat'))
-				s.set('lum', hs.get('lum'))
-			}
+		} else if (cs)
+			hit = cs.get('hit')
+
+		if (hit == 'hue_bar') {
+			s.set('hue', hs.get('hue'))
+		} else if (hit == 'hsl_square') {
+			s.set('sat', hs.get('sat'))
+			s.set('lum', hs.get('lum'))
 		}
 
+		let hue = s.get('hue') ?? 0
+		let sat = s.get('sat') ?? .5
+		let lum = s.get('lum') ?? .5
+
 		draw_hsl_square(s, x, y, w, h,
-			s.get('hue'),
+			hue,
 			hs?.get('sat'),
 			hs?.get('lum'),
-			s.get('sat'),
-			s.get('lum'),
+			sat, lum,
 		)
+
 		draw_hue_bar(s, x+w+10, y, 20, h,
 			hs?.get('hue'),
-			s.get('hue'),
+			hue,
 		)
+
+		cx.beginPath()
+		cx.rect(x, y+sh+10, sw / 2, ui.em(2))
+		cx.fillStyle = ui.hsl(hue, sat, lum)
+		cx.fill()
+
+		cx.textAlign = 'left'
+		cx.fillStyle = color
+		let c = 'H:'+dec(hue)+'\u00B0  S:'+dec(sat*100)+'%  L:'+dec(lum*100)+'%'
+		let m = cx.measureText(c)
+		let asc = m.fontBoundingBoxAscent
+		let dsc = m.fontBoundingBoxDescent
+		cx.fillText(c, x+sw/2+10, y+sh+10+((ui.em(2)-(asc+dsc))/2)+asc)
 
 	},
 
@@ -3717,23 +3762,151 @@ ui.box_widget('color_picker', {
 		let x = a[i+0]
 		let y = a[i+1]
 
-		if (hit_rect(x, y, w, h)) {
+		let cs = ui.captured(id)
+
+		if (cs ? cs.get('hit') == 'hsl_square' : hit_rect(x, y, w, h)) {
 			hit_set_id(id)
-			let hs = ui.captured(id) ?? ui.hovers(id)
+			let hs = ui.hovers(id)
 			hs.set('hit', 'hsl_square')
-			hs.set('sat', lerp(ui.mx - x, 0, w-1, 0, 1))
-			hs.set('lum', lerp(ui.my - y, 0, h-1, 0, 1))
+			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
+			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
 			return true
 		}
 
-		if (hit_rect(x+w+10, y, 20, w)) {
+		if (cs ? cs.get('hit') == 'hue_bar' : hit_rect(x+w+10, y, 20, w)) {
 			hit_set_id(id)
 			let hs = ui.hovers(id)
 			hs.set('hit', 'hue_bar')
-			hs.set('hue', lerp(ui.my-y, 0, h-1, 0, 360))
+			hs.set('hue', clamp(lerp(ui.my - y, 0, h-1, 0, 360), 0, 360))
 			return true
 		}
 
+	},
+
+})
+}
+
+// bg_dots -------------------------------------------------------------------
+
+{
+let dot_density = 2 // per 100px^2 surface
+let max_distance = 200 // between two dots
+
+function point_distance(p1, p2) {
+	let dx = abs(p1.x - p2.x)
+	let dy = abs(p1.y - p2.y)
+	return Math.sqrt(dx**2 + dy**2)
+}
+
+function random(min, max) {
+	return Math.random() * (max - min) + min
+}
+function coinflip(a, b) {
+	return Math.random() > 0.5 ? a : b
+}
+
+ui.widget('dots_bg', {
+
+	create: function(cmd, id) {
+		let ct_i = ui.assert(ct_stack.at(-1), 'dots_bg outside container')
+		assert(id, 'id required')
+		return ui_cmd(cmd, id, ct_i)
+	},
+
+	draw: function(a, i) {
+
+		let id   = a[i+0]
+		let ct_i = a[i+1]
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
+
+		let dot_num = round(w * h / 10000 * dot_density)
+
+		if (!dot_num)
+			return
+
+		let dots = ui.state(id, 'dots')
+		if (!dots) {
+			dots = []
+			ui.state_set(id, 'dots', dots)
+
+			dots.mouse_dot = {}
+			dots.push(dots.mouse_dot)
+		}
+
+		for (let i = dots.length; i < dot_num+1; i++) {
+			let t = {}
+			let d = max_distance
+			t.x  = random(-d, w+d)
+			t.y  = random(-d, h+d)
+			t.vx = random(0.2, 1) * coinflip(1, -1)
+			t.vy = random(0.2, 1) * coinflip(1, -1)
+			dots.push(t)
+		}
+		dots.length = dot_num+1
+
+		dots.mouse_dot.x = (ui.mx ?? -1000) - x
+		dots.mouse_dot.y = (ui.my ?? -1000) - y
+
+		cx.save()
+
+		cx.translate(x, y)
+
+		cx.beginPath()
+		cx.rect(0, 0, w, h)
+		cx.clip()
+
+		for (let t of dots) {
+			if (t != dots.mouse_dot) {
+				cx.fillStyle = ui.fg('label')[0]
+				cx.beginPath()
+				cx.arc(t.x, t.y, 2, 0, Math.PI*2, true)
+				cx.closePath()
+				cx.fill()
+			}
+		}
+
+		for (let i = 0; i < dots.length; i++) {
+			for (let j = i+1; j < dots.length; j++) {
+				let t1 = dots[i]
+				let t2 = dots[j]
+				let dp = point_distance(t1, t2) / max_distance
+				if (dp < 1) {
+					let alpha = 1 - dp
+					cx.strokeStyle = ui.hsl_adjust(ui.fg('label'), 1, 1, 1, alpha)
+					cx.lineWidth = 0.8
+					cx.beginPath()
+					cx.moveTo(t1.x, t1.y)
+					cx.lineTo(t2.x, t2.y)
+					cx.stroke()
+				}
+			}
+		}
+
+		for (let t of dots) {
+			if (t != dots.mouse_dot) {
+				t.x += t.vx
+				t.y += t.vy
+				let d = max_distance
+				if (!(t.x > -d && t.x < w+d && t.y > -d && t.y < h+d)) { // dead
+					if (coinflip(0, 1)) {
+						t.x = random  (-d, w+d)
+						t.y = coinflip(-d, h+d)
+					} else {
+						t.x = coinflip(-d, w+d)
+						t.y = random  (-d, h+d)
+					}
+					t.vx = random(0.2, 1) * (t.x > w / 2 ? -1 : 1)
+					t.vy = random(0.2, 1) * (t.y > h / 2 ? -1 : 1)
+				}
+			}
+		}
+
+		cx.restore()
+
+		ui.animate()
 	},
 
 })
