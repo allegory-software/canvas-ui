@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html theme=dark>
 <head>
 <style>
 * {
@@ -102,21 +102,21 @@ ui.end_hsplit()
 `
 
 demos.input = `
-ui.v(1, ui.sp1(), 'l', 'c')
-	ui.h(1, ui.sp1())
+ui.v(1, ui.sp(), 'l', 'c')
+	ui.h(1, ui.sp())
 		ui.label('input1', 'First Input')
 		ui.input('input1', 'Hello3 Hello3 Hello3 Hello3')
 	ui.end_h()
-	ui.h(1, ui.sp1())
+	ui.h(1, ui.sp())
 		ui.label('input2', 'Second Input')
 		ui.input('input2', 'Hello3 Hello3')
 	ui.end_h()
 ui.end_v()
 `
 
-demos.dots_bg = `
+demos.bg_dots = `
 ui.stack()
-	ui.dots_bg('dots1')
+	ui.bg_dots('dots1')
 ui.end_stack()
 `
 
@@ -131,12 +131,94 @@ ui.end_h()
 `
 
 demos.popup = `
+ui.m(20)
+ui.v(1, 10, 'c', 'c')
+	let i = 1
+	for (let inner of ['', 'i']) {
+		ui.h(1, 0, 'c', 'c', 200, 100)
+			ui.bb('', null, 1, 'gray')
+			for (let align of ['c', '[', ']']) {
+				ui.m(20, 20)
+				ui.stack()
+					ui.bb('', null, 1, 'gray')
+					for (let side of ['t', 'r', 'b', 'l', 'c']) {
+						if (side != 'c' || inner) {
+							ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
+								ui.bb('', null, 1, 'gray')
+							ui.end_popup()
+						}
+					}
+				ui.end_stack()
+			}
+		ui.end_h()
+	}
+ui.end_v()
+`
 
+demos.scrollbox = `
+ui.stack()
+	ui.h(0, 10, 'c', 'c')
+
+		// both scrollbars
+		ui.sb('sb1', 0, null, null, 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 300, 300)
+				ui.bb('', 'bg1', 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// max w/h before showing scrollbar
+		ui.sb('sb2', 0, 'scroll', 'scroll', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 100, 100)
+				ui.bb('', 'bg1', 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// hide on x-axis
+		ui.sb('sb3', 0, 'hide', 'auto', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 300, 300)
+				ui.bb('', 'bg1', 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// hide on y-axis
+		ui.sb('sb4', 0, 'auto', 'hide', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 300, 300)
+				ui.bb('', 'bg1', 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+	ui.end_h()
+ui.end_stack()
+`
+
+demos.toolbox = `
+	ui.toolbox('tb1', "Hey y'all", '[', 500, 100)
+		ui.stack('', 1, 's', 's', 200, 300)
+		ui.end_stack()
+	ui.end_toolbox()
+	ui.toolbox('tb2', "Hey y'all", '[', 550, 150)
+		ui.stack('', 1, 's', 's', 200, 300)
+		ui.end_stack()
+	ui.end_toolbox()
+	ui.toolbox('tb3', "Hey y'all", ']', 100, 100)
+		ui.stack('', 1, 's', 's', 200, 300)
+		ui.end_stack()
+	ui.end_toolbox()
+`
+
+let test_template = {
+	t: 'v', fr: 2, gap: 20, e: [
+		{t: 'text', id: 't1', s: 'TP Hello!'},
+		{t: 'stack', id: 'st1', fr: 1, e: [
+			{t: 'bb', id: 'r1', bg_color: 'hsl(120deg 50% 16%)'},
+		]},
+	]}
+demos.template = `
+ui.template('tpl1', test_template)
 `
 
 demos.color_picker = `
 ui.stack()
-	ui.p(ui.sp1())
+	ui.p(ui.sp())
 	ui.stack('', 0, 'c', 'c', 400)
 		ui.bb('', null, 1, 'light')
 		ui.color_picker('cp1')
@@ -146,22 +228,22 @@ ui.end_stack()
 
 /*
 	if (0) {
-	ui.m(50, null, 50)
+	ui.m(50, 50)
 	ui.h(1, 20)
 		ui.text('t1', 'Hello1!')
 		ui.stack('', 1)
 			ui.bb('', ui.bg('bg2'))
 			ui.scrollbox('sb1', 1)
-				ui.m(50, 50, 0, 0)
+				ui.m(50, 0, 50, 0)
 				ui.p(20)
 				ui.v(1, 20, 'c', 'c')
 					// ui.bg('hsl(0deg 0% 16%)')
 					ui.shadow(2, 2, 5, 0, false, 'black')
 					ui.bb('', 'bg1', 1, 'light', 20)
-					// ui.p(10, 10, 10, 10)
+					// ui.p(10)
 					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
 					if (1) {
-						ui.m(0, 0, -20, 0)
+						ui.m(0, -20, 0, 0)
 						ui.popup('p1', layer_popup, null, 'b')
 							ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
 							ui.p(20)
@@ -171,7 +253,6 @@ ui.end_stack()
 				ui.end_v()
 			ui.end_scrollbox()
 		ui.end_stack()
-		ui.template('tpl1', test_template)
 		// ui.text('t3', '...and again.', 1, 'c', 'c')
 	ui.end_h()
 	}
@@ -180,13 +261,7 @@ ui.end_stack()
 		ui.m(10)
 		ui.p(10)
 		ui.v()
-			ui.bb('', 'bg1')
-			if (ui.button('btn1', 'Wasup?'))
-				pr('clicked!')
-			ui.stack()
-				ui.connected_dots_bg('dots1')
-			ui.end_stack()
-			ui.hsplit('hsplit1', 200, 'px', '[')
+			ui.hsplit('hsplit1', 200, 'px', '[')
 				ui.splitter()
 					ui.vsplit('vsplit1')
 							ui.stack()
@@ -207,14 +282,6 @@ ui.end_stack()
 
 */
 
-let test_template = {
-	t: 'v', fr: 2, gap: 20, e: [
-		{t: 'text', id: 't1', s: 'TP Hello!'},
-		{t: 'stack', id: 'st1', fr: 1, e: [
-			{t: 'bb', id: 'r1', bg_color: 'hsl(120deg 50% 16%)'},
-		]},
-	]}
-
 let demos_array = Object.keys(demos)
 
 let a_length = 0
@@ -223,7 +290,7 @@ ui.frame = function() {
 
 	ui.v()
 
-		ui.p(ui.sp1())
+		ui.p(ui.sp())
 		ui.h(0, ui.sp2(), 's')
 			ui.bb('', null, 'b', 'light')
 			ui.color('label')
@@ -270,6 +337,8 @@ ui.frame = function() {
 
 	a_length = ui.a.length
 }
+
+ui.ready()
 
 </script>
 </body>

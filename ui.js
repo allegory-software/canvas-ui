@@ -326,8 +326,8 @@ ui.border = function(name, state, theme1) {
 // ---------------------------------------------------------------------------
 ui.border_style('light', 'light'   , 'normal' ,   0,   0,   0, 0.10)
 ui.border_style('light', 'light'   , 'hover'  ,   0,   0,   0, 0.30)
-ui.border_style('light', 'intense' , 'normal' ,   0,   0,   1, 0.30)
-ui.border_style('light', 'intense' , 'hover'  ,   0,   0,   1, 0.50)
+ui.border_style('light', 'intense' , 'normal' ,   0,   0,   0, 0.30)
+ui.border_style('light', 'intense' , 'hover'  ,   0,   0,   0, 0.40)
 
 ui.border_style('dark' , 'light'   , 'normal' ,   0,   0,   1, 0.09)
 ui.border_style('dark' , 'light'   , 'hover'  ,   0,   0,   1, 0.03)
@@ -424,23 +424,23 @@ ui.bg_style('dark' , 'modified'        , 'normal', 120, 0.59, 0.24)
 ui.bg_style('dark' , 'new-modified'    , 'normal', 157, 0.18, 0.20)
 
 // grid cell & row states. these need to be opaque!
-ui.bg_style('light', 'cell', 'item-focused'                       ,   0, 0.00, 0.93)
-ui.bg_style('light', 'cell', 'item-selected'                      ,   0, 0.00, 0.91)
-ui.bg_style('light', 'cell', 'item-focused item-selected'         ,   0, 0.00, 0.87)
-ui.bg_style('light', 'cell', 'item-focused focused'               ,   0, 0.00, 0.87)
-ui.bg_style('light', 'cell', 'item-focused item-selected focus'   , 139 / 239 * 360, 141 / 240, 206 / 240)
-ui.bg_style('light', 'cell', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.bg_style('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
+ui.bg_style('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
+ui.bg_style('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
+ui.bg_style('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
+ui.bg_style('light', 'item', 'item-focused item-selected focus'   , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_style('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
 
 ui.bg_style('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
 ui.bg_style('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
 ui.bg_style('light', 'row' , 'item-focused item-error'            ,   0, 1.00, 0.60)
 
-ui.bg_style('dark' , 'cell', 'item-focused'                       , 195, 0.06, 0.12)
-ui.bg_style('dark' , 'cell', 'item-selected'                      ,   0, 0.00, 0.20)
-ui.bg_style('dark' , 'cell', 'item-focused item-selected'         , 208, 0.11, 0.23)
-ui.bg_style('dark' , 'cell', 'item-focused focused'               ,   0, 0.00, 0.23)
-ui.bg_style('dark' , 'cell', 'item-focused item-selected focused' , 211, 0.62, 0.24)
-ui.bg_style('dark' , 'cell', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.bg_style('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
+ui.bg_style('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
+ui.bg_style('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0.23)
+ui.bg_style('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
+ui.bg_style('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
+ui.bg_style('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
 
 ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
@@ -484,6 +484,7 @@ function resize_canvas() {
 	a.h = screen_h
 	animate()
 }
+ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
 
 let raf_id
@@ -501,14 +502,19 @@ function raf_animate() {
 	else
 		ui.max_frame_duration = 0.000001
 }
+let ready
 function animate() {
 	if (raf_id) return
+	if (!ready) return
 	raf_id = requestAnimationFrame(raf_animate)
 }
 ui.animate = animate
 
-// delay first animation frame to after all scripts are loaded.
-document.addEventListener('DOMContentLoaded', resize_canvas)
+ui.ready = function() {
+	ready = true
+	assert(ui.frame, 'ui.frame not set')
+	resize_canvas()
+}
 
 // input event handling ------------------------------------------------------
 
@@ -842,8 +848,8 @@ function measure_req_all() {
 
 let color, font, font_size, font_weight, line_gap
 
-ui.default_theme = 'dark'
-ui.default_font = 'Arial'
+ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
+ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
 ui.font_size_normal = 14
 
 function reset_all() {
@@ -1062,8 +1068,9 @@ ui.sp1   = () => rem( .5)
 ui.sp2   = () => rem( .75)
 ui.sp4   = () => rem(1)
 ui.sp8   = () => rem(2)
+ui.sp    = ui.sp1
 
-ui.padding = function(_px1, _px2, _py1, _py2) {
+ui.padding = function(_px1, _py1, _px2, _py2) {
 	px1 = _px1 ?? 0
 	px2 = _px2 ?? _px1 ?? 0
 	py1 = _py1 ?? _px1 ?? 0
@@ -1074,10 +1081,8 @@ ui.padding_left   = function(p) { px1 = p }; ui.pl = ui.padding_left
 ui.padding_right  = function(p) { px2 = p }; ui.pr = ui.padding_right
 ui.padding_top    = function(p) { py1 = p }; ui.pt = ui.padding_top
 ui.padding_bottom = function(p) { py2 = p }; ui.pb = ui.padding_bottom
-ui.padding_h      = function(p1, p2) { px1 = p1; px2 = p2; }; ui.ph = ui.padding_h
-ui.padding_v      = function(p1, p2) { py1 = p1; py2 = p2; }; ui.pv = ui.padding_v
 
-ui.margin = function(_mx1, _mx2, _my1, _my2) {
+ui.margin = function(_mx1, _my1, _mx2, _my2) {
 	mx1 = _mx1 ?? 0
 	mx2 = _mx2 ?? _mx1 ?? 0
 	my1 = _my1 ?? _mx1 ?? 0
@@ -1088,8 +1093,6 @@ ui.margin_left   = function(m) { mx1 = m }; ui.ml = ui.margin_left
 ui.margin_right  = function(m) { mx2 = m }; ui.mr = ui.margin_right
 ui.margin_top    = function(m) { my1 = m }; ui.mt = ui.margin_top
 ui.margin_bottom = function(m) { my2 = m }; ui.mb = ui.margin_bottom
-ui.margin_h      = function(m1, m2) { mx1 = m1; mx2 = m2; }; ui.mh = ui.margin_h
-ui.margin_v      = function(m1, m2) { my1 = m1; my2 = m2; }; ui.mv = ui.margin_v
 
 function reset_paddings() {
 	px1 = 0
@@ -1192,6 +1195,17 @@ const SB_CW       =  S+2 // content w,h
 const SB_ID       =  S+4
 const SB_SX       =  S+5 // scroll x,y
 
+const SB_OVERFLOW_AUTO   = 0
+const SB_OVERFLOW_HIDE   = 1
+const SB_OVERFLOW_SCROLL = 2
+
+function parse_sb_overflow(s) {
+	if (s == null   || s == 'auto'  ) return SB_OVERFLOW_AUTO
+	if (s === false || s == 'hide'  ) return SB_OVERFLOW_HIDE
+	if (s === true  || s == 'scroll') return SB_OVERFLOW_SCROLL
+	assert(false, 'invalid overflow ', s)
+}
+
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
@@ -1202,8 +1216,8 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 
 	begin_scope()
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
-		overflow_x ?? 'auto',
-		overflow_y ?? 'auto',
+		parse_sb_overflow(overflow_x),
+		parse_sb_overflow(overflow_y),
 		min_w ?? 0, // swapped with content w on `end`
 		min_h ?? 0, // swapped with content h on `end`
 		id,
@@ -2250,13 +2264,13 @@ function position_popup(w, h, side, align, tx1, ty1, tx2, ty2) {
 	let th = ty2 - ty1
 
 	if (side == POPUP_SIDE_RIGHT) {
-		;[x, y] = [tx2, ty1]
+		;[x, y] = [tx2 - 1, ty1]
 	} else if (side == POPUP_SIDE_LEFT) {
-		;[x, y] = [tx1 - w, ty1]
+		;[x, y] = [tx1 - w + 1, ty1]
 	} else if (side == POPUP_SIDE_TOP) {
-		;[x, y] = [tx1, ty1 - h]
+		;[x, y] = [tx1, ty1 - h + 1]
 	} else if (side == POPUP_SIDE_BOTTOM) {
-		;[x, y] = [tx1, ty2]
+		;[x, y] = [tx1, ty2 - 1]
 	} else if (side == POPUP_SIDE_INNER_RIGHT) {
 		;[x, y] = [tx2 - w, ty1]
 	} else if (side == POPUP_SIDE_INNER_LEFT) {
@@ -2538,8 +2552,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 }
 
-let scrollbar_rect
-{
+let scrollbar_rect; {
 let r = [false, 0, 0, 0, 0]
 scrollbar_rect = function(a, i, axis, active) {
 	let x  = a[i+0]
@@ -2550,23 +2563,26 @@ scrollbar_rect = function(a, i, axis, active) {
 	let ch = a[i+SB_CW+1]
 	let sx = a[i+SB_SX+0]
 	let sy = a[i+SB_SX+1]
+	let overflow_x = a[i+SB_OVERFLOW+0]
+	let overflow_y = a[i+SB_OVERFLOW+1]
 	sx = max(0, min(sx, cw - w))
 	sy = max(0, min(sy, ch - h))
 	let psx = sx / (cw - w)
 	let psy = sy / (ch - h)
 	let pw = w / cw
 	let ph = h / ch
-	let thickness = active ? theme.scrollbar_thickness_active : theme.scrollbar_thickness
+	let thickness = theme.scrollbar_thickness
+	let thickness_active = active ? theme.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
-	let h_visible = pw < 1
-	let v_visible = ph < 1
+	let h_visible = overflow_x != SB_OVERFLOW_HIDE && pw < 1
+	let v_visible = overflow_y != SB_OVERFLOW_HIDE && ph < 1
 	let both_visible = h_visible && v_visible && 1 || 0
 	if (!axis) {
 		visible = h_visible
 		if (visible) {
 			let bw = w - both_visible * thickness
 			tw = pw * bw
-			th = thickness
+			th = thickness_active
 			tx = psx * (bw - tw)
 			ty = h - th
 		}
@@ -2575,7 +2591,7 @@ scrollbar_rect = function(a, i, axis, active) {
 		if (visible) {
 			let bh = h - both_visible * thickness
 			th = ph * bh
-			tw = thickness
+			tw = thickness_active
 			ty = psy * (bh - th)
 			tx = w - tw
 		}
@@ -2666,15 +2682,35 @@ if (!c2d.roundRect) { // Firefox doesn't have it
 	}
 }
 
-function border_path(cx, x1, y1, x2, y2, sides, radius) {
+function bg_path(cx, x1, y1, x2, y2, sides, r) {
 	cx.beginPath()
 	if (sides == BORDER_SIDE_ALL)
-		if (!radius)
+		if (!r)
 			cx.rect(x1, y1, x2-x1, y2-y1)
 		else
-			cx.roundRect(x1, y1, x2-x1, y2-y1, radius)
+			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
+	else {
+		let rlb = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_B) && r || 0
+		let rlt = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_T) && r || 0
+		let rrt = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_T) && r || 0
+		let rrb = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_B) && r || 0
+		cx.moveTo(x1, y2-rlb);
+		cx.lineTo(x1, y1+rlt); if (rlt) cx.arcTo(x1, y1, x1+rlt, y1, rlt);
+		cx.lineTo(x2-rrt, y1); if (rrt) cx.arcTo(x2, y1, x2, y1+rrt, rrt);
+		cx.lineTo(x2, y2-rrb); if (rrb) cx.arcTo(x2, y2, x2-rrb, y2, rrb);
+		cx.lineTo(x1+rlb, y2); if (rlb) cx.arcTo(x1, y2, x1, y2-rlb, rlb);
+	}
+}
+
+function border_path(cx, x1, y1, x2, y2, sides, r) {
+	cx.beginPath()
+	if (sides == BORDER_SIDE_ALL)
+		if (!r)
+			cx.rect(x1, y1, x2-x1, y2-y1)
+		else
+			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
 	else
-		border_paths[sides](cx, x1, y1, x2, y2, radius)
+		border_paths[sides](cx, x1, y1, x2, y2, r)
 }
 
 let shadow_set
@@ -2704,7 +2740,7 @@ draw[CMD_BB] = function(a, i) {
 	let border_radius = a[i+5]
 	if (bg_color != null) {
 		cx.fillStyle = bg_color
-		border_path(cx, x, y, x + w, y + h, BORDER_SIDE_ALL, border_radius)
+		bg_path(cx, x, y, x + w, y + h, border_sides, border_radius)
 		cx.fill()
 	}
 	if (shadow_set) {
@@ -2713,7 +2749,7 @@ draw[CMD_BB] = function(a, i) {
 		cx.shadowOffsetY = 0
 		shadow_set = false
 	}
-	if (border_sides) {
+	if (border_sides && border_color != null) {
 		cx.strokeStyle = border_color
 		cx.lineWidth = 1
 		cx.lineCap = 'square'
@@ -3173,15 +3209,20 @@ ui.box_widget('template_overlay', {
 })
 
 function draw_node(id, t_t, t, depth) {
-	ui.p(depth * 20, 0, ui.sp05(), ui.sp05())
+	ui.p(depth * 20, ui.sp05(), 0)
 	ui.stack(t)
 		let hit = ui.hit(t)
 		if (hit && ui.click)
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
-		if (sel)
-			ui.bb('', 'selected')
-		ui.color('text', hit ? 'hover' : 'normal')
+		if (sel) {
+			ui.bb('', ui.bg('item',
+				ui.focused(id)
+					? 'item-focused item-selected focused'
+					: 'item-focused item-selected'
+			))
+		}
+		ui.color('text', hit ? 'hover' : null)
 		ui.text('', t.t, 1, 'l')
 	ui.end_stack()
 	if (t.e)
@@ -3207,18 +3248,18 @@ function template_editor(id, t, ch_t) {
 				let def = defs[k]
 				let v = ch_t[k]
 				ui.h()
-					ui.bb('', null, 'b', '#666')
-					let vs = v != null ? str(v) : (def.default ?? '')
+					ui.bb('', null, 'b', 'light')
+					let vs = str((v != null ? v : def.default) ?? '')
 					ui.mb(1)
-					ui.p(8, 8, 5, 5)
+					ui.p(8, 5)
 					ui.text('', k , 1, 'l', 'c', 20)
 					ui.mb(1)
-					ui.p(8, 8, 5, 5)
+					ui.p(8, 5)
 					ui.stack()
 						if (def.type == 'color') {
-							ui.bb('', v, 'l', '#888')
+							ui.bb('', v, 'l', 'light')
 						} else {
-							ui.bb('', null, 'l', '#888')
+							ui.bb('', null, 'l', 'light')
 							ui.color(v != null ? '#fff' : '#888')
 							ui.text('', vs, 1, 'l', 'c', 20)
 						}
@@ -3273,7 +3314,7 @@ ui.button = function(id, s, style, align, valign) {
 	let hit = ui.hit(id)
 	let state = hit ? ui.pressed ? 'active' : 'hover' : 'normal'
 	style = style ?? 'button'
-	ui.p(ui.sp2(), null, ui.sp1())
+	ui.p(ui.sp2(), ui.sp())
 	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
 		ui.shadow('button')
 		ui.bb('', ui.bg(style, state), 1, ui.border('intense', state), ui.sp05())
@@ -3467,13 +3508,13 @@ ui.end_vsplit = function() { end_split('v') }
 ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', fr, 's', 's')
 		ui.bb('', 'input', 1, ui.border('intense', ui.focused(id) ? 'hover' : 'normal'))
-		ui.p(ui.sp1())
+		ui.p(ui.sp())
 		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(10), min_h, null, true)
 	ui.end_stack()
 }
 
 ui.label = function(for_id, s, fr, align, valign) {
-	ui.p(ui.sp1())
+	ui.p(ui.sp())
 	ui.text('', s, fr ?? 1, align ?? 'l', valign ?? 'c')
 }
 
@@ -3504,15 +3545,16 @@ ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, i
 	i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
-		ui.p(ui.sp05())
+		ui.p(ui.sp(), ui.sp05())
 		ui.stack(item_id, 0)
 			let item_focused = focused_item_i == i
 			ui.bb('',
 				item_focused
-					? ui.bg('cell', list_focused
+					? ui.bg('item', list_focused
 							? 'item-focused item-selected focused'
 							: 'item-focused item-selected')
 					: 'bg')
+			ui.color('text', ui.hit(item_id) ? 'hover' : null)
 			ui.text('', item, item_fr ?? 1, item_align ?? 'l', item_valign ?? 'c')
 		ui.end_stack()
 		i++
@@ -3575,16 +3617,18 @@ ui.toolbox = function(id, title, align, x0, y0) {
 		s.set('my2', my2)
 	}
 
-	ui.m(mx1, mx2, my1, my2)
+	ui.m(mx1, my1, mx2, my2)
 	ui.popup(id+'.popup', layer_popup, null, 'it', align, min_w, min_h, 'constrain')
 		ui.p(1)
-		ui.bb('', 'bg1', 1, 'light')
+		ui.bb('', 'bg1', 1, 'intense', ui.sp075())
 		ui.stack()
 			ui.v() // title / body split
 				ui.h(0) // title bar
-					ui.bb(id+'.title', 'red')
-					ui.p(5)
-					ui.text('', title)
+					ui.stack(id+'.title')
+						ui.bb('', 'bg3', 'ltr', null, ui.sp075() * 0.75)
+						ui.p(ui.sp2(), ui.sp())
+						ui.text('', title, 0, 'l')
+					ui.end_stack()
 				ui.end_h()
 }
 
@@ -3861,7 +3905,7 @@ function draw_hue_line(x, y, h, w, hue, alpha) {
 	cx.strokeStyle = ui.hsl(0, 0, 0, alpha)
 	cx.lineWidth = 1
 	cx.beginPath()
-	let hue_y = lerp(hue, 0, 360, 0, h-1)
+	let hue_y = round(lerp(hue, 0, 360, 0, h-1))
 	cx.moveTo(x    , y + hue_y + .5)
 	cx.lineTo(x + w, y + hue_y + .5)
 	cx.stroke()
@@ -3874,10 +3918,11 @@ ui.widget('hue_bar', {
 		ui.state_set_default(id, 'hue', hue)
 
 		if (ui.focused(id)) {
-			let step = ui.keydown('arrowup') && 1 || ui.keydown('arrowdown') && -1
+			let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
 			if (step) {
 				let hue = ui.state(id, 'hue')
-				ui.state_set(id, 'hue', hue + (ui.key('shift') ? 0.1 : 1) * 0.1 * step)
+				hue = clamp(round(hue + (ui.key('shift') ? 1 : 10) * step), 0, 360)
+				ui.state_set(id, 'hue', hue)
 			}
 		}
 
@@ -3974,7 +4019,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 	hue = hue ?? 0
 	sat = sat ?? .5
 	lum = lum ?? .5
-	ui.v(1, ui.sp1())
+	ui.v(1, ui.sp())
 		ui.h(1, ui.sp05())
 			ui.record()
 				ui.stack('', 0, null, null, ui.em(1))
@@ -4030,7 +4075,7 @@ function coinflip(a, b) {
 	return Math.random() > 0.5 ? a : b
 }
 
-ui.widget('dots_bg', {
+ui.widget('bg_dots', {
 
 	create: function(cmd, id) {
 		assert(id, 'id required')
