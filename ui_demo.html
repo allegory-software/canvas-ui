@@ -13,44 +13,187 @@
 
 let pr = console.log
 
+let tuts = []
 let demos = []
 
-demos.flex = `
+tuts.text = `
+// text() shows a line of text.
+
+// how to call it: text(id, text, fr=1,
+//      align='center', valign='center',
+//      max_min_w=inf, min_w='auto', min_h='auto'
+//   )
+
+// max_min_w limits how much text can expand under min_w='auto' before being clipped.
+// the id is optional, we'll get back to that.
+
+ui.text('', 'Hello World!')
+`
+
+tuts.h = `
+// h() is a flexbox-like container that places its children horizontally.
+
+// how to call it: ui.h(fr=1, gap=0, align='stretch', valign='stretch', min_w=0, min_h=0)
+
+ui.h()
+	ui.text('', 'Hello')
+	ui.text('', 'World')
+ui.end()
+`
+
+tuts.v = `
+// v() is a flexbox-like container that places its children vertically.
+
+// how to call it: ui.v(fr=1, gap=0, align='stretch', valign='stretch', min_w=0, min_h=0)
+
 ui.v()
-	ui.h()
-		ui.v()
-		ui.end_v()
-	ui.end_h()
-ui.end_v()
+	ui.text('', 'Hello')
+	ui.text('', 'World')
+ui.end()
+`
+
+tuts.stack = `
+// stack() is a container that places its children on top of each other,
+// expanding as needed to make them fit.
+
+// how to call it: ui.stack(id, fr=1, align='stretch', valign='stretch', min_w=0, min_h=0)
+
+ui.stack()
+	ui.text('', 'Hello')
+	ui.text('', 'World')
+ui.end()
+`
+
+tuts.bb = `
+// bb() puts a background and/or border on its container, which is usually a stack.
+
+// how to call it: bb(id, bg_color, border_sides, border_color, border_radius=0)
+//    border_sides can be true or 1 (all), null (none), or any combination of 'ltrb'.
+//    bg_color and border_color can be null (none).
+
+// ui.shadow() draws a box shadow on the next bb() call.
+
+ui.stack('', 0, 'c', 'c', 150, 50)
+	ui.shadow(2, 2, 5, 0, false, 'black')
+	ui.bb('', 'crimson', 'ltrb', 'brown', 10)
+	ui.text('', 'Hello World!')
+ui.end()
+`
+
+tuts.font_size = `
+// font(), font_size(), font_weight(), color() can be used
+// to style up the text in the current container.
+
+ui.v(0, 20, 'c', 'c')
+	ui.font_size(24)
+	ui.color('teal')
+	ui.text('', 'Buongiorno!')
+	ui.h(0, 10, 'c')
+		// font and color changes are scoped.
+		// when this container ends, previus settings take effect.
+		ui.font('Serif')
+		ui.font_size(42)
+		ui.font_weight('bold')
+		ui.color('green')
+		ui.text('', 'Hello', 0)
+		ui.text('', 'World!', 0)
+	ui.end()
+	// using the font size set above in this scope.
+	ui.text('', 'Buona notte!')
+ui.end()
+`
+
+demos.flex_align_gap = `
+ui.v(1, 30, 'c', 'c')
+
+	ui.h(1, 10, 'c', 'c')
+	for (let align of ['l', 'r', 'c', 's']) {
+		ui.v(1, 10)
+		for (let valign of ['t', 'b', 'c', 's']) {
+			ui.h(1, 10, 'c', 'c', 30, 30)
+				ui.bb('bg3', null, 1, 'intense')
+				for (let i = 1; i <= 3; i++) {
+					ui.stack('', 1, align, valign, 10, 10)
+						ui.bb('', 'red')
+					ui.end_stack()
+				}
+			ui.end()
+		}
+		ui.end()
+	}
+	ui.end()
+
+	ui.h(1, 10, 'c', 'c')
+	for (let align of ['l', 'r', 'c', 's']) {
+		ui.v(1, 10)
+		for (let valign of ['t', 'b', 'c', 's']) {
+			ui.v(1, 10, 'c', 'c', 30, 30)
+				ui.bb('', null, 1, 'intense')
+				for (let i = 1; i <= 3; i++) {
+					ui.stack('', 1, align, valign, 10, 10)
+						ui.bb('', 'red')
+					ui.end_stack()
+				}
+			ui.end()
+		}
+		ui.end()
+	}
+	ui.end()
+
+ui.end()
+`
+
+demos.flex_fr_min_w = `
+ui.h(1, 30)
+for (let hv of ['h', 'v']) {
+	ui.hv(hv, 1, 10, 'c', 'c', 100, 100)
+		ui.stack('', 1)
+			ui.bb('', 'red')
+		ui.end_stack()
+		ui.stack('', 2)
+			ui.bb('', 'red')
+		ui.end_stack()
+		ui.stack('', 3)
+			ui.bb('', 'red')
+		ui.end_stack()
+		ui.stack('', 4)
+			ui.bb('', 'red')
+		ui.end_stack()
+		ui.stack('', 0, 's', 's', 100, 100)
+			ui.bb('', 'red')
+		ui.end_stack()
+	ui.end()
+}
+ui.end_h()
 `
 
 demos.split = `
 ui.hsplit('hsplit1', .5)
 		ui.vsplit('vsplit1')
 				ui.hsplit('hsplit2', 100, 'px')
-						ui.text('', 'Here1')
+						ui.text('', 'Fixed')
 					ui.splitter()
-						ui.text('', 'Here2')
+						ui.text('', 'Mobile')
 				ui.end_hsplit()
 			ui.splitter()
-				ui.hsplit('hsplit3', 0.3, '%')
-						ui.text('', 'Here3')
+				ui.hsplit('hsplit3', 0.3)
+						ui.text('', '30%')
 					ui.splitter()
-						ui.text('', 'Here4')
+						ui.text('', '70%')
 				ui.end_hsplit()
 		ui.end_vsplit()
 	ui.splitter()
 		ui.vsplit('vsplit2')
-				ui.hsplit('hsplit4', 100, 'px', ']')
-						ui.text('', 'Here1')
+				ui.hsplit('hsplit4', 200, 'px', ']')
+						ui.text('', 'Mobile')
 					ui.splitter()
-						ui.text('', 'Here2')
+						ui.text('', 'Fixed')
 				ui.end_hsplit()
 			ui.splitter()
-				ui.hsplit('hsplit5', 0.3, '%', ']')
-						ui.text('', 'Here3')
+				ui.hsplit('hsplit5', 0.3)
+						ui.text('', '30%')
 					ui.splitter()
-						ui.text('', 'Here4')
+						ui.text('', '70%')
 				ui.end_hsplit()
 		ui.end_vsplit()
 ui.end_hsplit()
@@ -96,7 +239,7 @@ ui.hsplit('hsplit1', .8)
 		ui.end_v()
 	ui.splitter()
 		ui.stack()
-			//
+			ui.text('', '<- Drag to wrap')
 		ui.end_stack()
 ui.end_hsplit()
 `
@@ -115,9 +258,7 @@ ui.end_v()
 `
 
 demos.bg_dots = `
-ui.stack()
-	ui.bg_dots('dots1')
-ui.end_stack()
+ui.bg_dots('dots1')
 `
 
 demos.button = `
@@ -155,8 +296,28 @@ ui.v(1, 10, 'c', 'c')
 ui.end_v()
 `
 
+demos.popup_move = `
+let j = 0
+for (let align of ['c', '[', ']']) {
+	let i = 0
+	for (let side of ['t', 'r', 'b', 'l']) {
+		let [x, y, p_i] = ui.drag_point('p'+j+i, 100+j*220, 100+i*120, 'red')
+		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 30, 30)
+			ui.bb('', null, 1, 'light')
+			ui.popup('tt'+j+i, null, ct_i, side, align, 100, 50, 'change_side constrain')
+				ui.bb('', null, 1, 'intense')
+			ui.end_popup()
+		ui.end_popup()
+		i++
+	}
+	j++
+}
+`
+
 demos.scrollbox = `
-ui.stack()
+
+ui.v(0, 30, 'c', 'c')
+
 	ui.h(0, 10, 'c', 'c')
 
 		// both scrollbars
@@ -186,23 +347,43 @@ ui.stack()
 				ui.bb('', 'bg1', 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
+
 	ui.end_h()
-ui.end_stack()
+
+	ui.h(0, 10, 'c', 'c')
+
+		// contain on x-axis
+		ui.sb('sb5', 0, 'contain', 'auto', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 200, 200)
+				ui.bb('', 'bg1', 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+		// contain on y-axis
+		ui.sb('sb5', 0, 'auto', 'contain', 'c', 'c', 100, 100)
+			ui.stack('', 0, 'l', 't', 200, 200)
+				ui.bb('', 'bg1', 1, 'intense')
+			ui.end_stack()
+		ui.end_sb()
+
+	ui.end_h()
+
+ui.end_v()
 `
 
 demos.toolbox = `
-	ui.toolbox('tb1', "Hey y'all", '[', 500, 100)
-		ui.stack('', 1, 's', 's', 200, 300)
-		ui.end_stack()
-	ui.end_toolbox()
-	ui.toolbox('tb2', "Hey y'all", '[', 550, 150)
-		ui.stack('', 1, 's', 's', 200, 300)
-		ui.end_stack()
-	ui.end_toolbox()
-	ui.toolbox('tb3', "Hey y'all", ']', 100, 100)
-		ui.stack('', 1, 's', 's', 200, 300)
-		ui.end_stack()
-	ui.end_toolbox()
+ui.toolbox('tb1', "Hey y'all", '[', 500, 100)
+	ui.stack('', 1, 's', 's', 200, 300)
+	ui.end_stack()
+ui.end_toolbox()
+ui.toolbox('tb2', "Hey y'all", '[', 550, 150)
+	ui.stack('', 1, 's', 's', 200, 300)
+	ui.end_stack()
+ui.end_toolbox()
+ui.toolbox('tb3', "Hey y'all", ']', 100, 100)
+	ui.stack('', 1, 's', 's', 200, 300)
+	ui.end_stack()
+ui.end_toolbox()
 `
 
 let test_template = {
@@ -217,12 +398,10 @@ ui.template('tpl1', test_template)
 `
 
 demos.color_picker = `
-ui.stack()
-	ui.p(ui.sp())
-	ui.stack('', 0, 'c', 'c', 400)
-		ui.bb('', null, 1, 'light')
-		ui.color_picker('cp1')
-	ui.end_stack()
+ui.p(ui.sp())
+ui.stack('', 0, 'c', 'c', 400)
+	ui.bb('', null, 1, 'light')
+	ui.color_picker('cp1')
 ui.end_stack()
 `
 
@@ -261,7 +440,7 @@ ui.end_stack()
 		ui.m(10)
 		ui.p(10)
 		ui.v()
-			ui.hsplit('hsplit1', 200, 'px', '[')
+			ui.hsplit('hsplit1', 200, 'px', '[')
 				ui.splitter()
 					ui.vsplit('vsplit1')
 							ui.stack()
@@ -282,7 +461,13 @@ ui.end_stack()
 
 */
 
-let demos_array = Object.keys(demos)
+let demos_array; {
+let t = {}
+for (let k in tuts)
+	t['tutorial_'+k] = tuts[k]
+Object.assign(demos, t)
+demos_array = Object.keys(demos)
+}
 
 let a_length = 0
 let dark_mode = true
@@ -294,15 +479,15 @@ ui.frame = function() {
 		ui.h(0, ui.sp2(), 's')
 			ui.bb('', null, 'b', 'light')
 			ui.color('label')
-			ui.text('', 'max frame')
+			ui.text('', 'max frame', 0)
 			ui.color('link')
 			ui.text('', (ui.max_frame_duration * 1000).toFixed(1)+' ms', 0, 'r', 'c', 1/0, ui.em(4))
 			ui.color('label')
-			ui.text('', 'last frame')
+			ui.text('', 'last frame', 0)
 			ui.color('link')
 			ui.text('', (ui.last_frame_duration * 1000).toFixed(1)+' ms', 0, 'r', 'c', 1/0, ui.em(4))
 			ui.color('label')
-			ui.text('', 'a.length')
+			ui.text('', 'a.length', 0)
 			ui.color('link')
 			ui.text('', a_length+'', 0, 'r', 'c', 1/0, ui.em(3))
 			if (ui.button('btn_light', 'lights')) {
@@ -316,7 +501,9 @@ ui.frame = function() {
 
 		ui.h()
 
-			let demo = ui.list('demos', demos_array, 0)
+			ui.sb('demos_list_sb', .2)
+				let demo = ui.list('demos', demos_array)
+			ui.end_sb()
 
 			let s = (demos[demo] ?? '').trim()
 
@@ -328,8 +515,10 @@ ui.frame = function() {
 					ui.text_lines('demo_text', s, 0, 'l', 't')
 			ui.end_sb()
 
-			if (s)
-				eval(s)
+			ui.stack()
+				if (s)
+					eval(s)
+			ui.end_stack()
 
 		ui.end_h()
 

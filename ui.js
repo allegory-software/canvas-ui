@@ -921,14 +921,18 @@ ui.cmd = ui_cmd
 
 // cmd buffers ---------------------------------------------------------------
 
-Array.prototype.clear = function() { this.length = 0 } // freelist needs it
+// freelist needs this...
+Object.defineProperty(Array.prototype, 'clear', {
+	value: function() { this.length = 0 },
+	enumerable: false,
+})
 
-let cmd_buffer_freelist = freelist(() => new Array())
+let record_freelist = freelist(() => new Array())
 
 let record_stack = []
 
 ui.record = function() {
-	let a1 = cmd_buffer_freelist()
+	let a1 = record_freelist()
 	record_stack.push(a)
 	a = a1
 }
@@ -961,6 +965,8 @@ ui.record_play = function(a1) {
 	}
 
 	a.push(...a1)
+
+	record_freelist(a1)
 }
 
 // widget API ----------------------------------------------------------------
@@ -1195,14 +1201,16 @@ const SB_CW       =  S+2 // content w,h
 const SB_ID       =  S+4
 const SB_SX       =  S+5 // scroll x,y
 
-const SB_OVERFLOW_AUTO   = 0
-const SB_OVERFLOW_HIDE   = 1
-const SB_OVERFLOW_SCROLL = 2
+const SB_OVERFLOW_AUTO    = 0
+const SB_OVERFLOW_HIDE    = 1
+const SB_OVERFLOW_SCROLL  = 2
+const SB_OVERFLOW_CONTAIN = 3
 
 function parse_sb_overflow(s) {
 	if (s == null   || s == 'auto'  ) return SB_OVERFLOW_AUTO
 	if (s === false || s == 'hide'  ) return SB_OVERFLOW_HIDE
 	if (s === true  || s == 'scroll') return SB_OVERFLOW_SCROLL
+	if (s == 'contain') return SB_OVERFLOW_CONTAIN
 	assert(false, 'invalid overflow ', s)
 }
 
@@ -1332,6 +1340,7 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		popup_parse_flags(flags ?? ''),
 	)
 	begin_layer(layer1, i)
+	return i
 }
 
 reindex[CMD_POPUP] = function(a, i, offset) {
@@ -1481,7 +1490,7 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 		assert(id, 'wrapped text needs id')
 		s = word_wrapper(id, s)
 	}
-	ui_cmd_box(CMD_TEXT, fr ?? 0, align ?? 'c', valign ?? 'c',
+	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'c', valign ?? 'c',
 		min_w ?? -1, // -1=auto
 		min_h ?? -1, // -1=auto
 		0, // ascent
@@ -1874,7 +1883,9 @@ measure[CMD_END] = function(a, _, axis) {
 	let cmd = a[i-1]
 	if (cmd == CMD_SCROLLBOX) {
 		let co_min_w = a[i+2+axis] // content min_w
-		let sb_min_w = a[i+SB_CW+axis] + p // scrollbox min_w
+		let contain = a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_CONTAIN
+		let min_w = contain ? co_min_w : 0
+		let sb_min_w = max(a[i+SB_CW+axis], min_w) + p // scrollbox min_w
 		a[i+SB_CW+axis] = co_min_w
 		a[i+2+axis] = sb_min_w
 		let fr = a[i+FR]
@@ -2361,8 +2372,8 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used, ct_i) {
 			re = 1; side = POPUP_SIDE_BOTTOM
 		} else if (side == POPUP_SIDE_RIGHT && out_x2) {
 			re = 1; side = POPUP_SIDE_LEFT
-		} else if (side == POPUP_SIDE_TOP && out_x1) {
-			re = 1; side = POPUP_SIDE_BOTTOM
+		} else if (side == POPUP_SIDE_LEFT && out_x1) {
+			re = 1; side = POPUP_SIDE_RIGHT
 		}
 
 		let vert = side & POPUP_SIDE_VERT
@@ -2740,7 +2751,7 @@ draw[CMD_BB] = function(a, i) {
 	let border_radius = a[i+5]
 	if (bg_color != null) {
 		cx.fillStyle = bg_color
-		bg_path(cx, x, y, x + w, y + h, border_sides, border_radius)
+		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
 		cx.fill()
 	}
 	if (shadow_set) {
@@ -2932,13 +2943,13 @@ hit[CMD_STACK] = function(a, i) {
 	if (hit_box(a, i)) {
 		hit_set_id(a[i+STACK_ID])
 		hit_template(a, i)
-		return true
 	}
 }
 
 hit[CMD_BB] = function(a, i) {
-	let ct_i = a[i+1]
-	if (hit_box(a, ct_i)) {
+	let ct_i     = a[i+1]
+	let bg_color = a[i+2]
+	if (bg_color != null && hit_box(a, ct_i)) {
 		hit_set_id(a[i+BB_ID])
 		hit_template(a, i)
 		return true
@@ -3274,13 +3285,41 @@ function template_editor(id, t, ch_t) {
 
 // drag point widget ---------------------------------------------------------
 
+{
+let ARGS  = 2+2+8+1
+let COLOR = ARGS+0
+let ID    = ARGS+1
+let out = [0, 0, null]
 ui.widget('drag_point', {
-	create: function(cmd, id, cx, cy, color, on_drag) {
-		let hit = ui.hit(id)
-		return ui_cmd(cmd, cx, cy, color, id, on_drag)
+	create: function(cmd, id, x, y, color) {
+		ui.state_set_default(id, 'x', x)
+		ui.state_set_default(id, 'y', y)
+		x = ui.state(id, 'x')
+		y = ui.state(id, 'y')
+		let [state, dx, dy] = ui.drag(id)
+		if (state == 'dragging' || state == 'drop') {
+			x += dx
+			y += dy
+		}
+		if (state == 'drop') {
+			ui.state_set(id, 'x', x)
+			ui.state_set(id, 'y', y)
+		}
+		// NOTE: we're making it a zero-sized box so that a popup can be anchored to it.
+		let i = ui_cmd(cmd, x, y,
+			0, 0, // w, h
+			0, 0, 0, 0, // p
+			0, 0, 0, 0, // m
+			0, // fr
+			color, id,
+		)
+		out[0] = x
+		out[1] = y
+		out[2] = i
+		return out
 	},
 	position: function(a, i, axis, sx, sw) {
-		a[i+0+axis] = sx
+		a[i+0+axis] += sx
 	},
 	translate: function(a, i, dx, dy) {
 		a[i+0] += dx
@@ -3290,7 +3329,7 @@ ui.widget('drag_point', {
 		let r = 5
 		let x     = a[i+0]
 		let y     = a[i+1]
-		let color = a[i+2]
+		let color = a[i+COLOR]
 		cx.fillStyle = color
 		cx.beginPath()
 		cx.rect(x-r, y-r, 2*r, 2*r)
@@ -3300,13 +3339,14 @@ ui.widget('drag_point', {
 		let r = 5
 		let x  = a[i+0]
 		let y  = a[i+1]
-		let id = a[i+3]
+		let id = a[i+ID]
 		if (hit_rect(x-r, y-r, 2*r, 2*r)) {
 			hit_set_id(id)
 			return true
 		}
 	},
 })
+}
 
 // button --------------------------------------------------------------------
 
@@ -3515,7 +3555,7 @@ ui.input = function(id, s, fr, min_w, min_h) {
 
 ui.label = function(for_id, s, fr, align, valign) {
 	ui.p(ui.sp())
-	ui.text('', s, fr ?? 1, align ?? 'l', valign ?? 'c')
+	ui.text('', s, fr, align ?? 'l', valign ?? 'c')
 }
 
 // list ----------------------------------------------------------------------
@@ -3555,7 +3595,7 @@ ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, i
 							: 'item-focused item-selected')
 					: 'bg')
 			ui.color('text', ui.hit(item_id) ? 'hover' : null)
-			ui.text('', item, item_fr ?? 1, item_align ?? 'l', item_valign ?? 'c')
+			ui.text('', item, item_fr, item_align ?? 'l', item_valign ?? 'c')
 		ui.end_stack()
 		i++
 	}
