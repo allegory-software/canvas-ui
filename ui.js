@@ -3,114 +3,48 @@
 	Canvas IMGUI library with flexbox, widgets and UI designer.
 	Written by Cosmin Apreutesei. Public Domain.
 
+LOADING
+
+	<body>
+		<script src=ui.js [global]>
+	</body>
+
+	NOTE: You must put it inside the <body> tag!
+	NOTE: The global flag publishes all as globals instead of in the ui namespace.
+
 */
 
 (function () {
 "use strict"
-let G = window
+const G = window
 
-// declare `ui = window` to get rid of the ui namespace.
-let ui = G.ui || {}
+let ui = document.currentScript.hasAttribute('global') ? window : {}
 G.ui = ui
 
 ui.VERSION = '0.1'
-ui.DEBUG = 0
 
 // utilities ------------------------------------------------------------------
 
-// single-value filter.
-let repl = function(x, v, z) { return x === v ? z : x }
+const {
+	repl,
+	isarray, isstr,
+	assert, pr, trace,
+	floor, ceil, round, max, min, abs, clamp,
+	lerp,
+	dec, num, str,
+	obj, set, map, array,
+	assign,
+	noop,
+	clock,
+	memoize,
+	freelist,
+	hash32,
+	hsl_to_rgb_out,
+	hsl_to_rgb_hex,
+} = glue
 
-let isarray = Array.isArray
-let isstr = s => typeof s == 'string'
-let isnum = n => typeof n == 'number'
-let isbool = b => typeof b == 'boolean'
-let isfunc = f => typeof f == 'function'
-
-function assert(ret, ...args) {
-	if (!ret)
-		throw (args.length ? args.join('') : 'assertion failed')
-	return ret
-}
-ui.assert = assert
-
-let pr = console.log
-let trace = console.trace
-
-let floor = Math.floor
-let ceil  = Math.ceil
-let round = Math.round
-let max   = Math.max
-let min   = Math.min
-let abs   = Math.abs
-
-// NOTE: returns x1 if x1 < x0, which enables the idiom
-// `a[clamp(i, 0, b.length-1)]` to return undefined when b is empty.
-function clamp(x, x0, x1) {
-	return min(max(x, x0 ?? -1/0), x1 ?? 1/0)
-}
-
-function lerp(x, x0, x1, y0, y1) {
-	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
-}
-
-function dec(x, d) { return x.toFixed(d) }
-
-function num(s) {
-	let x = parseFloat(s)
-	return x != x ? undefined : x
-}
-
-let str = String
-
-let obj = () => Object.create(null)
-let set = (iter) => new Set(iter)
-let map = (iter) => new Map(iter)
-
-let assign = Object.assign
-
-function noop() {}
-
-let json = JSON.stringify
-
-function clock() { return performance.now() / 1000 }
-
-function memoize(f) {
-	let t = map()
-	return function(x) {
-		if (t.has(x))
-			return t.get(x)
-		let y = f(x)
-		t.set(x, y)
-		return y
-	}
-}
-
-function hash32(s) {
-	let hash = 0
-	for (let i = 0, n = s.length; i < n; i++) {
-		hash = ((hash << 5) - hash) + s.charCodeAt(i)
-		hash |= 0 // convert to 32bit integer
-	}
-	return hash
-}
-
-function freelist(cons) {
-	let fl = []
-	return function(o) {
-		if (o) {
-			o.clear()
-			fl.push(o)
-		} else {
-			o = fl.pop()
-			return o || cons()
-		}
-	}
-}
-
-function map_freelist() {
-	return freelist(map)
-}
+let map_freelist   = () => freelist(map, m => m.clear())
+let array_freelist = () => freelist(array, a => a.length = 0)
 
 // When using capture_pointer(), setting the cursor for the element that
 // is hovered doesn't work anymore, so use this hack instead.
@@ -170,45 +104,11 @@ body {
 
 // colors --------------------------------------------------------------------
 
-// hsl is in (0..360, 0..1, 0..1)
-function h2rgb(m1, m2, h) {
-	if (h<0) h = h+1
-	if (h>1) h = h-1
-	if (h*6<1)
-		return m1+(m2-m1)*h*6
-	else if (h*2<1)
-		return m2
-	else if (h*3<2)
-		return m1+(m2-m1)*(2/3-h)*6
-	else
-		return m1
-}
-function hsl_to_rgba(d, i, h, s, L, a) {
-	h = h / 360
-	let m2 = L <= .5 ? L*(s+1) : L+s-L*s
-	let m1 = L*2-m2
-	d[i+0] = 255 * h2rgb(m1, m2, h+1/3)
-	d[i+1] = 255 * h2rgb(m1, m2, h)
-	d[i+2] = 255 * h2rgb(m1, m2, h-1/3)
-	d[i+3] = a ?? 255
-}
-
 ui.hsl = function(h, s, L, a) {
 	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
 }
 
-{
-let hex = x => round(x).toString(16).padStart(2, '0')
-let d = []
-ui.rgb = function(h, s, L, a) {
-	hsl_to_rgba(d, 0, h, s, L)
-	return '#' +
-		hex(d[0]) +
-		hex(d[1]) +
-		hex(d[2]) +
-		(a ? hex(a) : '')
-}
-}
+ui.rgb = hsl_to_rgb_hex
 
 ui.hsl_adjust = function(c, h, s, L, a) {
 	return ui.hsl(c[1] * h, c[2] * s, c[3] * L, c[4] * a)
@@ -238,7 +138,7 @@ function theme_make(name, default_color) {
 		shadow : [],
 	}
 }
-let themes = {}
+let themes = obj()
 theme_make('light', 'black')
 theme_make('dark' , 'white')
 
@@ -480,8 +380,6 @@ function resize_canvas() {
 	canvas.style.height = (screen_h / dpr) + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
-	a.w = screen_w
-	a.h = screen_h
 	animate()
 }
 ui.resize = resize_canvas
@@ -712,7 +610,7 @@ function end_scope() {
 		end_font_size(ended_scope)
 		end_font_weight(ended_scope)
 		end_line_gap(ended_scope)
-		scope_freelist(ended_scope)
+		scope_freelist.free(ended_scope)
 	}
 }
 
@@ -735,7 +633,7 @@ function scope_get(k) {
 }
 
 function scope_set(k, v) {
-	scope = scope ?? scope_freelist()
+	scope = scope ?? scope_freelist.alloc()
 	scope.set(k, v)
 }
 
@@ -768,7 +666,7 @@ ui.state_map = function(id) {
 	keepalive(id)
 	let m = id_state_maps.get(id)
 	if (!m) {
-		m = id_state_map_freelist()
+		m = id_state_map_freelist.alloc()
 		id_state_maps.set(id, m)
 	}
 	return m
@@ -801,7 +699,7 @@ function id_state_gc() {
 		if (free)
 			free(m, id)
 		id_state_maps.delete(id)
-		id_state_map_freelist(m)
+		id_state_map_freelist.free(m)
 	}
 	id_remove_set.clear()
 	let empty = id_remove_set
@@ -902,7 +800,7 @@ function C(a, i) { return cmd_names[a[i-1]] }
 function cmd(name, is_ct) {
 	let code = hash32(name)
 	code = (is_ct ? -1 : 1) * abs(code)
-	assert(!cmd_names[code], 'duplicate command code ',code,' for ',name)
+	assert(!cmd_names[code], 'duplicate command code ', code, ' for ', name)
 	cmd_names[code] = name
 	cmd_name_map.set(name, code)
 	return code
@@ -921,18 +819,12 @@ ui.cmd = ui_cmd
 
 // cmd buffers ---------------------------------------------------------------
 
-// freelist needs this...
-Object.defineProperty(Array.prototype, 'clear', {
-	value: function() { this.length = 0 },
-	enumerable: false,
-})
-
-let record_freelist = freelist(() => new Array())
+let record_freelist = array_freelist()
 
 let record_stack = []
 
 ui.record = function() {
-	let a1 = record_freelist()
+	let a1 = record_freelist.alloc()
 	record_stack.push(a)
 	a = a1
 }
@@ -966,7 +858,7 @@ ui.record_play = function(a1) {
 
 	a.push(...a1)
 
-	record_freelist(a1)
+	record_freelist.free(a1)
 }
 
 // widget API ----------------------------------------------------------------
@@ -1242,13 +1134,13 @@ ui.sb = ui.scrollbox
 // popup ---------------------------------------------------------------------
 
 const POPUP_SIDE_CENTER       = 0 // only POPUP_SIDE_INNER_CENTER is valid!
-const POPUP_SIDE_HORIZ        = 2
-const POPUP_SIDE_VERT         = 4
+const POPUP_SIDE_LR           = 2
+const POPUP_SIDE_TB           = 4
 const POPUP_SIDE_INNER        = 8
-const POPUP_SIDE_LEFT         = POPUP_SIDE_HORIZ + 0
-const POPUP_SIDE_RIGHT        = POPUP_SIDE_HORIZ + 1
-const POPUP_SIDE_TOP          = POPUP_SIDE_VERT  + 0
-const POPUP_SIDE_BOTTOM       = POPUP_SIDE_VERT  + 1
+const POPUP_SIDE_LEFT         = POPUP_SIDE_LR + 0
+const POPUP_SIDE_RIGHT        = POPUP_SIDE_LR + 1
+const POPUP_SIDE_TOP          = POPUP_SIDE_TB + 0
+const POPUP_SIDE_BOTTOM       = POPUP_SIDE_TB + 1
 const POPUP_SIDE_INNER_CENTER = POPUP_SIDE_INNER + POPUP_SIDE_CENTER
 const POPUP_SIDE_INNER_LEFT   = POPUP_SIDE_INNER + POPUP_SIDE_LEFT
 const POPUP_SIDE_INNER_RIGHT  = POPUP_SIDE_INNER + POPUP_SIDE_RIGHT
@@ -1313,12 +1205,10 @@ const POPUP_TARGET_I  = S+2
 const POPUP_SIDE      = S+3
 const POPUP_ALIGN     = S+4
 const POPUP_FLAGS     = S+5
-const POPUP_COLOR     = S+6
-const POPUP_FONT      = S+7
-const POPUP_FONT_SIZE = S+8
+const POPUP_SIDE_REAL = S+6
+const POPUP_ALIGN_REAL= S+7
 
 const POPUP_TARGET_SCREEN = -1
-const POPUP_TARGET_PARENT = -2
 
 const CMD_POPUP = cmd_ct('popup')
 ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
@@ -1334,18 +1224,207 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
 		id,
 		layer1,
-		repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? POPUP_TARGET_PARENT,
+		repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i(),
 		popup_parse_side(side ?? 't'),
 		popup_parse_align(align ?? 'c'),
 		popup_parse_flags(flags ?? ''),
+		0, 0, // side_real, align_real
 	)
 	begin_layer(layer1, i)
 	return i
 }
 
 reindex[CMD_POPUP] = function(a, i, offset) {
-	a[i+POPUP_TARGET_I] += offset
+	if (a[i+POPUP_TARGET_I] >= 0)
+		a[i+POPUP_TARGET_I] += offset
 }
+
+// tooltip background & border -----------------------------------------------
+
+function tooltip_tip_cut_center(x1, x2, align, r, d) {
+	if (align == POPUP_ALIGN_START)
+		return x1+r + d/2
+	else if (align == POPUP_ALIGN_END)
+		return x2-r - d/2
+	else if (align == POPUP_ALIGN_CENTER)
+		return x2-r - (x2-x1-2*r)/2
+}
+function tooltip_path(cx, x1, y1, x2, y2, side, tx, ty, b1x, b1y, b2x, b2y, r, d) {
+	cx.beginPath()
+	// left side
+	cx.moveTo(x1, y2-r)
+	if (side == POPUP_SIDE_RIGHT) {
+		cx.lineTo(x1, b2y)
+		cx.lineTo(tx, ty)
+		cx.lineTo(x1, b1y)
+	}
+	cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r)
+	// top side
+	if (side == POPUP_SIDE_BOTTOM) {
+		cx.lineTo(b1x, y1)
+		cx.lineTo(tx, ty)
+		cx.lineTo(b2x, y1)
+	}
+	cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r)
+	// right side
+	if (side	== POPUP_SIDE_LEFT) {
+		cx.lineTo(x2, b1y)
+		cx.lineTo(tx, ty)
+		cx.lineTo(x2, b2y)
+	}
+	cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r)
+	// bottom side
+	if (side == POPUP_SIDE_TOP) {
+		cx.lineTo(b2x, y2)
+		cx.lineTo(tx, ty)
+		cx.lineTo(b1x, y2)
+	}
+	cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r)
+}
+
+ui.widget('bb_tooltip', {
+	create: function(cmd, id, bg_color, border_color, border_radius) {
+		let ct_i = ui.ct_i()
+		assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
+		if (isstr(bg_color))
+			bg_color = ui.bg(bg_color) ?? bg_color
+		if (isarray(bg_color)) {
+			set_theme_dark(bg_color[5] ?? bg_color[3] < .5)
+			bg_color = bg_color[0]
+		}
+		if (isstr(border_color))
+			border_color = ui.border(border_color) ?? border_color
+		if (isarray(border_color))
+			border_color = border_color[0]
+		return ui_cmd(cmd, id, ct_i, bg_color, border_color, border_radius ?? 0)
+	},
+	reindex: function(a, i, offset) {
+		a[i+0] += offset
+	},
+	draw: function(a, i) {
+		let ct_i = a[i+1]
+
+		let px1 = a[ct_i+PX1+0]
+		let py1 = a[ct_i+PX1+1]
+		let px2 = a[ct_i+PX2+0]
+		let py2 = a[ct_i+PX2+1]
+		let x   = a[ct_i+0] - px1
+		let y   = a[ct_i+1] - py1
+		let w   = a[ct_i+2] + px1 + px2
+		let h   = a[ct_i+3] + py1 + py2
+
+		let bg_color      = a[i+2]
+		let border_color  = a[i+3]
+		let r             = a[i+4] // border radius
+
+		let side  = a[ct_i+POPUP_SIDE_REAL]
+		let align = a[ct_i+POPUP_ALIGN_REAL]
+
+		let T = POPUP_SIDE_TOP
+		let B = POPUP_SIDE_BOTTOM
+		let L = POPUP_SIDE_LEFT
+		let R = POPUP_SIDE_RIGHT
+		let S = POPUP_ALIGN_START
+		let E = POPUP_ALIGN_END
+
+		let m = ui.sp2() // margin away from the target's corners.
+		let d = ui.sp2() // tooltip's tip base width.
+
+		// find tooltip tip's tip point.
+		let [tx1, ty1, tx2, ty2] = ui.popup_target_rect(a, ct_i)
+		let tx, ty
+
+		if (side == T && align == S) {
+			tx = tx1 + m
+			ty = ty1
+		} else if (side == L && align == S) {
+			tx = tx1
+			ty = ty1 + m
+		} else if (side == T && align == E) {
+			tx = tx2 - m
+			ty = ty1
+		} else if (side == R && align == S) {
+			tx = tx2
+			ty = ty1 + m
+		} else if (side == B && align == S) {
+			tx = tx1 + m
+			ty = ty2
+		} else if (side == L && align == E) {
+			tx = tx1
+			ty = ty2 - m
+		} else if (side == B && align == E) {
+			tx = tx2 - m
+			ty = ty2
+		} else if (side == R && align == E) {
+			tx = tx2
+			ty = ty2 - m
+		} else if (align == POPUP_ALIGN_CENTER) {
+			if (side & POPUP_SIDE_TB) {
+				tx = tx1 + (tx2 - tx1) / 2
+				ty = side == T ? ty1 : ty2
+			} else {
+				ty = ty1 + (ty2 - ty1) / 2
+				tx = side == L ? tx1 : tx2
+			}
+		}
+		// in case `m` was too big...
+		tx = clamp(tx, tx1, tx2)
+		ty = clamp(ty, ty1, ty2)
+
+		// find tooltip tip's base points.
+		let bx, by // tip's center point between its two base points.
+		let b1x, b1y
+		let b2x, b2y
+		let x1 = x
+		let y1 = y
+		let x2 = x1 + w
+		let y2 = y1 + h
+		if (side & POPUP_SIDE_LR) {
+			bx = side == L ? x2 : x1
+			by = clamp(ty, y1+r + d/2, y2-r - d/2)
+			b1x = bx
+			b2x = bx
+			b1y = by - d/2
+			b2y = by + d/2
+		} else {
+			by = side == T ? y2 : y1
+			bx = clamp(tx, x1+r + d/2, x2-r - d/2)
+			b1y = by
+			b2y = by
+			b1x = bx - d/2
+			b2x = bx + d/2
+		}
+
+		// align tooltip tip's tip point to its base' center point.
+		if (side & POPUP_SIDE_LR) {
+			ty = clamp(by, ty1+d, ty2-d)
+		} else {
+			tx = clamp(bx, tx1+d, tx2-d)
+		}
+
+		if (bg_color != null) {
+			cx.fillStyle = bg_color
+			tooltip_path(cx, x, y, x + w, y + h,
+				side, tx, ty, b1x, b1y, b2x, b2y, r, d)
+			cx.fill()
+		}
+		if (shadow_set) {
+			cx.shadowBlur    = 0
+			cx.shadowOffsetX = 0
+			cx.shadowOffsetY = 0
+			shadow_set = false
+		}
+		if (border_color != null) {
+			cx.strokeStyle = border_color
+			cx.lineWidth = 1
+			cx.lineCap = 'square'
+			tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
+				side, tx, ty, b1x, b1y, b2x, b2y, r, d)
+			cx.stroke()
+		}
+
+	},
+})
 
 // common end command for all containers -------------------------------------
 
@@ -1373,7 +1452,7 @@ reindex[CMD_END] = function(a, i, offset) {
 	a[i+0] += offset
 }
 
-// border & background -------------------------------------------------------
+// background & border -------------------------------------------------------
 
 const BORDER_SIDE_T = 1
 const BORDER_SIDE_R = 2
@@ -1402,7 +1481,6 @@ const BB_CT_I = 1
 
 const CMD_BB = cmd('bb') // border-background
 ui.bb = function(id, bg_color, sides, border_color, border_radius) {
-	let s = bg_color
 	if (isstr(bg_color))
 		bg_color = ui.bg(bg_color) ?? bg_color
 	if (isarray(bg_color)) {
@@ -1421,6 +1499,7 @@ reindex[CMD_BB] = function(a, i, offset) {
 }
 
 function set_theme_dark(dark) {
+	ui.dark = dark
 	theme = dark ? themes.dark : themes.light
 	scope_set('theme', theme)
 	ui.color('text')
@@ -1781,18 +1860,18 @@ let word_wrapper_freelist = freelist(function() {
 	}
 
 	return ww
-})
+}, ww => ww.clear())
 
 function free_word_wrapper(s) {
 	let ww = s.get('ww')
-	word_wrapper_freelist(ww)
+	word_wrapper_freelist.free(ww)
 }
 
 function word_wrapper(id, text) {
 	let s = ui.state_map(id)
 	let ww = s.get('ww')
 	if (!ww) {
-		ww = word_wrapper_freelist()
+		ww = word_wrapper_freelist.alloc()
 		s.set('ww', ww)
 		ui.on_free(id, free_word_wrapper)
 	}
@@ -2016,6 +2095,7 @@ function position_flex(a, i, axis, sx, sw) {
 		if (gap) {
 			let n = 0
 			let i = next_i
+			// TODO: make this agnostic of cmd type
 			while (a[i-1] != CMD_END && a[i-1] != CMD_POPUP) {
 				if (position[a[i-1]])
 					n++
@@ -2132,21 +2212,18 @@ position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
 }
 
 // NOTE: popup positioning is done later in the translation phase.
-// NOTE: sw is always 0 because popups have fr=0.
-position[CMD_POPUP] = function(a, i, axis, sx, sw, ct_i) {
+// NOTE: sw is always 0 because popups have fr=0, so we don't use it.
+position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 
 	// stretched popups stretch to the dimensions of their target.
 	let target_i = a[i+POPUP_TARGET_I]
 	let side     = a[i+POPUP_SIDE]
 	let align    = a[i+POPUP_ALIGN]
 	if (side & POPUP_SIDE_INNER && align == POPUP_ALIGN_STRETCH) {
-		let d = 10
 		if (target_i == POPUP_TARGET_SCREEN) {
-			a[i+2+axis] = (axis ? a.h : a.w) - 2*d
+			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
 		} else {
-			if (target_i >= 0)
-				ct_i = target_i
-			let ct_w = a[ct_i+2+axis] + paddings(a, ct_i, axis)
+			let ct_w = a[target_i+2+axis] + paddings(a, target_i, axis)
 			a[i+2+axis] = max(a[i+2+axis], ct_w)
 		}
 	}
@@ -2157,7 +2234,7 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw, ct_i) {
 }
 
 function position_all(axis) {
-	let ct_w = axis ? a.h : a.w
+	let ct_w = axis ? screen_h : screen_w
 	let i = 2
 	let cmd = a[i-1]
 	let min_w = a[i+2+axis]
@@ -2268,39 +2345,70 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 }
 
 {
+let tx1, ty1, tx2, ty2
+let screen_margin = 10
+
+// a popup's target rect is the target's border rect.
+function get_popup_target_rect(a, i) {
+
+	let ct_i = a[i+POPUP_TARGET_I]
+
+	if (ct_i == POPUP_TARGET_SCREEN) {
+
+		let d = screen_margin
+		tx1 = d
+		ty1 = d
+		tx2 = bw - d
+		ty2 = bh - d
+
+	} else {
+
+		tx1 = a[ct_i+0] - a[ct_i+PX1+0]
+		ty1 = a[ct_i+1] - a[ct_i+PX1+1]
+		tx2 = a[ct_i+2] + tx1 + a[ct_i+PX2+0]
+		ty2 = a[ct_i+3] + ty1 + a[ct_i+PX2+1]
+
+	}
+
+}
+
 let x, y
-function position_popup(w, h, side, align, tx1, ty1, tx2, ty2) {
+
+function position_popup(w, h, side, align) {
 
 	let tw = tx2 - tx1
 	let th = ty2 - ty1
 
 	if (side == POPUP_SIDE_RIGHT) {
-		;[x, y] = [tx2 - 1, ty1]
+		x = tx2 - 1
+		y = ty1
 	} else if (side == POPUP_SIDE_LEFT) {
-		;[x, y] = [tx1 - w + 1, ty1]
+		x = tx1 - w + 1
+		y = ty1
 	} else if (side == POPUP_SIDE_TOP) {
-		;[x, y] = [tx1, ty1 - h + 1]
+		x = tx1
+		y = ty1 - h + 1
 	} else if (side == POPUP_SIDE_BOTTOM) {
-		;[x, y] = [tx1, ty2 - 1]
+		x = tx1
+		y = ty2 - 1
 	} else if (side == POPUP_SIDE_INNER_RIGHT) {
-		;[x, y] = [tx2 - w, ty1]
-	} else if (side == POPUP_SIDE_INNER_LEFT) {
-		;[x, y] = [tx1, ty1]
-	} else if (side == POPUP_SIDE_INNER_TOP) {
-		;[x, y] = [tx1, ty1]
+		x = tx2 - w
+		y = ty1
+	} else if (side == POPUP_SIDE_INNER_LEFT || side == POPUP_SIDE_INNER_TOP) {
+		x = tx1
+		y = ty1
 	} else if (side == POPUP_SIDE_INNER_BOTTOM) {
-		;[x, y] = [tx1, ty2 - h]
+		x = tx1
+		y = ty2 - h
 	} else if (side == POPUP_SIDE_INNER_CENTER) {
-		;[x, y] = [
-			tx1 + round((tw - w) / 2),
-			ty1 + round((th - h) / 2)
-		]
+		x = tx1 + round((tw - w) / 2)
+		y = ty1 + round((th - h) / 2)
 	} else {
 		assert(false)
 	}
 
-	let sdx = side & POPUP_SIDE_HORIZ
-	let sdy = side & POPUP_SIDE_VERT
+	let sdx = side & POPUP_SIDE_LR
+	let sdy = side & POPUP_SIDE_TB
 
 	if (align == POPUP_ALIGN_CENTER && sdy)
 		x += round((tw - w) / 2)
@@ -2310,56 +2418,32 @@ function position_popup(w, h, side, align, tx1, ty1, tx2, ty2) {
 		x += tw - w
 	else if (align == POPUP_ALIGN_END && sdx)
 		y += th - h
+
 }
-translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used, ct_i) {
 
-	let d = 10
-	let bw = a.w
-	let bh = a.h
+translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 
-	let tx1, ty1, tx2, ty2
+	let bw = screen_w
+	let bh = screen_h
 
-	let target_i = a[i+POPUP_TARGET_I]
+	get_popup_target_rect(a, i)
 
-	if (target_i == POPUP_TARGET_SCREEN) {
-
-		ct_i = null
-
-		tx1 = d
-		ty1 = d
-		tx2 = bw - d
-		ty2 = bh - d
-
-	} else {
-
-		if (target_i >= 0)
-			ct_i = target_i
-
-		tx1 = a[ct_i+0] - a[ct_i+PX1+0]
-		ty1 = a[ct_i+1] - a[ct_i+PX1+1]
-		tx2 = a[ct_i+2] + tx1 + a[ct_i+PX2+0]
-		ty2 = a[ct_i+3] + ty1 + a[ct_i+PX2+1]
-
-	}
-
-	tx1 += a[i+PX1+0] + a[i+MX1+0]
-	ty1 += a[i+PX1+1] + a[i+MX1+1]
-	tx2 -= a[i+PX2+0] + a[i+MX2+0]
-	ty2 -= a[i+PX2+1] + a[i+MX2+1]
-
-	let w     = a[i+2]
-	let h     = a[i+3]
+	let px    = paddings(a, i, 0)
+	let py    = paddings(a, i, 1)
+	let w     = a[i+2] + px
+	let h     = a[i+3] + py
 	let side  = a[i+POPUP_SIDE]
 	let align = a[i+POPUP_ALIGN]
 	let flags = a[i+POPUP_FLAGS]
 
-	position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
+	position_popup(w, h, side, align)
 
 	if (flags & POPUP_FIT_CHANGE_SIDE) {
 
 		// if popup doesn't fit the screen, first try to change its side
 		// or alignment and relayout, and if that doesn't work, its offset.
 
+		let d = screen_margin
 		let out_x1 = x < d
 		let out_y1 = y < d
 		let out_x2 = x + w > (bw - d)
@@ -2376,21 +2460,17 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used, ct_i) {
 			re = 1; side = POPUP_SIDE_RIGHT
 		}
 
-		let vert = side & POPUP_SIDE_VERT
-
-		if (align == POPUP_ALIGN_END && ((vert && out_x2) || (!vert && out_y2))) {
-			re = 1; align = POPUP_ALIGN_START
-		} else if (align == POPUP_ALIGN_START && ((vert && out_x1) || (!vert && out_y1))) {
-			re = 1; align = POPUP_ALIGN_END
-		}
-
 		if (re)
-			position_popup(w, h, side, align, tx1, ty1, tx2, ty2)
+			position_popup(w, h, side, align)
 
 	}
 
+	a[i+POPUP_SIDE_REAL ] = side
+	a[i+POPUP_ALIGN_REAL] = align
+
 	// if nothing else works, adjust the offset to fit the screen.
 	if (flags & POPUP_FIT_CONSTRAIN) {
+		let d = screen_margin
 		let ox2 = max(0, x + w - (bw - d))
 		let ox1 = min(0, x - d)
 		let oy2 = max(0, y + h - (bh - d))
@@ -2399,14 +2479,25 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used, ct_i) {
 		y -= oy1 ? oy1 : oy2
 	}
 
-	a[i+0] = x
-	a[i+1] = y
-	a[i+2] = w
-	a[i+3] = h
+	a[i+0] = x + a[i+MX1+0] + a[i+PX1+0]
+	a[i+1] = y + a[i+MX1+1] + a[i+PX1+1]
+	a[i+2] = w - px
+	a[i+3] = h - py
 
 	translate_children(a, i, x, y)
 
 }
+
+let out = [0, 0, 0, 0]
+ui.popup_target_rect = function(a, i) {
+	get_popup_target_rect(a, i)
+	out[0] = tx1
+	out[1] = ty1
+	out[2] = tx2
+	out[3] = ty2
+	return out
+}
+
 }
 
 function translate_all() {
@@ -2826,7 +2917,7 @@ ui.hovers = function(id) {
 		return
 	let m = hit_state_maps.get(id)
 	if (!m) {
-		m = hit_state_map_freelist()
+		m = hit_state_map_freelist.alloc()
 		hit_state_maps.set(id, m)
 	}
 	return m
@@ -2963,7 +3054,7 @@ function hit_all() {
 	hit_template_i1 = null
 
 	for (let m of hit_state_maps.values())
-		hit_state_map_freelist(m)
+		hit_state_map_freelist.free(m)
 	hit_state_maps.clear()
 	hit_set.clear()
 
@@ -3047,8 +3138,8 @@ ui.focusing = function(id) {
 
 // template widget -----------------------------------------------------------
 
-let targs = {}
-let tprops = {}
+let targs  = obj()
+let tprops = obj()
 
 targs.text  = function(t) { return [t.id, t.s, t.align, t.valign, t.fr] }
 targs.h     = function(t) { return [t.fr, t.gap, t.align, t.valign, t.min_w, t.min_h] }
@@ -3888,7 +3979,7 @@ ui.widget('sat_lum_square', {
 				for (let x = 0; x < w; x++) {
 					let sat = lerp(x, 0, w-1, 0, 1)
 					let lum = lerp(y, 0, h-1, 1, 0)
-					hsl_to_rgba(d, (y * w + x) * 4, hue, sat, lum)
+					hsl_to_rgb_out(d, (y * w + x) * 4, hue, sat, lum)
 				}
 			}
 			idata.hue = hue
@@ -3992,7 +4083,7 @@ ui.widget('hue_bar', {
 			for (let y = 0; y < h; y++) {
 				for (let x = 0; x < w; x++) {
 					let hue = lerp(y, 0, h-1, 0, 360)
-					hsl_to_rgba(d, (y * w + x) * 4, hue, 1, .5)
+					hsl_to_rgb_out(d, (y * w + x) * 4, hue, 1, .5)
 				}
 			}
 			idata.ready = true
@@ -4100,7 +4191,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 
 {
 let dot_density = 2 // per 100px^2 surface
-let max_distance = 200 // between two dots
+let max_distance = 160 // between two dots
 
 function point_distance(p1, p2) {
 	let dx = abs(p1.x - p2.x)
@@ -4111,22 +4202,25 @@ function point_distance(p1, p2) {
 function random(min, max) {
 	return Math.random() * (max - min) + min
 }
+
 function coinflip(a, b) {
 	return Math.random() > 0.5 ? a : b
 }
 
 ui.widget('bg_dots', {
 
-	create: function(cmd, id) {
+	create: function(cmd, id, speed) {
 		assert(id, 'id required')
 		let ct_i = ui.ct_i()
-		return ui_cmd(cmd, id, ct_i)
+		return ui_cmd(cmd, id, ct_i, speed ?? 1)
 	},
 
 	draw: function(a, i) {
 
-		let id   = a[i+0]
-		let ct_i = a[i+1]
+		let id    = a[i+0]
+		let ct_i  = a[i+1]
+		let speed = a[i+2]
+
 		let x = a[ct_i+0]
 		let y = a[ct_i+1]
 		let w = a[ct_i+2]
@@ -4151,8 +4245,8 @@ ui.widget('bg_dots', {
 			let d = max_distance
 			t.x  = random(-d, w+d)
 			t.y  = random(-d, h+d)
-			t.vx = random(0.2, 1) * coinflip(1, -1)
-			t.vy = random(0.2, 1) * coinflip(1, -1)
+			t.vx = random(0.1, 1) * coinflip(1, -1)
+			t.vy = random(0.1, 1) * coinflip(1, -1)
 			dots.push(t)
 		}
 		dots.length = dot_num+1
@@ -4195,24 +4289,25 @@ ui.widget('bg_dots', {
 			}
 		}
 
-		for (let t of dots) {
-			if (t != dots.mouse_dot) {
-				t.x += t.vx
-				t.y += t.vy
-				let d = max_distance
-				if (!(t.x > -d && t.x < w+d && t.y > -d && t.y < h+d)) { // dead
-					if (coinflip(0, 1)) {
-						t.x = random  (-d, w+d)
-						t.y = coinflip(-d, h+d)
-					} else {
-						t.x = coinflip(-d, w+d)
-						t.y = random  (-d, h+d)
+		if (speed)
+			for (let t of dots) {
+				if (t != dots.mouse_dot) {
+					t.x += t.vx * speed
+					t.y += t.vy * speed
+					let d = max_distance
+					if (!(t.x > -d && t.x < w+d && t.y > -d && t.y < h+d)) { // dead
+						if (coinflip(0, 1)) {
+							t.x = random  (-d, w+d)
+							t.y = coinflip(-d, h+d)
+						} else {
+							t.x = coinflip(-d, w+d)
+							t.y = random  (-d, h+d)
+						}
+						t.vx = random(0.1, 1) * (t.x > w / 2 ? -1 : 1)
+						t.vy = random(0.1, 1) * (t.y > h / 2 ? -1 : 1)
 					}
-					t.vx = random(0.2, 1) * (t.x > w / 2 ? -1 : 1)
-					t.vy = random(0.2, 1) * (t.y > h / 2 ? -1 : 1)
 				}
 			}
-		}
 
 		cx.restore()
 
@@ -4221,6 +4316,28 @@ ui.widget('bg_dots', {
 
 })
 }
+
+// grid ----------------------------------------------------------------------
+
+let GRID_ID     = S-1
+let GRID_ROWSET = S+0
+
+ui.widget('grid', {
+
+	create: function(cmd, id, rowset, fr, align, valign, min_w, min_h) {
+		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			id,
+			rowset,
+		)
+	},
+
+	draw: function(a, i) {
+
+		//
+
+	},
+
+})
 
 // init ----------------------------------------------------------------------
 

@@ -8,13 +8,20 @@
 </style>
 </head>
 <body>
+<script src=glue.js></script>
 <script src=ui.js></script>
+<script src=validation.js></script>
+<script src=ui_nav.js></script>
 <script>
 
 let pr = console.log
 
 let tuts = []
 let demos = []
+
+demos.grid = `
+ui.grid()
+`
 
 tuts.text = `
 // text() shows a line of text.
@@ -258,7 +265,7 @@ ui.end_v()
 `
 
 demos.bg_dots = `
-ui.bg_dots('dots1')
+ui.bg_dots('dots1', 0.3)
 `
 
 demos.button = `
@@ -296,7 +303,7 @@ ui.v(1, 10, 'c', 'c')
 ui.end_v()
 `
 
-demos.popup_move = `
+demos.bb_tooltip = `
 let j = 0
 for (let align of ['c', '[', ']']) {
 	let i = 0
@@ -304,8 +311,13 @@ for (let align of ['c', '[', ']']) {
 		let [x, y, p_i] = ui.drag_point('p'+j+i, 100+j*220, 100+i*120, 'red')
 		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 30, 30)
 			ui.bb('', null, 1, 'light')
+			ui.m(
+				side == 'l' || side == 'r' ? ui.sp2() : 0,
+				side == 't' || side == 'b' ? ui.sp2() : 0,
+			)
 			ui.popup('tt'+j+i, null, ct_i, side, align, 100, 50, 'change_side constrain')
-				ui.bb('', null, 1, 'intense')
+				ui.shadow(1, 1, 3, 0, false, ui.dark ? 'black' : '#ccc')
+				ui.bb_tooltip('', 'bg2', 'intense', ui.sp1())
 			ui.end_popup()
 		ui.end_popup()
 		i++
@@ -404,62 +416,6 @@ ui.stack('', 0, 'c', 'c', 400)
 	ui.color_picker('cp1')
 ui.end_stack()
 `
-
-/*
-	if (0) {
-	ui.m(50, 50)
-	ui.h(1, 20)
-		ui.text('t1', 'Hello1!')
-		ui.stack('', 1)
-			ui.bb('', ui.bg('bg2'))
-			ui.scrollbox('sb1', 1)
-				ui.m(50, 0, 50, 0)
-				ui.p(20)
-				ui.v(1, 20, 'c', 'c')
-					// ui.bg('hsl(0deg 0% 16%)')
-					ui.shadow(2, 2, 5, 0, false, 'black')
-					ui.bb('', 'bg1', 1, 'light', 20)
-					// ui.p(10)
-					ui.text('t2', '[Hello Hello Hello Hello Hello]', '[', 'c', 1)
-					if (1) {
-						ui.m(0, -20, 0, 0)
-						ui.popup('p1', layer_popup, null, 'b')
-							ui.bb('', 'hsl(0 100% 50% / .5)', 1, 'hsl(0 0% 100%)', 5)
-							ui.p(20)
-							ui.text('tp1', 'Wasup?')
-						ui.end_popup()
-					}
-				ui.end_v()
-			ui.end_scrollbox()
-		ui.end_stack()
-		// ui.text('t3', '...and again.', 1, 'c', 'c')
-	ui.end_h()
-	}
-
-	if (1) {
-		ui.m(10)
-		ui.p(10)
-		ui.v()
-			ui.hsplit('hsplit1', 200, 'px', '[')
-				ui.splitter()
-					ui.vsplit('vsplit1')
-							ui.stack()
-								ui.bb('', 'input')
-								// (id, s, align, valign, fr, max_min_w, min_w, min_h, wrap)
-								ui.text('', `
-				Hello2 Hello2 Hello2 Hello2
-				Hello2 Hello2 Hello2
-				Hello2 Hello2
-				Hello2
-		`, null, null, null, null, null, null, 'line')
-							ui.end_stack()
-						ui.splitter()
-					ui.end_vsplit()
-			ui.end_hsplit()
-		ui.end_v()
-	}
-
-*/
 
 let demos_array; {
 let t = {}
