@@ -3,14 +3,24 @@
 	Nav widget mixin.
 	Written by Cosmin Apreutesei. Public Domain.
 
+You must load first:
+
+	ui.js
+
+COMPONENTS
+
+	<rowset>
+	<nav>
+
 A nav is an in-memory table with typed columns and rows. It can be populated
 from a rowset or manually. Once set up, rows can be sorted, filtered, grouped
 or form a tree, cells can be selected, values can be looked up, etc.
-A nav is the data model for the grid widget but it can also be used standalone
+A nav is the data model for our virtual grid but it can also be used standalone
 as a shared data model sourcing multiple widgets (think lookup tables).
 
 A rowset is a POD used to populate a nav. It contains field definitions and
-rows of values. It can come from a http server as JSON, or constructed in JS.
+rows of values. It can come from a http server as JSON, defined in HTML with
+the <rowset> tag (inside <nav> or <grid> or standalone), or constructed in JS.
 
 Rowset structure:
 
@@ -19,6 +29,16 @@ Rowset structure:
 	rows   : [[v1, v2, ...], ...],             // array of rows, values in field order.
 	ROWSET_ATTR: VAL,                          // rowset attributes, see below.
 }
+
+HTML rowsets:
+
+	<rowset pk=... ROWSET_ATTR=VAL ...>
+		<field name=COL ATTR=VAL ...></field>
+		<row COL=VAL ...></row>
+	</rowset>
+
+	NOTE: use `:id` for the `id` column!
+	NOTE: The rowset will be available as e.rowset.
 
 Loading a rowset into a nav:
 
@@ -585,14 +605,106 @@ G.shared_nav = function(id, opt) {
 
 G.shared_navs = shared_navs // for debugging
 
-} // end shared nav scope
+} //shared nav scope
+
+let rowset_attr_parse = {
+	pk              : return_arg,
+	can_add_rows    : bool,
+	can_remove_rows : bool,
+	can_change_rows : bool,
+	name_col        : return_arg,
+	wait            : num,
+}
+
+let field_attr_parse = {
+	name     : return_arg,
+	label    : return_arg,
+	type     : return_arg,
+	placeholder : return_arg,
+	enum_values : return_arg,
+	decimals : num,
+	min      : return_arg, // parsing this depends on type
+	max      : return_arg, // parsing this depends on type
+	max_len  : num,
+	min_len  : num,
+	from     : num,
+	to       : num,
+	w        : num,
+	min_w    : num,
+	max_w    : num,
+	precision: return_arg,
+	not_null : bool,
+	required : bool,
+	sortable : bool,
+	maxlen   : num,
+	lookup_rowset: return_arg,
+	lookup_nav: return_arg,
+}
+
+let field_attr_map = {
+	lookup_rowset : 'lookup_rowset_name',
+	lookup_nav    : 'lookup_nav_id',
+}
+
+function parse_text_attrs(t, parse) {
+	let dt = obj()
+	for (let k in t) {
+		let uk = k.replace('-', '_')
+		let v = t[k] ?? t[uk]
+		assert(uk in parse, 'html attr parser missing for ', uk)
+		v = parse[uk](v)
+		let fk = field_attr_map[uk] || uk
+		dt[fk] = v
+	}
+	return dt
+}
+
+function parse_field_attrs(field_attrs) {
+	return parse_text_attrs(field_attrs, field_attr_parse)
+}
+
+ui.rowset = function(e) {
+	let fields = []
+	let row_vals = []
+	let rt = e.attrs; delete rt.id
+	e.rowset = parse_text_attrs(rt, rowset_attr_parse)
+	e.rowset.fields = fields
+	e.rowset.row_vals = row_vals
+	let cols = obj() // {name->true}
+	for (let field_tag of e.$(':scope>field')) {
+		let field = parse_field_attrs(field_tag.attrs)
+		let field_index = fields.length
+		if (field.name) {
+			cols[field.name] = true
+			fields.push(field)
+		} else {
+			warn('<field name=?> missing')
+		}
+	}
+	for (let row_tag of e.$(':scope>row')) {
+		let t = row_tag.attrs
+		if (':id' in t) { t.id = t[':id']; delete t[':id']; }
+		for (let k in t)
+			warn_if(!cols[k], '<row> unknown field', k)
+		if (row_tag.length)
+			for (let val_tag of row_tag.$(':scope>val')) {
+				let col = val_tag.attr('for')
+				warn_if(!col, '<val for=?> missing')
+				warn_if(!cols[col], '<val> unknown field', col)
+				warn_if(col in t, '<val> overrides <row> value for', col)
+				t[col] = val_tag.html
+			}
+		row_vals.push(t)
+	}
+	e.clear()
+}
 
 function nav_ajax(opt) {
-	let rowset = window['rowset_'+opt.rowset_name]
-	if (rowset) // js rowset
+	let rowset_tag = window['rowset_'+opt.rowset_name]
+	if (rowset_tag) // html rowset
 		opt.xhr = {
-			wait: opt.wait ?? rowset.wait,
-			response: rowset,
+			wait: opt.wait ?? rowset_tag.rowset.wait,
+			response: rowset_tag.rowset,
 		}
 	return ajax(opt)
 }
@@ -601,51 +713,11 @@ let errors_no_messages = []
 errors_no_messages.failed = true
 errors_no_messages.client_side = true
 
-ui.nav = function() {
+ui.make_nav_widget = function() {
+	let e = this
+	e.isnav = true
+	e.make_disablable()
 
-	let e = {}
-
-	e.override = function(method, func) {
-		this[method] = wrap(this[method], func)
-	}
-
-	e.do_before = function(method, func) {
-		this[method] = do_before(this[method], func)
-	}
-
-	e.do_after = function(method, func) {
-		this[method] = do_after(this[method], func)
-	}
-
-	e.property = function(name, get, set) {
-		return property(this, name, get, set)
-	}
-
-	e.can_add_rows               = true
-	e.can_remove_rows            = true
-	e.can_change_rows            = true
-	e.can_move_rows              = false
-	e.can_sort_rows              = true
-	e.can_focus_cells            = true
-	e.can_select_multiple        = true
-	e.can_select_non_siblings    = true
-
-	e.auto_advance_row           = false
-	e.auto_focus_first_cell      = true
-	e.auto_edit_first_cell       = false
-	e.stay_in_edit_mode          = true
-
-	e.save_on_add_row            = false
-	e.save_on_remove_row         = true
-	e.save_on_input              = false
-	e.save_on_exit_edit          = false
-	e.save_on_exit_row           = true
-
-	e.exit_edit_on_lost_focus    = false
-	e.save_row_states            = false
-	e.action_band_visible        = 'auto' // 'auto always no'
-
-	/*
 	e.prop('can_add_rows'            , {type: 'bool', default: true})
 	e.prop('can_remove_rows'         , {type: 'bool', default: true})
 	e.prop('can_change_rows'         , {type: 'bool', default: true})
@@ -669,19 +741,14 @@ ui.nav = function() {
 	e.prop('exit_edit_on_lost_focus' , {type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
 	e.prop('save_row_states'         , {type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
 	e.prop('action_band_visible'     , {type: 'enum', enum_values: 'auto always no', default: 'auto', to_attr: true, slot: 'user'})
-	*/
+
+	e.debug_anon_name = () => catany('', e.tag, catall(':', e.rowset_name))
 
 	// init -------------------------------------------------------------------
 
 	e.ready = false
 
 	e.do_after('init', function() {
-
-		bind_rowset_name(e.rowset_name, on)
-		update_param_vals()
-		e.reload()
-		e.update_action_band()
-
 		if (e.dropdown)
 			e.init_as_picker()
 	})
@@ -693,17 +760,23 @@ ui.nav = function() {
 		init_all_fields()
 	}
 
-	e.free = function() {
-		e.ready = false
-		e.announce('ready', false)
-		abort_all_requests()
-		e.unfocus_focused_cell({cancel: true})
-		init_all()
-		e.announce('reset')
-		disable_all(false)
-	}
+	e.on_bind(function nav_bind(on) {
+		bind_rowset_name(e.rowset_name, on)
+		if (on) {
+			update_param_vals()
+			e.reload()
+			e.update_action_band()
+		} else {
+			e.ready = false
+			e.announce('ready', false)
+			abort_all_requests()
+			e.unfocus_focused_cell({cancel: true})
+			init_all()
+			e.announce('reset')
+			disable_all(false)
+		}
+	})
 
-	/*
 	e.set_static_rowset = function(rs) {
 		e.rowset = rs
 		e.reload()
@@ -745,19 +818,18 @@ ui.nav = function() {
 		e.reload()
 	}
 	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
-	*/
 
 	// fields utils -----------------------------------------------------------
 
-	function fld(col) {
+	let fld = function(col) {
 		if (isstr(col))
-			return assert(e.all_fields_map[col], e.id, ' has no col: ', col)
+			return assert(e.all_fields_map[col], e.debug_name, ' has no col: ', col)
 		else if (isnum(col))
-			return assert(e.all_fields[col], e.id, ' has no col: ', col)
+			return assert(e.all_fields[col], e.debug_name, ' has no col: ', col)
 		else
 			return col
 	}
-	function optfld(col) {
+	let optfld  = function(col) {
 		if (isstr(col))
 			return e.all_fields_map[col]
 		else if (isnum(col))
@@ -1036,7 +1108,6 @@ ui.nav = function() {
 		e.update({rows: true})
 	}
 
-	/*
 	e.set_flat = flat_changed
 	e.prop('flat', {type: 'bool', slot: 'user', default: false})
 
@@ -1070,7 +1141,6 @@ ui.nav = function() {
 		e.update({state: true})
 	}
 	e.prop('quicksearch_col', {type: 'col'})
-	*/
 
 	// field attributes exposed as `col.*` props
 
@@ -1186,14 +1256,12 @@ ui.nav = function() {
 
 	// visible cols list ------------------------------------------------------
 
-	/*
 	e.set_cols = function() {
 		e.exit_edit()
 		init_fields()
 		e.update({fields: true})
 	}
 	e.prop('cols', {slot: 'user'})
-	*/
 
 	function visible_col(col) {
 		let field = check_field('col', col)
@@ -1259,10 +1327,8 @@ ui.nav = function() {
 
 	*/
 
-	/*
 	e.prop('params', {parse: parse_params}) // "ID1.[COL1=]PARAM1,[COL2=]PARAM2,... ..."
 	e.set_params = params_changed
-	*/
 
 	function parse_params(params_s) {
 		if (!params_s)
@@ -1312,7 +1378,7 @@ ui.nav = function() {
 					pv1.push(vals)
 				}
 			} else {
-				warn('param widget is not a nav', te.id)
+				warn('param widget is not a nav', te.debug_name)
 				return false
 			}
 			if (!pv) {
@@ -1427,7 +1493,6 @@ ui.nav = function() {
 
 	// tabname ----------------------------------------------------------------
 
-	/*
 	e.prop('tabname_template', {slot: 'lang', default: '{0}'})
 
 	let tabname
@@ -1457,7 +1522,6 @@ ui.nav = function() {
 			caps.push(e.row_tabname(row))
 		return caps.join(', ')
 	}
-	*/
 
 	// all rows in load order -------------------------------------------------
 
@@ -2616,14 +2680,12 @@ ui.nav = function() {
 		return a.length ? a.join(' ') : undefined
 	}
 
-	/*
 	e.set_order_by = function() {
 		update_field_sort_order()
 		sort_rows()
 		e.update({vals: true, state: true, sort_order: true})
 	}
 	e.prop('order_by', {slot: 'user'})
-	*/
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
 		if (!field.sortable)
@@ -3480,13 +3542,11 @@ ui.nav = function() {
 
 	// cell lookup display val ------------------------------------------------
 
-	/*
 	e.set_display_col = function() {
 		reset_quicksearch()
 		e.display_field = check_field('display_col', e.display_col) || e.name_field
 	}
 	e.prop('display_col', {type: 'col'})
-	*/
 
 	function init_field_own_lookup_nav(field) {
 		if (field.lookup_nav) // linked lookup nav (not owned).
@@ -4346,7 +4406,7 @@ ui.nav = function() {
 		return e.announce('nav_load_fail', err, type, status, message, body, this)
 	}
 
-	// e.prop('focus_state', {slot: 'user'})
+	e.prop('focus_state', {slot: 'user'})
 
 	function load_success(rs) {
 		if (this.allow_diff_merge && e.diff_merge(rs))
@@ -5097,8 +5157,8 @@ ui.nav = function() {
 
 	// picker protocol --------------------------------------------------------
 
-	// e.prop('row_display_val_template', {private: true})
-	// e.prop('row_display_val_template_name', {attr: 'row_display_val_template'})
+	e.prop('row_display_val_template', {private: true})
+	e.prop('row_display_val_template_name', {attr: 'row_display_val_template'})
 
 	e.draw_row = function(row, cx) { // stub
 		if (isnode(cx)) {
@@ -6129,4 +6189,3 @@ let init_rowset_events = memoize(function() {
 
 
 }()) // module function
-

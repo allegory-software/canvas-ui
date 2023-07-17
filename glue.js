@@ -7,7 +7,7 @@ LOADING
 
 	<script src=glue.js [global] [extend]>
 
-	  global flag:   publish all as globals instead of in the `glue` namespace.
+	  global flag:   dump the `glue` namespace into `window`.
  	  extend flag:   extend Object, String, Array, Number, Set, Map prototypes.
 
 BROWSER DETECTION
@@ -229,8 +229,8 @@ URL DECODING, ENCODING AND UPDATING
 
 NATIVE CUSTOM EVENTS
 
-	event    (name, ...args)
-	event_up (name, ...args)
+	custom_event    (name, ...args)
+	custom_event_up (name, ...args)
 
 FAST GLOBAL EVENTS
 
@@ -266,8 +266,7 @@ JS LINTING
 (function () {
 "use strict"
 let G = window
-
-let g = document.currentScript.hasAttribute('global') ? window : {}
+let g = {}
 G.glue = g
 
 function DEBUG(k, dv) {
@@ -731,21 +730,15 @@ function map_first_key(m) {
 		return k
 }
 
-function set_add(s0, s) {
-	for (let k of s)
-		s0.add(k)
-	return s0
+function set_addset(s, s1) {
+	for (let k of s1)
+		s.add(k)
+	return s
 }
 
-function set_addset(s0, s) {
-	for (let k of s)
-		set_add(s0, k)
-	return s0
-}
-
-function set_set(s0, s) {
-	s0.clear()
-	return set_addset(s0, s)
+function set_set(s, s1) {
+	s.clear()
+	return set_addset(s, s1)
 }
 
 function set_toarray(s) {
@@ -1823,8 +1816,8 @@ function _event(bubbles, ev, ...args) {
 	ev.args = args
 	return ev
 }
-function event    (...args) { return _event(false, ...args) }
-function event_up (...args) { return _event(true , ...args) }
+function custom_event    (...args) { return _event(false, ...args) }
+function custom_event_up (...args) { return _event(true , ...args) }
 
 /* fast global events --------------------------------------------------------
 
@@ -2120,7 +2113,7 @@ function ajax(req) {
 		if (name == 'done')
 			fire(arg1, ...rest)
 
-		if (req.dispatchEvent(event(name, arg1, ...rest))) {
+		if (req.dispatchEvent(custom_event(name, arg1, ...rest))) {
 			if (name == 'fail' && arg1)
 				notify_error(arg1, ...rest)
 			if (name == 'success' && isobject(arg1) && isstr(arg1.notify))
@@ -2133,7 +2126,7 @@ function ajax(req) {
 		let notify = req.notify instanceof EventTarget ? [req.notify] : req.notify
 		if (isarray(notify))
 			for (let target of notify)
-				target.dispatchEvent(event('load', name, arg1, ...rest))
+				target.dispatchEvent(custom_event('load', name, arg1, ...rest))
 
 	}
 
@@ -2322,7 +2315,6 @@ g.obj                          = obj
 g.set                          = set
 g.map                          = map
 g.map_first_key                = map_first_key
-g.set_add                      = set_add
 g.set_addset                   = set_addset
 g.set_set                      = set_set
 g.set_toarray                  = set_toarray
@@ -2408,8 +2400,8 @@ g.save                         = save
 g.load                         = load
 g.url_parse                    = url_parse
 g.url_format                   = url_format
-g.event                        = event
-g.event_up                     = event_up
+g.custom_event                 = custom_event
+g.custom_event_up              = custom_event_up
 g.listen                       = listen
 g.announce                     = announce
 g.broadcast                    = broadcast
@@ -2423,6 +2415,14 @@ g.ajax                         = ajax
 g.get                          = get
 g.post                         = post
 g.lint                         = lint
+
+
+if (document.currentScript.hasAttribute('global')) {
+	for (let k in g) {
+		assert(!(k in G), k, ' global already exists')
+		G[k] = g[k]
+	}
+}
 
 if (document.currentScript.hasAttribute('extend')) {
 
@@ -2490,7 +2490,6 @@ property(Map, 'first_key', m(map_first_key))
 
 let S = Set.prototype
 
-S.add     = m(set_add)
 S.add_set = m(set_addset)
 S.set     = m(set_set)
 S.toarray = m(set_toarray)

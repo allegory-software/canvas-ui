@@ -551,8 +551,14 @@ ui.key = function(key) {
 	return key_state.has(key)
 }
 
-function reset_keys() {
-	key_state_now.clear()
+let event_state = map()
+
+ui.fire(ev, ...args) {
+	event_state.set(ev, args)
+}
+
+ui.listen = function(ev) {
+	return event_state.get(ev)
 }
 
 // z-layers ------------------------------------------------------------------
@@ -750,7 +756,7 @@ ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
 ui.font_size_normal = 14
 
-function reset_all() {
+function reset_canvas() {
 	theme = themes[ui.default_theme]
 	color = ui.fg('text')[0]
 	font = ui.default_font
@@ -918,6 +924,15 @@ function get_next_ext_i(a, i) {
 	return a[i-2] // next_i
 }
 
+ui.PX1 = PX1
+ui.PX2 = PX2
+ui.MX1 = MX1
+ui.MX2 = MX2
+ui.FR         = FR
+ui.ALIGN      = ALIGN
+ui.NEXT_EXT_I = NEXT_EXT_I
+ui.S          = S
+
 const ALIGN_STRETCH = 0
 const ALIGN_START   = 1
 const ALIGN_END     = 2
@@ -1019,6 +1034,7 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	reset_paddings()
 	return i
 }
+ui.cmd_box = ui_cmd_box
 
 // NOTE: `ct` is short for container, which must end with ui.end().
 function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
@@ -1206,7 +1222,6 @@ const POPUP_SIDE      = S+3
 const POPUP_ALIGN     = S+4
 const POPUP_FLAGS     = S+5
 const POPUP_SIDE_REAL = S+6
-const POPUP_ALIGN_REAL= S+7
 
 const POPUP_TARGET_SCREEN = -1
 
@@ -1221,14 +1236,15 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		force_font_weight(font_weight)
 		force_line_gap(line_gap)
 	}
+	side = popup_parse_side(side ?? 't')
 	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
 		id,
 		layer1,
 		repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i(),
-		popup_parse_side(side ?? 't'),
+		side,
 		popup_parse_align(align ?? 'c'),
 		popup_parse_flags(flags ?? ''),
-		0, 0, // side_real, align_real
+		side, // side_real
 	)
 	begin_layer(layer1, i)
 	return i
@@ -1318,7 +1334,7 @@ ui.widget('bb_tooltip', {
 		let r             = a[i+4] // border radius
 
 		let side  = a[ct_i+POPUP_SIDE_REAL]
-		let align = a[ct_i+POPUP_ALIGN_REAL]
+		let align = a[ct_i+POPUP_ALIGN]
 
 		let T = POPUP_SIDE_TOP
 		let B = POPUP_SIDE_BOTTOM
@@ -1746,6 +1762,7 @@ function add_ct_min_wh(a, axis, w, fr) {
 		a[i+2+axis] = max(min_w, w)
 	}
 }
+ui.add_ct_min_wh = add_ct_min_wh
 
 measure[CMD_FONT] = set_font
 measure[CMD_FONT_SIZE] = set_font_size
@@ -1985,7 +2002,7 @@ measure[CMD_END] = function(a, _, axis) {
 
 function measure_all(axis) {
 	check_stacks()
-	reset_all()
+	reset_canvas()
 	let i = 2
 	let n = a.length
 	while (i < n) {
@@ -2034,6 +2051,11 @@ function inner_x(a, i, axis, ct_x) {
 function inner_w(a, i, axis, ct_w) {
 	return ct_w - paddings(a, i, axis)
 }
+
+ui.align_x = align_x
+ui.align_w = align_w
+ui.inner_x = inner_x
+ui.inner_w = inner_w
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	if (!axis) {
@@ -2223,6 +2245,7 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 		if (target_i == POPUP_TARGET_SCREEN) {
 			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
 		} else {
+			// TODO: align border rects here!
 			let ct_w = a[target_i+2+axis] + paddings(a, target_i, axis)
 			a[i+2+axis] = max(a[i+2+axis], ct_w)
 		}
@@ -2358,8 +2381,8 @@ function get_popup_target_rect(a, i) {
 		let d = screen_margin
 		tx1 = d
 		ty1 = d
-		tx2 = bw - d
-		ty2 = bh - d
+		tx2 = screen_w - d
+		ty2 = screen_h - d
 
 	} else {
 
@@ -2394,7 +2417,10 @@ function position_popup(w, h, side, align) {
 	} else if (side == POPUP_SIDE_INNER_RIGHT) {
 		x = tx2 - w
 		y = ty1
-	} else if (side == POPUP_SIDE_INNER_LEFT || side == POPUP_SIDE_INNER_TOP) {
+	} else if (side == POPUP_SIDE_INNER_LEFT) {
+		x = tx1
+		y = ty1
+	} else if (side == POPUP_SIDE_INNER_TOP) {
 		x = tx1
 		y = ty1
 	} else if (side == POPUP_SIDE_INNER_BOTTOM) {
@@ -2449,24 +2475,22 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 		let out_x2 = x + w > (bw - d)
 		let out_y2 = y + h > (bh - d)
 
-		let re
-		if (side == POPUP_SIDE_BOTTOM && out_y2) {
-			re = 1; side = POPUP_SIDE_TOP
-		} else if (side == POPUP_SIDE_TOP && out_y1) {
-			re = 1; side = POPUP_SIDE_BOTTOM
-		} else if (side == POPUP_SIDE_RIGHT && out_x2) {
-			re = 1; side = POPUP_SIDE_LEFT
-		} else if (side == POPUP_SIDE_LEFT && out_x1) {
-			re = 1; side = POPUP_SIDE_RIGHT
+		let side0 = side
+		if (side == POPUP_SIDE_BOTTOM && out_y2)
+			side = POPUP_SIDE_TOP
+		 else if (side == POPUP_SIDE_TOP && out_y1)
+			side = POPUP_SIDE_BOTTOM
+		 else if (side == POPUP_SIDE_RIGHT && out_x2)
+			side = POPUP_SIDE_LEFT
+		 else if (side == POPUP_SIDE_LEFT && out_x1)
+			side = POPUP_SIDE_RIGHT
+
+		if (side != side0) {
+			position_popup(w, h, side, align)
+			a[i+POPUP_SIDE_REAL] = side
 		}
 
-		if (re)
-			position_popup(w, h, side, align)
-
 	}
-
-	a[i+POPUP_SIDE_REAL ] = side
-	a[i+POPUP_ALIGN_REAL] = align
 
 	// if nothing else works, adjust the offset to fit the screen.
 	if (flags & POPUP_FIT_CONSTRAIN) {
@@ -2479,8 +2503,11 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 		y -= oy1 ? oy1 : oy2
 	}
 
-	a[i+0] = x + a[i+MX1+0] + a[i+PX1+0]
-	a[i+1] = y + a[i+MX1+1] + a[i+PX1+1]
+	x += a[i+MX1+0] + a[i+PX1+0]
+	y += a[i+MX1+1] + a[i+PX1+1]
+
+	a[i+0] = x
+	a[i+1] = y
 	a[i+2] = w - px
 	a[i+3] = h - py
 
@@ -2875,7 +2902,7 @@ function draw_all() {
 		for (let i of layer) {
 			let next_ext_i = get_next_ext_i(a, i)
 			check_stacks()
-			reset_all()
+			reset_canvas()
 			while (i < next_ext_i) {
 				let draw_f = draw[a[i-1]]
 				if (draw_f && draw_f(a, i))
@@ -3066,7 +3093,7 @@ function hit_all() {
 		layer = a.layers[j]
 		// iterate layer's cointainers in reverse order.
 		for (let k = layer.length-1; k >= 0; k--) {
-			reset_all()
+			reset_canvas()
 			let i = layer[k]
 			let hit_f = hit[a[i-1]]
 			if (hit_f(a, i)) {
@@ -3110,14 +3137,15 @@ function redraw_all() {
 
 		if (!want_redraw)
 			draw_all()
-		reset_all()
+		reset_canvas()
 		reset_mouse()
-		reset_keys()
+		key_state_now.clear()
+		event_state.clear()
 		focusing_id = null
 	}
 }
 
-reset_all()
+reset_canvas()
 
 // focusing ------------------------------------------------------------------
 
@@ -3730,15 +3758,15 @@ ui.drag = function(id, move, dx0, dy0) {
 
 // toolbox widget ------------------------------------------------------------
 
-ui.toolbox = function(id, title, align, x0, y0) {
+ui.toolbox = function(id, title, align, x0, y0, target_i) {
 
 	let align_start = parse_align(align || '[') == ALIGN_START
 	let [dstate, dx, dy] = ui.drag(id+'.title')
 	let s = ui.state_map(id)
 	let mx1 =  align_start ? (s.get('mx1') ?? x0) + dx : 0
 	let mx2 = !align_start ? (s.get('mx2') ?? x0) - dx : 0
-	let my1 = (s.get('my1') ?? y0) + dy
-	let my2 = (s.get('my2') ?? y0) - dy
+	let my1 =  align_start ? (s.get('my1') ?? y0) + dy : 0
+	let my2 = !align_start ? (s.get('my2') ?? y0) - dy : 0
 	let min_w = s.get('min_w')
 	let min_h = s.get('min_h')
 	if (dstate == 'drop') {
@@ -3749,7 +3777,7 @@ ui.toolbox = function(id, title, align, x0, y0) {
 	}
 
 	ui.m(mx1, my1, mx2, my2)
-	ui.popup(id+'.popup', layer_popup, null, 'it', align, min_w, min_h, 'constrain')
+	ui.popup(id+'.popup', layer_popup, target_i ?? 'screen', 'it', align, min_w, min_h, 'constrain')
 		ui.p(1)
 		ui.bb('', 'bg1', 1, 'intense', ui.sp075())
 		ui.stack()
@@ -4316,28 +4344,6 @@ ui.widget('bg_dots', {
 
 })
 }
-
-// grid ----------------------------------------------------------------------
-
-let GRID_ID     = S-1
-let GRID_ROWSET = S+0
-
-ui.widget('grid', {
-
-	create: function(cmd, id, rowset, fr, align, valign, min_w, min_h) {
-		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-			id,
-			rowset,
-		)
-	},
-
-	draw: function(a, i) {
-
-		//
-
-	},
-
-})
 
 // init ----------------------------------------------------------------------
 

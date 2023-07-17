@@ -8,10 +8,11 @@
 </style>
 </head>
 <body>
-<script src=glue.js></script>
+<script src=glue.js global extend></script>
 <script src=ui.js></script>
 <script src=validation.js></script>
 <script src=ui_nav.js></script>
+<script src=ui_grid.js></script>
 <script>
 
 let pr = console.log
@@ -20,7 +21,7 @@ let tuts = []
 let demos = []
 
 demos.grid = `
-ui.grid()
+ui.grid('g1')
 `
 
 tuts.text = `
@@ -384,15 +385,15 @@ ui.end_v()
 `
 
 demos.toolbox = `
-ui.toolbox('tb1', "Hey y'all", '[', 500, 100)
+ui.toolbox('tb1', "I am left-aligned", '[', 100, 100)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
-ui.toolbox('tb2', "Hey y'all", '[', 550, 150)
+ui.toolbox('tb2', "I am also left-aligned", '[', 150, 150)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
-ui.toolbox('tb3', "Hey y'all", ']', 100, 100)
+ui.toolbox('tb3', "I am right-aligned", ']', 100, 100)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
