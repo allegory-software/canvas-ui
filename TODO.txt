@@ -4,12 +4,18 @@ THINK
 	widgets depending on the state of other widgets that appear later in the frame.
 		solutions:
 			- cmd record buffers
+			- events
+			- forced re-layouting without redrawing
 
 - toolbox z-index
 - toolbox move by all sides, with all alignment combinations
 - bb on text
 - bb on scrollbox?
 - negative margins?
+
+- separate available APIs for each phase
+- make drawing phase stateless
+-
 
 ------------------------------------------------------------------------------
 

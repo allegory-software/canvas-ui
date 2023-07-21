@@ -27,20 +27,21 @@ ui.VERSION = '0.1'
 
 const {
 	repl,
-	isarray, isstr,
+	isarray, isstr, isnum,
 	assert, pr, trace,
 	floor, ceil, round, max, min, abs, clamp,
 	lerp,
 	dec, num, str,
 	obj, set, map, array,
 	assign,
-	noop,
+	noop, return_true,
 	clock,
 	memoize,
 	freelist,
 	hash32,
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
+	PI,
 } = glue
 
 let map_freelist   = () => freelist(map, m => m.clear())
@@ -54,7 +55,7 @@ let style = document.createElement('style')
 document.documentElement.appendChild(style)
 ui.set_cursor = function(cursor) {
 	// TODO: use style API here, it's probably faster.
-	style.innerHTML = cursor && captured_id ? `* {cursor: ${cursor} !important; }` : ''
+	style.innerHTML = cursor && ui.captured_id ? `* {cursor: ${cursor} !important; }` : ''
 	canvas.style.cursor = cursor ?? 'initial'
 }
 }
@@ -119,72 +120,114 @@ ui.hsl_adjust = function(c, h, s, L, a) {
 ui.scrollbar_thickness = 6
 ui.scrollbar_thickness_active = 12
 
-function array_of_arrays(n) {
+function array_of_objs(n) {
 	let a = []
 	for (let i = 0; i < n; i++)
-		a.push([])
+		a.push(obj())
 	return a
 }
 
-function theme_make(name, default_color) {
+function theme_make(name, is_dark) {
 	themes[name] = {
-		name   : name,
-		default_color : default_color,
-		scrollbar_thickness        : ui.scrollbar_thickness,
-		scrollbar_thickness_active : ui.scrollbar_thickness_active,
-		fg     : array_of_arrays(63),
-		border : array_of_arrays(63),
-		bg     : array_of_arrays(63),
-		shadow : [],
+		is_dark : is_dark,
+		name    : name,
+		// TODO: 255 seems excessive...
+		fg     : array_of_objs(255),
+		border : array_of_objs(255),
+		bg     : array_of_objs(255),
+		shadow : obj(),
 	}
 }
 let themes = obj()
-theme_make('light', 'black')
-theme_make('dark' , 'white')
-
-let theme
+theme_make('light', false)
+theme_make('dark' , true)
 
 // state parsing -------------------------------------------------------------
 
-const STATE_NORMAL        =  0
-const STATE_HOVER         =  1
-const STATE_ACTIVE        =  2
-const STATE_FOCUSED       =  4
-const STATE_ITEM_SELECTED =  8
-const STATE_ITEM_FOCUSED  = 16
-const STATE_ITEM_ERROR    = 32
+const STATE_HOVER         =   1
+const STATE_ACTIVE        =   2
+const STATE_FOCUSED       =   4
+const STATE_ITEM_SELECTED =   8
+const STATE_ITEM_FOCUSED  =  16
+const STATE_ITEM_ERROR    =  32
+const STATE_NEW           =  64
+const STATE_MODIFIED      = 128
 
 let parse_state_combis = memoize(function(s) {
 	s = ' '+s
 	let b = 0
-	if (s.includes(' normal'       )) b |= STATE_NORMAL
 	if (s.includes(' hover'        )) b |= STATE_HOVER
 	if (s.includes(' active'       )) b |= STATE_ACTIVE
 	if (s.includes(' focused'      )) b |= STATE_FOCUSED
 	if (s.includes(' item-selected')) b |= STATE_ITEM_SELECTED
 	if (s.includes(' item-focused' )) b |= STATE_ITEM_FOCUSED
 	if (s.includes(' item-error'   )) b |= STATE_ITEM_ERROR
+	if (s.includes(' new'          )) b |= STATE_NEW
+	if (s.includes(' modified'     )) b |= STATE_MODIFIED
 	return b
 })
 function parse_state(s) {
-	if (!s || s == 'normal') return STATE_NORMAL
-	if (s == 'hover') return STATE_HOVER
+	if (isnum(s)) return s
+	if (s == 'normal') return 0
+	if (s == 'hover' ) return STATE_HOVER
 	if (s == 'active') return STATE_ACTIVE
 	return parse_state_combis(s)
 }
 
+// named HSL colors ----------------------------------------------------------
+
+function def_color_func(k) {
+	function def_color(theme, name, state, h, s, L, a, is_dark) {
+		if (theme == '*') { // define color for all themes
+			for (let theme_name in themes)
+				def_color(theme_name, name, state, h, s, L, a, is_dark)
+			return
+		}
+		let states = themes[theme][k]
+		if (state == '*') { // copy all states of a color
+			assert(isstr(h), 'expected color name to copy for all states')
+			for (let state_i = 0; state_i < states.length; state_i++) {
+				let color = states[state_i][h]
+				if (color != null)
+					states[state_i][name] = color
+			}
+			return
+		}
+		state = state ?? 'normal'
+		let state_i = parse_state(state)
+		states[state_i][name] = isnum(h)
+			? [ui.hsl(h, s, L, a), h, s, L, a, is_dark]
+			: isarray(h) ? h : ui[k+'_color'](h, s ?? state, L ?? theme)
+	}
+	return def_color
+}
+
+let theme
+ui.get_theme = () => theme
+
+function lookup_color_func(k) {
+	return function(name, state, theme1) {
+		if (isarray(name)) // custom color
+			return name
+		state = state ?? 'normal'
+		let state_i = parse_state(state)
+		theme1 = theme1 ? themes[theme1] : theme
+		let c = theme1[k][state_i][name] ?? theme[k][0][name]
+		if (!c) assert(false, 'no ', k, ' for (', name, ', ', state, ', ', theme1.name, ')')
+		return c
+	}
+}
+
+function set_theme_dark_from(bg_color) {
+	let dark = bg_color[5] ?? bg_color[3] < .5
+	ui.dark = dark
+	theme = dark ? themes.dark : themes.light
+}
+
 // text colors ---------------------------------------------------------------
 
-ui.fg_style = function(theme, name, state, h, s, L, a) {
-	let state_i = parse_state(state)
-	themes[theme].fg[state_i][name] = isarray(h) ? h : [ui.hsl(h, s, L, a), h, s, L, a]
-}
-
-ui.fg = function(name, state, theme1) {
-	let state_i = parse_state(state)
-	theme1 = theme1 ? themes[theme1] : theme
-	return theme1.fg[state_i][name] ?? theme.fg[0][name]
-}
+ui.fg_style = def_color_func('fg')
+ui.fg_color = lookup_color_func('fg')
 
 //           theme    name     state       h     s     L    a
 // ---------------------------------------------------------------------------
@@ -211,16 +254,8 @@ ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 
 // border colors -------------------------------------------------------------
 
-ui.border_style = function(theme, name, state, h, s, L, a) {
-	let state_i = parse_state(state)
-	themes[theme].border[state_i][name] = isarray(h) ? h : [ui.hsl(h, s, L, a), h, s, L, a]
-}
-
-ui.border = function(name, state, theme1) {
-	let state_i = parse_state(state)
-	theme1 = theme1 ? themes[theme1] : theme
-	return theme1.border[state_i][name] ?? theme.border[0][name]
-}
+ui.border_style = def_color_func('border')
+ui.border_color = lookup_color_func('border')
 
 //               theme    name        state       h    s    L     a
 // ---------------------------------------------------------------------------
@@ -236,15 +271,11 @@ ui.border_style('dark' , 'intense' , 'hover'  ,   0,   0,   1, 0.40)
 
 // background colors ---------------------------------------------------------
 
-ui.bg_style = function(theme, name, state, h, s, L, a, is_dark) {
-	let state_i = parse_state(state)
-	themes[theme].bg[state_i][name] = isarray(h) ? h : [ui.hsl(h, s, L, a), h, s, L, a, is_dark]
-}
+ui.bg_style = def_color_func('bg')
+ui.bg_color = lookup_color_func('bg')
 
-ui.bg = function(name, state, theme1) {
-	let state_i = parse_state(state)
-	theme1 = theme1 ? themes[theme1] : theme
-	return theme1.bg[state_i][name] ?? theme.bg[0][name]
+ui.bg_is_dark = function(bg_color) {
+	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
 }
 
 //           theme    name      state       h     s     L     a
@@ -285,6 +316,14 @@ ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
 ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
+// TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
+for (let theme of ['light', 'dark']) {
+	for (let state of ['normal', 'hover', 'active']) {
+		ui.bg_style(theme, 'text', state, ui.fg_color('text', state, theme))
+		ui.bg_style(theme, 'link', state, ui.fg_color('link', state, theme))
+	}
+}
+
 ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
 ui.bg_style('light', 'scrollbar', 'hover'  ,   0, 0.00, 0.75, 0.8)
 ui.bg_style('light', 'scrollbar', 'active' ,   0, 0.00, 0.80, 0.8)
@@ -293,47 +332,36 @@ ui.bg_style('dark' , 'scrollbar', 'normal' , 216, 0.28, 0.37, 0.5)
 ui.bg_style('dark' , 'scrollbar', 'hover'  , 216, 0.28, 0.39, 0.8)
 ui.bg_style('dark' , 'scrollbar', 'active' , 216, 0.28, 0.41, 0.8)
 
-ui.bg_style('light', 'button', 'normal' , ui.bg('bg', 'normal', 'light'))
-ui.bg_style('light', 'button', 'hover'  , ui.bg('bg', 'hover' , 'light'))
-ui.bg_style('light', 'button', 'active' , ui.bg('bg', 'active', 'light'))
+ui.bg_style('*', 'button'        , '*' , 'bg')
+ui.bg_style('*', 'button-primary', '*' , 'link')
 
-ui.bg_style('dark' , 'button', 'normal' , ui.bg('bg', 'normal', 'dark'))
-ui.bg_style('dark' , 'button', 'hover'  , ui.bg('bg', 'hover' , 'dark'))
-ui.bg_style('dark' , 'button', 'active' , ui.bg('bg', 'active', 'dark'))
-
-ui.bg_style('light', 'button-primary', 'normal' , ui.fg('link', 'normal', 'light'))
-ui.bg_style('light', 'button-primary', 'hover'  , ui.fg('link', 'hover' , 'light'))
-ui.bg_style('light', 'button-primary', 'active' , ui.fg('link', 'active', 'light'))
-
-ui.bg_style('dark' , 'button-primary', 'normal' , ui.fg('link', 'normal', 'dark'))
-ui.bg_style('dark' , 'button-primary', 'hover'  , ui.fg('link', 'hover' , 'dark'))
-ui.bg_style('dark' , 'button-primary', 'active' , ui.fg('link', 'active', 'dark'))
-
-ui.bg_style('light', 'search'          , 'normal',  60,  1.00, 0.80) // quicksearch text bg
-ui.bg_style('light', 'info'            , 'normal', 200,  1.00, 0.30) // info bubbles
-ui.bg_style('light', 'focused-invalid' , 'normal',   0,  1.00, 0.60)
-ui.bg_style('light', 'warn'            , 'normal',  39,  1.00, 0.50) // warning bubbles
+ui.bg_style('*', 'search' , 'normal',  60,  1.00, 0.80) // quicksearch text bg
+ui.bg_style('*', 'info'   , 'normal', 200,  1.00, 0.30) // info bubbles
+ui.bg_style('*', 'warn'   , 'normal',  39,  1.00, 0.50) // warning bubbles
+ui.bg_style('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
 
 // input value states
-ui.bg_style('light', 'new'             , 'normal', 240, 1.00, 0.97)
-ui.bg_style('light', 'modified'        , 'normal', 120, 1.00, 0.93)
-ui.bg_style('light', 'new-modified'    , 'normal', 180, 0.55, 0.87)
-
-ui.bg_style('dark' , 'new'             , 'normal', 240, 0.35, 0.27)
-ui.bg_style('dark' , 'modified'        , 'normal', 120, 0.59, 0.24)
-ui.bg_style('dark' , 'new-modified'    , 'normal', 157, 0.18, 0.20)
+ui.bg_style('light', 'item', 'new'           , 240, 1.00, 0.97)
+ui.bg_style('light', 'item', 'modified'      , 120, 1.00, 0.93)
+ui.bg_style('light', 'item', 'new modified'  , 180, 0.55, 0.87)
+															,
+ui.bg_style('dark' , 'item', 'new'           , 240, 0.35, 0.27)
+ui.bg_style('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
+ui.bg_style('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
 
 // grid cell & row states. these need to be opaque!
 ui.bg_style('light', 'item', 'item-focused'                       ,   0, 0.00, 0.93)
 ui.bg_style('light', 'item', 'item-selected'                      ,   0, 0.00, 0.91)
 ui.bg_style('light', 'item', 'item-focused item-selected'         ,   0, 0.00, 0.87)
 ui.bg_style('light', 'item', 'item-focused focused'               ,   0, 0.00, 0.87)
-ui.bg_style('light', 'item', 'item-focused item-selected focus'   , 139 / 239 * 360, 141 / 240, 206 / 240)
+ui.bg_style('light', 'item', 'item-focused item-selected focused' , 139 / 239 * 360, 141 / 240, 206 / 240)
 ui.bg_style('light', 'item', 'item-selected focused'              , 139 / 239 * 360, 150 / 240, 217 / 240)
+ui.bg_style('light', 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.bg_style('light', 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 ui.bg_style('light', 'row' , 'item-focused focused'               , 139 / 239 * 360, 150 / 240, 231 / 240)
 ui.bg_style('light', 'row' , 'item-focused'                       , 139 / 239 * 360,   0 / 240, 231 / 240)
-ui.bg_style('light', 'row' , 'item-focused item-error'            ,   0, 1.00, 0.60)
+ui.bg_style('light', 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 ui.bg_style('dark' , 'item', 'item-focused'                       , 195, 0.06, 0.12)
 ui.bg_style('dark' , 'item', 'item-selected'                      ,   0, 0.00, 0.20)
@@ -341,10 +369,12 @@ ui.bg_style('dark' , 'item', 'item-focused item-selected'         , 208, 0.11, 0
 ui.bg_style('dark' , 'item', 'item-focused focused'               ,   0, 0.00, 0.23)
 ui.bg_style('dark' , 'item', 'item-focused item-selected focused' , 211, 0.62, 0.24)
 ui.bg_style('dark' , 'item', 'item-selected focused'              , 211, 0.62, 0.19)
+ui.bg_style('dark' , 'item', 'item-error'                         ,   0, 0.54, 0.43)
+ui.bg_style('dark' , 'item', 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 ui.bg_style('dark' , 'row' , 'item-focused focused'               , 212, 0.61, 0.13)
 ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0.13)
-ui.bg_style('dark' , 'row' , 'item-focused item-error'            ,   0, 1.00, 0.60)
+ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 // canvas --------------------------------------------------------------------
 
@@ -419,7 +449,7 @@ ui.ready = function() {
 ui.pressed = false
 ui.click = false
 ui.clickup = false
-let captured_id = null
+ui.captured_id = null
 ui.wheel_dy = 0
 ui.trackpad = false
 ui.mouseenter = false
@@ -427,7 +457,7 @@ ui.mouseleave = false
 
 function reset_mouse() {
 	if (ui.clickup)
-		captured_id = null
+		ui.captured_id = null
 	ui.click = false
 	ui.clickup = false
 	ui.wheel_dy = 0
@@ -471,12 +501,12 @@ canvas.addEventListener('pointermove', function(ev) {
 
 canvas.addEventListener('pointerenter', function(ev) {
 	update_mouse(ev)
-	if (!captured_id)
+	if (!ui.captured_id)
 		ui.mouseenter = true
 })
 
 canvas.addEventListener('pointerleave', function(ev) {
-	if (!captured_id) {
+	if (!ui.captured_id) {
 		ui.mx = null
 		ui.my = null
 		ui.mouseleave = true
@@ -501,13 +531,13 @@ let capture_state = map()
 ui.capture = function(id) {
 	if (!id)
 		return
-	if (captured_id)
+	if (ui.captured_id)
 		return
 	if (!ui.pressed)
 		return
 	if (!ui.realhit(id))
 		return
-	captured_id = id
+	ui.captured_id = id
 	capture_state.clear()
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
@@ -517,7 +547,7 @@ ui.capture = function(id) {
 ui.captured = function(id) {
 	if (!id)
 		return
-	if (captured_id != id)
+	if (ui.captured_id != id)
 		return
 	return capture_state
 }
@@ -553,7 +583,7 @@ ui.key = function(key) {
 
 let event_state = map()
 
-ui.fire(ev, ...args) {
+ui.fire = function(ev, ...args) {
 	event_state.set(ev, args)
 }
 
@@ -611,7 +641,6 @@ function end_scope() {
 	scope = scope_stack.pop()
 	if (ended_scope) {
 		end_color(ended_scope)
-		end_theme(ended_scope)
 		end_font(ended_scope)
 		end_font_size(ended_scope)
 		end_font_weight(ended_scope)
@@ -661,20 +690,52 @@ let id_state_maps  = map() // {id->map}
 let id_current_set = set() // {id}
 let id_remove_set  = set() // {id}
 
+ui._id_state_maps = id_state_maps
+
 function keepalive(id) {
+	assert(id, 'id required')
 	id_current_set.add(id)
 	id_remove_set.delete(id)
 }
+ui.keepalive = keepalive
 
-ui.state_map = function(id) {
-	if (!id)
-		return
-	keepalive(id)
+let updated_set = set() // {id}
+
+function state_map(id) {
 	let m = id_state_maps.get(id)
 	if (!m) {
 		m = id_state_map_freelist.alloc()
 		id_state_maps.set(id, m)
 	}
+	return m
+}
+
+ui.state_update = function(id, update_f) {
+	if (!id)
+		return
+	if (!update_f)
+		return
+	let m = state_map(id)
+	m.set('update', update_f)
+	state_update(id, m)
+}
+
+function state_update(id, m) {
+	let update_f = m.get('update')
+	if (!update_f)
+		return
+	let updated = updated_set.has(id)
+	if (!updated) {
+		update_f(id, m)
+		updated_set.add(id)
+	}
+}
+
+ui.state_map = function(id) {
+	if (!id)
+		return
+	let m = state_map(id)
+	state_update(id, m)
 	return m
 }
 
@@ -684,7 +745,7 @@ ui.state = function(id, k) {
 	let m = id_state_maps.get(id)
 	if (!m)
 		return
-	keepalive(id)
+	state_update(id, m)
 	return m.get(k)
 }
 
@@ -701,6 +762,8 @@ ui.state_set_default = function(id, k, v) {
 function id_state_gc() {
 	for (let id of id_remove_set) {
 		let m = id_state_maps.get(id)
+		if (!m)
+			continue
 		let free = m.get('free')
 		if (free)
 			free(m, id)
@@ -711,6 +774,7 @@ function id_state_gc() {
 	let empty = id_remove_set
 	id_remove_set = id_current_set
 	id_current_set = empty
+	updated_set.clear()
 }
 
 ui.on_free = function(id, free1) {
@@ -730,16 +794,16 @@ ui.on_free = function(id, free1) {
 
 let measure_req = []
 
-ui.measure = function(id) {
+ui.measure = function(dest) {
 	let i = assert(ct_stack.at(-1), 'measure outside container')
-	measure_req.push(id, i)
+	measure_req.push(dest, i)
 }
 
 function measure_req_all() {
 	for (let k = 0, n = measure_req.length; k < n; k += 2) {
-		let id = measure_req[k+0]
-		let i  = measure_req[k+1]
-		let s = ui.state_map(id)
+		let dest = measure_req[k+0]
+		let i    = measure_req[k+1]
+		let s = isstr(dest) ? ui.state_map(dest) : dest
 		s.set('x', a[i+0])
 		s.set('y', a[i+1])
 		s.set('w', a[i+2])
@@ -750,15 +814,17 @@ function measure_req_all() {
 
 // command state -------------------------------------------------------------
 
-let color, font, font_size, font_weight, line_gap
+let color, color_state, font, font_size, font_weight, line_gap
+
+ui.get_font_size = () => font_size
 
 ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
 ui.font_size_normal = 14
 
 function reset_canvas() {
-	theme = themes[ui.default_theme]
-	color = ui.fg('text')[0]
+	color = 'text'
+	color_state = 'normal'
 	font = ui.default_font
 	font_size = ui.font_size_normal
 	font_weight = 'normal'
@@ -823,6 +889,9 @@ function ui_cmd(cmd, ...args) {
 }
 ui.cmd = ui_cmd
 
+// first index after the last cmd arg.
+let cmd_end_i = (a, i) => a[i-2] - 3
+
 // cmd buffers ---------------------------------------------------------------
 
 let record_freelist = array_freelist()
@@ -869,11 +938,11 @@ ui.record_play = function(a1) {
 
 // widget API ----------------------------------------------------------------
 
-let measure   = []
-let position  = []
-let translate = []
-let draw      = []
-let hit       = []
+let measure   = {}
+let position  = {}
+let translate = {}
+let draw      = {}
+let hit       = {}
 
 ui.widget = function(cmd_name, t, is_ct) {
 	let _cmd = cmd(cmd_name, is_ct)
@@ -970,8 +1039,8 @@ function parse_valign(s) {
 let px1, px2, py1, py2
 let mx1, mx2, my1, my2
 
-ui.rem = rem => round(rem * ui.font_size_normal)
-ui. em =  em => round( em * font_size)
+ui.rem = rem => round((rem ?? 1) * ui.font_size_normal)
+ui. em =  em => round((em  ?? 1) * font_size)
 
 let rem = ui.rem
 ui.sp025 = () => rem( .125)
@@ -1047,6 +1116,7 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 }
 
 ui.box_widget = function(cmd_name, t, is_ct) {
+	let ID = t.ID
 	return ui.widget(cmd_name, assign({
 		measure: function(a, i, axis) {
 			let fr = a[i+FR]
@@ -1060,6 +1130,17 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		translate: function(a, i, dx, dy) {
 			a[i+0] += dx
 			a[i+1] += dy
+		},
+		hit: ID != null && function(a, i) {
+			let x = a[i+0]
+			let y = a[i+1]
+			let w = a[i+2]
+			let h = a[i+3]
+			let id = a[i+ID]
+			if (hit_rect(x, y, w, h)) {
+				hit_set_id(id)
+				return true
+			}
 		},
 	}, t), is_ct)
 }
@@ -1115,17 +1196,17 @@ const SB_OVERFLOW_SCROLL  = 2
 const SB_OVERFLOW_CONTAIN = 3
 
 function parse_sb_overflow(s) {
-	if (s == null   || s == 'auto'  ) return SB_OVERFLOW_AUTO
-	if (s === false || s == 'hide'  ) return SB_OVERFLOW_HIDE
-	if (s === true  || s == 'scroll') return SB_OVERFLOW_SCROLL
-	if (s == 'contain') return SB_OVERFLOW_CONTAIN
+	if (s == null   || s == 'auto'   ) return SB_OVERFLOW_AUTO
+	if (s === false || s == 'hide'   ) return SB_OVERFLOW_HIDE
+	if (s === true  || s == 'scroll' ) return SB_OVERFLOW_SCROLL
+	if (               s == 'contain') return SB_OVERFLOW_CONTAIN
 	assert(false, 'invalid overflow ', s)
 }
 
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
-	assert(id, 'scrollbox must have an id')
+	keepalive(id)
 	let ss = ui.state_map(id)
 	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
 	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
@@ -1141,11 +1222,17 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 		sy ?? 0, // scroll y
 	)
 	if (ss) {
-		ss.set('scroll_x', sx)
-		ss.set('scroll_y', sy)
+		if (sx != null) ss.set('scroll_x', sx)
+		if (sy != null) ss.set('scroll_y', sy)
 	}
+
+	return i
 }
 ui.sb = ui.scrollbox
+
+ui.scroll_xy = function(a, i, axis) {
+	return a[i+SB_SX+axis]
+}
 
 // popup ---------------------------------------------------------------------
 
@@ -1231,6 +1318,7 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 	// TODO: fr, align, valign are not used. find a way to remove them.
 	begin_scope()
 	if (layer1 != layer) {
+		force_color(color, color_state)
 		force_font(font)
 		force_font_size(font_size)
 		force_font_weight(font_weight)
@@ -1299,20 +1387,10 @@ function tooltip_path(cx, x1, y1, x2, y2, side, tx, ty, b1x, b1y, b2x, b2y, r, d
 }
 
 ui.widget('bb_tooltip', {
-	create: function(cmd, id, bg_color, border_color, border_radius) {
+	create: function(cmd, id, bg_color, bg_color_state, border_color, border_color_state, border_radius) {
 		let ct_i = ui.ct_i()
 		assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
-		if (isstr(bg_color))
-			bg_color = ui.bg(bg_color) ?? bg_color
-		if (isarray(bg_color)) {
-			set_theme_dark(bg_color[5] ?? bg_color[3] < .5)
-			bg_color = bg_color[0]
-		}
-		if (isstr(border_color))
-			border_color = ui.border(border_color) ?? border_color
-		if (isarray(border_color))
-			border_color = border_color[0]
-		return ui_cmd(cmd, id, ct_i, bg_color, border_color, border_radius ?? 0)
+		return ui_cmd(cmd, id, ct_i, bg_color, bg_color_state, border_color, border_color_state, border_radius ?? 0)
 	},
 	reindex: function(a, i, offset) {
 		a[i+0] += offset
@@ -1329,9 +1407,11 @@ ui.widget('bb_tooltip', {
 		let w   = a[ct_i+2] + px1 + px2
 		let h   = a[ct_i+3] + py1 + py2
 
-		let bg_color      = a[i+2]
-		let border_color  = a[i+3]
-		let r             = a[i+4] // border radius
+		let bg_color           = a[i+2]
+		let bg_color_state     = a[i+3]
+		let border_color       = a[i+4]
+		let border_color_state = a[i+5]
+		let r                  = a[i+6] // border radius
 
 		let side  = a[ct_i+POPUP_SIDE_REAL]
 		let align = a[ct_i+POPUP_ALIGN]
@@ -1419,7 +1499,9 @@ ui.widget('bb_tooltip', {
 		}
 
 		if (bg_color != null) {
-			cx.fillStyle = bg_color
+			bg_color = ui.bg_color(bg_color, bg_color_state)
+			set_theme_dark_from(bg_color)
+			cx.fillStyle = bg_color[0]
 			tooltip_path(cx, x, y, x + w, y + h,
 				side, tx, ty, b1x, b1y, b2x, b2y, r, d)
 			cx.fill()
@@ -1431,7 +1513,8 @@ ui.widget('bb_tooltip', {
 			shadow_set = false
 		}
 		if (border_color != null) {
-			cx.strokeStyle = border_color
+			border_color = ui.border_color(border_color, border_color_state)
+			cx.strokeStyle = border_color[0]
 			cx.lineWidth = 1
 			cx.lineCap = 'square'
 			tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
@@ -1492,38 +1575,16 @@ function parse_border_sides(s) {
 	return b
 }
 
-const BB_ID   = 0
-const BB_CT_I = 1
+const BB_ID            = 0
+const BB_CT_I          = 1
 
 const CMD_BB = cmd('bb') // border-background
-ui.bb = function(id, bg_color, sides, border_color, border_radius) {
-	if (isstr(bg_color))
-		bg_color = ui.bg(bg_color) ?? bg_color
-	if (isarray(bg_color)) {
-		set_theme_dark(bg_color[5] ?? bg_color[3] < .5)
-		bg_color = bg_color[0]
-	}
-	if (isstr(border_color))
-		border_color = ui.border(border_color) ?? border_color
-	if (isarray(border_color))
-		border_color = border_color[0]
-	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, parse_border_sides(sides), border_color, border_radius)
+ui.bb = function(id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius) {
+	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, bg_color_state, parse_border_sides(sides), border_color, border_color_state, border_radius)
 }
 
 reindex[CMD_BB] = function(a, i, offset) {
 	a[i+BB_CT_I] += offset
-}
-
-function set_theme_dark(dark) {
-	ui.dark = dark
-	theme = dark ? themes.dark : themes.light
-	scope_set('theme', theme)
-	ui.color('text')
-}
-function end_theme(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'theme')
-	if (s === undefined) return
-	theme = s
 }
 
 // box shadow ----------------------------------------------------------------
@@ -1548,7 +1609,7 @@ ui.shadow_style('dark', 'menu'    ,  2,  2,  2, 0, false, 0, 0, 0, 0xaa / 0xff)
 ui.shadow_style('dark', 'button'  ,  0,  0,  2, 0, false, 0, 0, 0, 0xff / 0xff)
 ui.shadow_style('dark', 'thumb'   ,  1,  1,  2, 0, false, 0, 0, 0, 0xaa / 0xff)
 ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, false, 0, 0, 0, 0x88 / 0xff)
-ui.shadow_style('dark', 'picker'  ,  0,  5, 10, 1, false, 0, 0, 0, 0x22 / 0xff) // large fuzzy shadow
+ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 1, false, 0, 0, 0, .8)
 
 const CMD_SHADOW = cmd('shadow')
 ui.shadow = function(x, y, blur, spread, inset, color) {
@@ -1557,6 +1618,15 @@ ui.shadow = function(x, y, blur, spread, inset, color) {
 	if (isarray(x))
 		[x, y, blur, spread, inset, color] = x
 	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset, color)
+}
+
+// TODO: use spread & inset
+ui.set_shadow = function(s) {
+	let [x, y, blur, spread, inset, color] = assert(theme.shadow[s], 'unknown shadow ', s)
+	cx.shadowBlur    = blur
+	cx.shadowOffsetX = x
+	cx.shadowOffsetY = y
+	cx.shadowColor   = color
 }
 
 // text box ------------------------------------------------------------------
@@ -1582,8 +1652,12 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
  		if (s.includes('\n'))
 			s = s.split('\n')
 	} else if (wrap == TEXT_WRAP_WORD) {
-		assert(id, 'wrapped text needs id')
+		keepalive(id)
 		s = word_wrapper(id, s)
+	}
+	if (editable) {
+		keepalive(id)
+		s = ui.state(id, 'text') ?? s
 	}
 	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'c', valign ?? 'c',
 		min_w ?? -1, // -1=auto
@@ -1593,7 +1667,7 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 		0, // text_x
 		max_min_w ?? -1, // -1=inf
 		id,
-		ui.state(id, 'text') ?? s,
+		s,
 		wrap | (editable ? TEXT_EDITABLE : 0),
 	)
 	if (editable)
@@ -1612,21 +1686,24 @@ ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, ed
 // text state ----------------------------------------------------------------
 
 const CMD_COLOR = cmd('color')
-ui.color = function(s, state) {
-	if (isstr(s))
-		s = ui.fg(s, state) ?? s
-	if (isarray(s))
-		s = s[0]
-	if (color == s) return
+function force_color(s, state) {
 	scope_set('color', s)
-	ui_cmd(CMD_COLOR, s)
+	scope_set('color_state', state)
+	ui_cmd(CMD_COLOR, s, state)
 	color = s
+	color_state = state
+}
+ui.color = function(s, state) {
+	if (color == s && color_state == state) return
+	force_color(s, state)
 }
 function end_color(ended_scope) {
 	let s = scope_prev_var(ended_scope, 'color')
 	if (s === undefined) return
-	ui_cmd(CMD_COLOR, s)
+	let state = scope_prev_var(ended_scope, 'color_state')
+	ui_cmd(CMD_COLOR, s, state)
 	color = s
+	color_state = state
 }
 
 const CMD_FONT = cmd('font')
@@ -2241,7 +2318,7 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 	let target_i = a[i+POPUP_TARGET_I]
 	let side     = a[i+POPUP_SIDE]
 	let align    = a[i+POPUP_ALIGN]
-	if (side & POPUP_SIDE_INNER && align == POPUP_ALIGN_STRETCH) {
+	if (side && align == POPUP_ALIGN_STRETCH) {
 		if (target_i == POPUP_TARGET_SCREEN) {
 			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
 		} else {
@@ -2328,9 +2405,9 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 			// wheel scrolling
 			if (axis && ui.wheel_dy && ui.hit(id)) {
-				let sy0 = ui.state_map(id).get('scroll_y') ?? 0
+				let sy0 = ui.state(id, 'scroll_y') ?? 0
 				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
-				ui.state_map(id).set('scroll_y', sy)
+				ui.state_set(id, 'scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
 
@@ -2341,14 +2418,14 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 				if (!axis) {
 					let psx0 = cs.get('ps0')
 					let dpsx = (ui.mx - ui.mx0) / (w - tw)
-					sx = clamp(psx0 + dpsx, 0, 1) * (cw - w)
-					ui.state_map(id).set('scroll_x', sx)
+					sx = clamp(round((psx0 + dpsx) * (cw - w)), 0, cw - w)
+					ui.state_set(id, 'scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
 					let psy0 = cs.get('ps0')
 					let dpsy = (ui.my - ui.my0) / (h - th)
-					sy = clamp(psy0 + dpsy, 0, 1) * (ch - h)
-					ui.state_map(id).set('scroll_y', sy)
+					sy = clamp(round((psy0 + dpsy) * (ch - h)), 0, ch - h)
+					ui.state_set(id, 'scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
 				break
@@ -2364,6 +2441,27 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 	}
 
 	translate_children(a, i, dx - sx, dy - sy)
+
+}
+
+// can be used inside the translate phase of a widget to re-scroll
+// another widget that might have already been scrolled.
+ui.force_scroll = function(a, i, sx, sy) {
+
+	let w   = a[i+2]
+	let h   = a[i+3]
+	let cw  = a[i+SB_CW+0]
+	let ch  = a[i+SB_CW+1]
+	let sx0 = a[i+SB_SX+0]
+	let sy0 = a[i+SB_SX+1]
+
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+
+	a[i+SB_SX+0] = sx
+	a[i+SB_SX+1] = sy
+
+	translate_children(a, i, sx0-sx, sy0-sy)
 
 }
 
@@ -2534,6 +2632,10 @@ function translate_all() {
 	translate_f(a, i, 0, 0)
 }
 
+ui.translate = function(a, i) {
+
+}
+
 // drawing phase -------------------------------------------------------------
 
 draw[CMD_POPUP] = function(a, i) {
@@ -2603,6 +2705,8 @@ draw[CMD_TEXT] = function(a, i) {
 	let wrap     = flags & TEXT_WRAP
 	let editable = flags & TEXT_EDITABLE
 
+	let col = ui.fg_color(color, color_state)[0]
+
 	if (editable) {
 		let input = ui.state(id, 'input')
 
@@ -2610,7 +2714,7 @@ draw[CMD_TEXT] = function(a, i) {
 		input.style.fontFamily = font
 		input.style.fontWeight = font_weight
 		input.style.fontSize   = (font_size / dpr)+'px'
-		input.style.color      = color
+		input.style.color      = col
 		input.style.left   = (x  / dpr)+'px'
 		input.style.top    = (y  / dpr)+'px'
 		input.style.width  = (sw / dpr)+'px'
@@ -2632,7 +2736,7 @@ draw[CMD_TEXT] = function(a, i) {
 	}
 
 	cx.textAlign = 'left'
-	cx.fillStyle = color
+	cx.fillStyle = col
 
 	if (isstr(s)) {
 
@@ -2700,17 +2804,18 @@ scrollbar_rect = function(a, i, axis, active) {
 	let psy = sy / (ch - h)
 	let pw = w / cw
 	let ph = h / ch
-	let thickness = theme.scrollbar_thickness
-	let thickness_active = active ? theme.scrollbar_thickness_active : thickness
+	let thickness = ui.scrollbar_thickness
+	let thickness_active = active ? ui.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
 	let h_visible = overflow_x != SB_OVERFLOW_HIDE && pw < 1
 	let v_visible = overflow_y != SB_OVERFLOW_HIDE && ph < 1
 	let both_visible = h_visible && v_visible && 1 || 0
+	let bar_min_len = round(2 * ui.font_size_normal)
 	if (!axis) {
 		visible = h_visible
 		if (visible) {
 			let bw = w - both_visible * thickness
-			tw = pw * bw
+			tw = max(min(bar_min_len, bw), pw * bw)
 			th = thickness_active
 			tx = psx * (bw - tw)
 			ty = h - th
@@ -2719,7 +2824,7 @@ scrollbar_rect = function(a, i, axis, active) {
 		visible = v_visible
 		if (visible) {
 			let bh = h - both_visible * thickness
-			th = ph * bh
+			th = max(min(bar_min_len, bh), ph * bh)
 			tw = thickness_active
 			ty = psy * (bh - th)
 			tx = w - tw
@@ -2770,7 +2875,7 @@ draw[CMD_END] = function(a, end_i) {
 
 			cx.beginPath()
 			cx.rect(tx, ty, tw, th)
-			cx.fillStyle = ui.bg('scrollbar', cs && 'active' || hs && 'hover' || 'normal')[0]
+			cx.fillStyle = ui.bg_color('scrollbar', cs && 'active' || hs && 'hover' || 'normal')[0]
 			cx.fill()
 
 		}
@@ -2863,12 +2968,16 @@ draw[CMD_BB] = function(a, i) {
 	let y   = a[ct_i+1] - py1
 	let w   = a[ct_i+2] + px1 + px2
 	let h   = a[ct_i+3] + py1 + py2
-	let bg_color      = a[i+2]
-	let border_sides  = a[i+3]
-	let border_color  = a[i+4]
-	let border_radius = a[i+5]
+	let bg_color           = a[i+2]
+	let bg_color_state     = a[i+3]
+	let border_sides       = a[i+4]
+	let border_color       = a[i+5]
+	let border_color_state = a[i+6]
+	let border_radius      = a[i+7]
 	if (bg_color != null) {
-		cx.fillStyle = bg_color
+		bg_color = ui.bg_color(bg_color, bg_color_state)
+		set_theme_dark_from(bg_color)
+		cx.fillStyle = bg_color[0]
 		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
 		cx.fill()
 	}
@@ -2879,7 +2988,8 @@ draw[CMD_BB] = function(a, i) {
 		shadow_set = false
 	}
 	if (border_sides && border_color != null) {
-		cx.strokeStyle = border_color
+		border_color = ui.border_color(border_color, border_color_state)
+		cx.strokeStyle = border_color[0]
 		cx.lineWidth = 1
 		cx.lineCap = 'square'
 		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
@@ -2888,7 +2998,8 @@ draw[CMD_BB] = function(a, i) {
 }
 
 draw[CMD_COLOR] = function(a, i) {
-	color = a[i]
+	color       = a[i+0]
+	color_state = a[i+1]
 }
 
 draw[CMD_FONT] = set_font
@@ -2896,21 +3007,36 @@ draw[CMD_FONT_SIZE] = set_font_size
 draw[CMD_FONT_WEIGHT] = set_font_weight
 draw[CMD_LINE_GAP] = set_line_gap
 
+let theme_stack = []
+
 function draw_all() {
-	screen.style.background = ui.bg('bg')[0]
+	screen.style.background = ui.bg_color('bg')[0]
 	for (layer of a.layers) {
+		// ^^NOTE: we're setting the global variable called layer!
 		for (let i of layer) {
 			let next_ext_i = get_next_ext_i(a, i)
 			check_stacks()
 			reset_canvas()
+			theme = themes[ui.default_theme]
 			while (i < next_ext_i) {
-				let draw_f = draw[a[i-1]]
-				if (draw_f && draw_f(a, i))
+
+				let cmd = a[i-1]
+				if (cmd < 0) // ct
+					theme_stack.push(theme)
+				else if (cmd == CMD_END)
+					theme = theme_stack.pop()
+
+				let draw_f = draw[cmd]
+				if (draw_f && draw_f(a, i)) {
 					i = get_next_ext_i(a, i)
-				else
+					if (cmd < 0)
+						theme = theme_stack.pop()
+				} else {
 					i = a[i-2] // next_i
+				}
 			}
 			check_stacks()
+			assert(!theme_stack.length)
 		}
 	}
 }
@@ -2922,6 +3048,9 @@ let hit_set = set() // {id}
 let hit_state_map_freelist = map_freelist()
 let hit_state_maps = map() // {id->map}
 
+ui._hit_state_maps = hit_state_maps
+ui._hit_set = hit_set
+
 function hit_set_id(id) {
 	if (id)
 		hit_set.add(id)
@@ -2932,16 +3061,12 @@ ui.realhit = function(id) {
 }
 
 ui.hit = function(id) {
-	if (ui.captured(id))
-		return true
+	if (ui.captured_id)
+		return ui.captured_id == id
 	return hit_set.has(id)
 }
 
-ui.hovers = function(id) {
-	if (!id)
-		return
-	if (!ui.hit(id))
-		return
+function hit_state_map(id) {
 	let m = hit_state_maps.get(id)
 	if (!m) {
 		m = hit_state_map_freelist.alloc()
@@ -2950,11 +3075,32 @@ ui.hovers = function(id) {
 	return m
 }
 
+ui.realhit_state = function(id) {
+	return id && hit_state_map(id)
+}
+
+ui.hit_state = function(id) {
+	return id && hit_state_map(id)
+}
+
+ui.hovers = function(id) {
+	if (!id)
+		return
+	if (!ui.hit(id))
+		return
+	return hit_state_map(id)
+}
+
 ui.hitstate = function(id, k) {
 	if (!id)
 		return
 	let m = hit_state_maps.get(id)
 	return m && m.get(k)
+}
+
+ui.hit_set = function(id, k, v) {
+	hit_set_id(id)
+	hit_state_map(id).set(k, v)
 }
 
 function hit_rect(x, y, w, h) {
@@ -3242,6 +3388,8 @@ function hit_template(a, i) {
 	let id = hit_template_id
 	if (id && i >= hit_template_i0 && i < hit_template_i1) {
 		let hs = ui.hovers(id)
+		if (!hs)
+			return
 		let root_t = hs.get('root')
 		let node_t = template_find_node(a, i, root_t, hit_template_i0)
 		hs.set('node', node_t)
@@ -3306,9 +3454,7 @@ ui.box_widget('template_overlay', {
 			hit_template_id = id
 			hit_template_i0 = i0
 			hit_template_i1 = i1
-			hit_set_id(id)
-			let hs = ui.hovers(id)
-			hs.set('root', t)
+			ui.hit_set(id, 'root', t)
 		}
 	},
 	draw: function(a, i) {
@@ -3346,11 +3492,11 @@ function draw_node(id, t_t, t, depth) {
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
 		if (sel) {
-			ui.bb('', ui.bg('item',
+			ui.bb('', 'item',
 				ui.focused(id)
 					? 'item-focused item-selected focused'
 					: 'item-focused item-selected'
-			))
+			)
 		}
 		ui.color('text', hit ? 'hover' : null)
 		ui.text('', t.t, 1, 'l')
@@ -3368,7 +3514,7 @@ function template_editor(id, t, ch_t) {
 				draw_node(id, t, t, 0)
 			ui.end_v()
 		ui.end_scrollbox()
-	ui.end_toolbox(id+'.tree_toolbox')
+	ui.end_toolbox()
 
 	ui.toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
 		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 150, 200)
@@ -3378,7 +3524,7 @@ function template_editor(id, t, ch_t) {
 				let def = defs[k]
 				let v = ch_t[k]
 				ui.h()
-					ui.bb('', null, 'b', 'light')
+					ui.bb('', null, null, 'b', 'light')
 					let vs = str((v != null ? v : def.default) ?? '')
 					ui.mb(1)
 					ui.p(8, 5)
@@ -3387,10 +3533,10 @@ function template_editor(id, t, ch_t) {
 					ui.p(8, 5)
 					ui.stack()
 						if (def.type == 'color') {
-							ui.bb('', v, 'l', 'light')
+							ui.bb('', v, null, 'l', 'light')
 						} else {
-							ui.bb('', null, 'l', 'light')
-							ui.color(v != null ? '#fff' : '#888')
+							ui.bb('', null, null, 'l', 'light')
+							ui.color(v != null ? 'text' : 'label')
 							ui.text('', vs, 1, 'l', 'c', 20)
 						}
 					ui.end_stack()
@@ -3398,7 +3544,7 @@ function template_editor(id, t, ch_t) {
 			}
 			ui.end_v()
 		ui.end_scrollbox()
-	ui.end_toolbox(id+'.prop_toolbox')
+	ui.end_toolbox()
 
 }
 
@@ -3411,6 +3557,7 @@ let ID    = ARGS+1
 let out = [0, 0, null]
 ui.widget('drag_point', {
 	create: function(cmd, id, x, y, color) {
+		keepalive(id)
 		ui.state_set_default(id, 'x', x)
 		ui.state_set_default(id, 'y', y)
 		x = ui.state(id, 'x')
@@ -3424,6 +3571,7 @@ ui.widget('drag_point', {
 			ui.state_set(id, 'x', x)
 			ui.state_set(id, 'y', y)
 		}
+
 		// NOTE: we're making it a zero-sized box so that a popup can be anchored to it.
 		let i = ui_cmd(cmd, x, y,
 			0, 0, // w, h
@@ -3476,7 +3624,7 @@ ui.button = function(id, s, style, align, valign) {
 	ui.p(ui.sp2(), ui.sp())
 	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
 		ui.shadow('button')
-		ui.bb('', ui.bg(style, state), 1, ui.border('intense', state), ui.sp05())
+		ui.bb('', style, state, 1, 'intense', state, ui.sp05())
 		ui.bold()
 		ui.color('text', state)
 		ui.text('', s, 0, 'c', 'c')
@@ -3493,46 +3641,32 @@ ui.btn_pri = ui.button_primary
 
 	<tooltip>         text  target  align  side  kind  icon_visible
 	<toaster>         side  align  timeout  spacing
-	<list>
 	<checklist>
 	<menu>
 	<tabs>            tabs_side  auto_focus  selected_item_id
-	<[v]split>        fixed_side  fixed_size  resizeable  min_size
 	<action-band>
 	<dlg>
-	<toolbox>
 	<slides>
 	<md>
 	<pagenav>
-	<label>
 	<info>
 	<erors>
-	<checkbox>
-	<toggle>
-	<radio>
-	<slider>
 	<range-slider>
 	<input-group>
-	<labelbox>
-	<input>
 	<textarea>
 	<[v]select-button>
 	<textarea-input>
-	<text-input>
 	<pass-input>
 	<num-input>
 	<tags-box>
 	<tags-input>
-	<dropdown>
 	<check-dropdown>
-	<calendar>
 	<range-calendar>
 	<ranges-calendar>
 	<date-input>
 	<timeofday-input>
 	<datetime-input>
 	<date-range-input>
-	<html-input>
 */
 
 // split ---------------------------------------------------------------------
@@ -3547,6 +3681,7 @@ function split(hv, id, size, unit, fixed_side,
 	let horiz = hv == 'h'
 	let W = horiz ? 'w' : 'h'
 	let [state, dx, dy] = ui.drag(id)
+	keepalive(id)
 	let s = ui.state_map(id)
 	let cs = ui.captured(id)
 	let max_size = (cs?.get(W) ?? s.get(W) ?? 1/0) - splitter_w
@@ -3606,7 +3741,7 @@ ui.splitter = function() {
 	let id = scope_get('split_id')
 	let collapsed = scope_get('split_collapsed')
 	let fr2 = scope_get('split_fr2')
-	let b = ui.border('intense', ui.hit(id) ? 'hover' : 'normal')
+	let b = ui.border_color('intense', ui.hit(id) ? 'hover' : 'normal')
 
 	if (hv == 'h') {
 		ui.stack('', 0, 'l', 's', 1, 0)
@@ -3614,11 +3749,11 @@ ui.splitter = function() {
 				ui.ml(-hit_distance / 2)
 				ui.stack(id, 0, 'l', 's', hit_distance)
 					ui.stack('', 1, 'c', 's')
-						ui.bb('', null, 'l', b)
+						ui.bb('', null, null, 'l', b)
 					ui.end_stack()
 					if (collapsed) {
 						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
-							ui.bb('', null, 'lr', b)
+							ui.bb('', null, null, 'lr', b)
 						ui.end_stack()
 					}
 				ui.end_stack()
@@ -3630,11 +3765,11 @@ ui.splitter = function() {
 				ui.mt(-hit_distance / 2)
 				ui.stack(id, 0, 's', 't', 0, hit_distance)
 					ui.stack('', 1, 's', 'c')
-						ui.bb('', null, 't', b)
+						ui.bb('', null, null, 't', b)
 					ui.end_stack()
 					if (collapsed) {
 						ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
-							ui.bb('', null, 'tb', b)
+							ui.bb('', null, null, 'tb', b)
 						ui.end_stack()
 					}
 				ui.end_stack()
@@ -3666,29 +3801,36 @@ ui.end_vsplit = function() { end_split('v') }
 
 ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', fr, 's', 's')
-		ui.bb('', 'input', 1, ui.border('intense', ui.focused(id) ? 'hover' : 'normal'))
+		ui.bb('', 'input', null, 1, 'intense', ui.focused(id) ? 'hover' : 'normal')
 		ui.p(ui.sp())
 		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(10), min_h, null, true)
 	ui.end_stack()
 }
 
 ui.label = function(for_id, s, fr, align, valign) {
-	ui.p(ui.sp())
-	ui.text('', s, fr, align ?? 'l', valign ?? 'c')
+	let id = for_id+'.label'
+	ui.color('text', (ui.hit(id) || ui.hit(for_id)) ? 'hover' : null)
+	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
+}
+
+ui.radio_label = function(for_id, for_group_id, s, fr, align, valign) {
+	let id = for_id+'.label'
+	ui.color('text', (ui.hit(id) || ui.hit(for_id)) ? 'hover' : null)
+	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
 // list ----------------------------------------------------------------------
 
-ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, item_fr, hv) {
-	ui.hv(hv ?? 'v', fr, gap, align, valign, 120)
-	let focused_item_i = ui.state(id, 'focused_item_i') ?? 0
+function list_update(id, m) {
+	let items = m.get('items')
+	let focused_item_i = m.get('focused_item_i') ?? 0
 	let d = ui.focused(id) && (
 			ui.keydown('arrowdown') &&  1 ||
 			ui.keydown('arrowup'  ) && -1
 		) || 0
 	if (d) {
 		focused_item_i = clamp(focused_item_i + d, 0, items.length-1)
-		ui.state_set(id, 'focused_item_i', focused_item_i)
+		m.set('focused_item_i', focused_item_i)
 	}
 	let i = 0
 	for (let item of items) {
@@ -3696,30 +3838,183 @@ ui.list = function(id, items, fr, gap, align, valign, item_align, item_valign, i
 		if (ui.hit(item_id) && ui.click) {
 			ui.focus(id)
 			focused_item_i = i
-			ui.state_set(id, 'focused_item_i', i)
+			m.set('focused_item_i', i)
 		}
 		i++
 	}
+}
+ui.list = function(id, items, focused_item_i, fr, gap, align, valign, item_align, item_valign, item_fr, hv) {
+	keepalive(id)
+	ui.state_set(id, 'items', items)
+	ui.state_update(id, list_update)
+	focused_item_i = ui.state(id, 'focused_item_i') ?? focused_item_i ?? 0
 	let list_focused = ui.focused(id)
-	i = 0
+	let i = 0
+	ui.hv(hv ?? 'v', fr, gap, align, valign, 120)
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(ui.sp(), ui.sp05())
 		ui.stack(item_id, 0)
 			let item_focused = focused_item_i == i
 			ui.bb('',
+				item_focused ? 'item' : 'bg',
 				item_focused
-					? ui.bg('item', list_focused
-							? 'item-focused item-selected focused'
-							: 'item-focused item-selected')
-					: 'bg')
+					? list_focused
+						? 'item-focused item-selected focused'
+						: 'item-focused item-selected'
+					: null
+			)
 			ui.color('text', ui.hit(item_id) ? 'hover' : null)
-			ui.text('', item, item_fr, item_align ?? 'l', item_valign ?? 'c')
+		ui.text('', item, item_fr, item_align ?? 'l', item_valign ?? 'c')
 		ui.end_stack()
 		i++
 	}
 	ui.end()
 	return items[focused_item_i]
+}
+
+// polyline ------------------------------------------------------------------
+
+function set_points(cx, x0, y0, a, pi1, pi2, closed) {
+	cx.beginPath()
+	let x = a[pi1+0]
+	let y = a[pi1+1]
+	cx.moveTo(x0 + x, y0 + y)
+	for (let i = pi1 + 2; i < pi2; i += 2) {
+		let x = a[i+0]
+		let y = a[i+1]
+		cx.lineTo(x0 + x, y0 + y)
+	}
+	if (closed)
+		cx.closePath()
+}
+
+ui.widget('polyline', {
+	create: function(cmd,
+			id, points, closed,
+			fill_color, fill_color_state,
+			stroke_color, stroke_color_state
+	) {
+		if (isstr(points))
+			points = points.split(/\s+/).map(num)
+		assert(points.length % 2 == 0, 'invalid point array')
+		if (!points.length)
+			return
+		return ui_cmd(cmd, id, ui.ct_i(), closed, fill_color, fill_color_state,
+			stroke_color, stroke_color_state, ...points)
+	},
+	measure: function(a, i, axis) {
+		if (!axis) {
+			let pi1 = i+7
+			let pi2 = cmd_end_i(a, i)
+			let x1 =  1/0
+			let y1 =  1/0
+			let x2 = -1/0
+			let y2 = -1/0
+			for (let i = pi1; i < pi2; i += 2) {
+				let x = a[i+0]
+				let y = a[i+1]
+				x1 = min(x1, x)
+				y1 = min(y1, y)
+				x2 = max(x2, x)
+				y2 = max(y2, y)
+			}
+			add_ct_min_wh(a, 0, x2-x1, 0)
+			add_ct_min_wh(a, 1, y2-y1, 0)
+		}
+	},
+	draw: function(a, i) {
+		let pi1 = i+7
+		let pi2 = cmd_end_i(a, i)
+		let ct_i = a[i+1]
+		let x0 = a[ct_i+0]
+		let y0 = a[ct_i+1]
+		let closed             = a[i+2]
+		let fill_color         = a[i+3]
+		let fill_color_state   = a[i+4]
+		let stroke_color       = a[i+5]
+		let stroke_color_state = a[i+6]
+		if (fill_color) {
+			set_points(cx, x0, y0, a, pi1, pi2, closed)
+			fill_color = ui.bg_color(fill_color, fill_color_state)
+			cx.fillStyle = fill_color[0]
+			cx.fill()
+		}
+		if (stroke_color) {
+			set_points(cx, x0, y0, a, pi1, pi2, closed)
+			stroke_color = ui.fg_color(stroke_color, stroke_color_state)
+			cx.strokeStyle = stroke_color[0]
+			cx.lineWidth = 1
+			cx.stroke()
+		}
+	},
+	hit: function(a, i) {
+		let id = a[i+0]
+		if (!id)
+			return
+		let ct_i = a[i+1]
+		let x0 = a[ct_i+0]
+		let y0 = a[ct_i+1]
+		let closed = a[i+2]
+		let pi1 = i+7
+		let pi2 = cmd_end_i(a, i)
+		set_points(cx, x0, y0, a, pi1, pi2, closed)
+		if (cx.isPointInPath(mx, my)) {
+			hit_set_id(id)
+			return true
+		}
+	},
+})
+
+// dropdown ------------------------------------------------------------------
+
+ui.dropdown = function(id, items, focused_item_i, fr, min_w, min_h) {
+	keepalive(id)
+	let fi = ui.state(id+'.list', 'focused_item_i') ?? focused_item_i
+	let s = fi != null ? assert(items[fi]) : ''
+	let focused = ui.focused(id)
+	let open = true
+
+	ui.stack('', fr, 's', 's', min_w ?? ui.em(10), min_h)
+
+		// placeholder for popup
+		ui.p(ui.sp())
+		ui.text('', '', 1, 'l', 'c')
+
+		if (open)
+			ui.popup(id+'.popup', layer_popup, null, 'il', 's', 0, 0, 'constrain change_side')
+
+		ui.v()
+
+			if (open)
+				ui.shadow('picker')
+			ui.bb('', 'input', null, 1, 'intense', focused ? 'hover' : null)
+
+			ui.stack(id)
+				ui.p(ui.sp())
+				ui.h(1, ui.sp())
+					ui.text('', s, 1, 'l', 'c')
+					ui.stack('', 0)
+						ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
+					ui.end_stack()
+				ui.end_h()
+			ui.end_stack()
+
+			if (open) {
+				ui.mt(1)
+					ui.stack()
+						ui.bb('', 'bg2', null, 1, 'intense')
+						ui.m(1)
+						ui.list(id+'.list', items, focused_item_i)
+					ui.end_stack()
+			}
+
+		ui.end_v()
+
+		if (open)
+			ui.end_popup()
+
+	ui.end_stack()
 }
 
 // drag & drop ---------------------------------------------------------------
@@ -3760,6 +4055,7 @@ ui.drag = function(id, move, dx0, dy0) {
 
 ui.toolbox = function(id, title, align, x0, y0, target_i) {
 
+	keepalive(id)
 	let align_start = parse_align(align || '[') == ALIGN_START
 	let [dstate, dx, dy] = ui.drag(id+'.title')
 	let s = ui.state_map(id)
@@ -3779,21 +4075,23 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 	ui.m(mx1, my1, mx2, my2)
 	ui.popup(id+'.popup', layer_popup, target_i ?? 'screen', 'it', align, min_w, min_h, 'constrain')
 		ui.p(1)
-		ui.bb('', 'bg1', 1, 'intense', ui.sp075())
+		ui.bb('', 'bg1', null, 1, 'intense', null, ui.sp075())
 		ui.stack()
+			scope_set('toolbox_id', id)
 			ui.v() // title / body split
 				ui.h(0) // title bar
 					ui.stack(id+'.title')
-						ui.bb('', 'bg3', 'ltr', null, ui.sp075() * 0.75)
+						ui.bb('', 'bg3', null, 0, null, null, ui.sp075() * 0.75)
 						ui.p(ui.sp2(), ui.sp())
 						ui.text('', title, 0, 'l')
 					ui.end_stack()
 				ui.end_h()
 }
 
-ui.end_toolbox = function(id) {
+ui.end_toolbox = function() {
 			ui.end_v()
-			ui.resizer(id)
+			pr(scope_get('toolbox_id'))
+			ui.resizer(scope_get('toolbox_id'))
 		ui.end_stack()
 	ui.end_popup()
 }
@@ -3845,6 +4143,7 @@ let cursors = {
 ui.widget('resizer', {
 	create: function(cmd, ct_id, id) {
 		id = id || ct_id+'.resizer'
+		keepalive(id)
 		return ui_cmd_box(cmd, 1, 's', 's', 0, 0, id, ct_id)
 	},
 	position: function(a, i, axis, x, w) {
@@ -3917,6 +4216,263 @@ ui.widget('resizer', {
 
 }
 
+// toggle & checkbox ---------------------------------------------------------
+
+ui.bg_style('*', 'toggle'      , '*', 'bg2')
+ui.bg_style('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
+ui.bg_style('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
+ui.bg_style('*', 'toggle-thumb', '*', 'text')
+
+let TOGGLE_ID = S-1
+
+let toggle = {}
+
+function toggle_toggle(id) {
+	let clicked = (ui.hit(id) || ui.hit(id+'.label')) && ui.click
+	let on
+	if (clicked) {
+		on = !ui.state(id, 'on')
+		ui.state_set(id, 'on', on)
+	}
+	return on
+}
+
+toggle.create = function(cmd, id, fr, align, valign, min_w, min_h) {
+	keepalive(id)
+	let on = toggle_toggle(id)
+	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
+		min_w ?? ui.em(2.5),
+		min_h ?? ui.em(1.5),
+		id)
+	return on
+}
+toggle.ID = TOGGLE_ID
+
+toggle.draw = function(a, i) {
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let id = a[i+TOGGLE_ID]
+
+	let hit = ui.hit(id) || ui.hit(id+'.label')
+	let on = ui.state(id, 'on')
+
+	// button
+
+	cx.beginPath()
+	cx.roundRect(x, y, w, h, 1000)
+	let state =
+		(on  ? STATE_ITEM_SELECTED : 0) |
+		(hit ? STATE_HOVER         : 0)
+	cx.fillStyle = ui.bg_color('toggle', state)[0]
+	cx.fill()
+
+	// thumb
+
+	cx.beginPath()
+	let cx1 = on ? x + w - h / 2 : x + h / 2
+	let cy1 = y + h / 2
+	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
+	cx.closePath()
+	ui.set_shadow('button')
+	cx.fillStyle = ui.bg_color('toggle-thumb', hit ? 'hover' : null)[0]
+	cx.fill()
+
+}
+
+ui.box_widget('toggle', toggle)
+
+// checkbox ------------------------------------------------------------------
+
+let checkbox = assign({}, toggle)
+
+checkbox.create = function(cmd, id, fr, align, valign, min_w, min_h) {
+	return toggle.create(cmd, id, fr, align, valign,
+		min_w ?? ui.em(1.5),
+		min_h ?? ui.em(1.5),
+	)
+}
+
+checkbox.draw = function(a, i) {
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let id = a[i+TOGGLE_ID]
+
+	let hit = ui.hit(id) || ui.hit(id+'.label')
+	let on = ui.state(id, 'on')
+
+	let state =
+		(on  ? STATE_ITEM_SELECTED : 0) |
+		(hit ? STATE_HOVER         : 0)
+	let bg = ui.bg_color('toggle', state)
+	let fg = ui.fg_color('text', hit ? 'hover' : null, ui.bg_is_dark(bg) ? 'dark' : 'light')
+
+	// check box
+
+	cx.beginPath()
+	cx.roundRect(x, y, w, h, 2)
+	cx.fillStyle = bg[0]
+	cx.fill()
+
+	// check mark
+
+	cx.beginPath()
+	cx.save()
+	cx.translate(x, y)
+	cx.scale(1/w, 1/h)
+	cx.scale(20, 20)
+	cx.translate(1, 0)
+	cx.moveTo(4, 11)
+	cx.lineTo(8, 15)
+	cx.lineTo(16, 6)
+	cx.strokeStyle = fg[0]
+	cx.lineWidth = 1.5
+	cx.lineCap = 'round'
+	cx.lineJoin = 'round'
+	cx.setLineDash([20])
+	cx.lineDashOffset = on ? 0 : 20 // TODO: animate
+	cx.stroke()
+	cx.restore()
+
+}
+
+ui.box_widget('checkbox', checkbox)
+
+// radio ---------------------------------------------------------------------
+
+let radio = assign({}, checkbox)
+
+let RADIO_GROUP_ID = S+0
+
+//|| ui.hit(id+'.label')
+radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
+	keepalive(id)
+	keepalive(group_id)
+	let clicked = (ui.hit(group_id) || ui.hit(group_id+'.label')) && ui.click
+	let clicked_id = clicked && ui.hovers(group_id).get('id')
+	let on = clicked ? clicked_id == id && !ui.state(id, 'on') : null
+	if (clicked) {
+		ui.state_set(id, 'on', false)
+		ui.state_set(clicked_id, 'on', true)
+	}
+	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
+		min_w ?? ui.em(1.5),
+		min_h ?? ui.em(1.5),
+		id,
+		group_id)
+	return on
+}
+
+radio.draw = function(a, i) {
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let id = a[i+TOGGLE_ID]
+
+	let hit = ui.hit(id) || ui.hit(id+'.label')
+	let on = ui.state(id, 'on')
+
+	let cx1 = x + w / 2
+	let cy1 = y + h / 2
+
+	// button
+
+	cx.beginPath()
+	cx.arc(cx1, cy1, h * .5, 0, 2 * PI)
+	cx.fillStyle = ui.bg_color('toggle', hit ? 'hover' : null)[0]
+	cx.fill()
+
+	// bullet
+
+	cx.beginPath()
+	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI) // TODO: animate radius
+	cx.closePath()
+	ui.set_shadow('button')
+	cx.fillStyle = ui.bg_color('toggle-thumb', hit ? 'hover' : null)[0]
+	cx.fill()
+
+}
+
+radio.hit = function(a, i) {
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let id = a[i+TOGGLE_ID]
+	let group_id = a[i+RADIO_GROUP_ID]
+	if (hit_rect(x, y, w, h)) {
+		hit_set_id(id)
+		ui.hit_set(group_id, 'id', id)
+		return true
+	}
+}
+
+ui.box_widget('radio', radio)
+
+// slider --------------------------------------------------------------------
+
+/*
+ui.box_widget('slider', {
+
+	create: function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
+		let clicked = ui.hit(id) && ui.click
+		ui_cmd_box(cmd, fr, align ?? 's', valign ?? 'c',
+			min_w ?? ui.em(2),
+			min_h ?? ui.em(1.5),
+			id,
+			)
+	},
+	draw: function(a, i) {
+
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
+		let id = a[i+S-1]
+
+	},
+
+})
+*/
+
+ui.bg_style('dark', 'red', 'normal', 0, 1, .5)
+
+ui.slider = function(id, fr, align, valign, min_w, min_h) {
+	ui.p(ui.sp())
+	ui.stack(id, fr, align, valign, min_w, min_h)
+
+		ui.stack(id+'.shaft', 0, 's', 'c', ui.em(), ui.em() / 2)
+			let hit_shaft = ui.hit(id+'.shaft')
+			ui.bb('', 'bg2', hit_shaft ? 'hover' : null, 1, 'light', null, 1000)
+		ui.end_stack()
+
+		ui.stack(id+'.thumb', 0, 'l', 'c', ui.em(), ui.em())
+			let hit_thumb = ui.hit(id+'.thumb')
+			ui.bb('', 'link', hit ? 'hover' : null, 1, 'light', null, 1000)
+			if (hit_thumb || hit_shaft) {
+				ui.popup(id+'.popup', layer_popup, null, 't', 'c', 0, 0, 'constrain change_side')
+					ui.bb_tooltip('', 'bg2')
+					ui.text('', '1234')
+				ui.end_popup()
+			}
+		ui.end_stack()
+
+	ui.end_stack()
+}
+
+// calendar ------------------------------------------------------------------
+
+ui.calendar = function(id, fr, align, valign, min_w, min_h) {
+
+}
+
 // blit'able -----------------------------------------------------------------
 
 ui.image_data = function(id, key, w, h) {
@@ -3954,6 +4510,8 @@ function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 ui.widget('sat_lum_square', {
 
 	create: function(cmd, id, hue, sat, lum) {
+
+		keepalive(id)
 
 		hue = hue ?? 0
 		sat = sat ?? .5
@@ -4036,7 +4594,7 @@ ui.widget('sat_lum_square', {
 		let h = a[ct_i+3]
 
 		let cs = ui.captured(id)
-		if (cs || (!captured_id && hit_rect(x, y, w, h)))
+		if (cs || (!ui.captured_id && hit_rect(x, y, w, h)))
 			hit_set_id(id)
 		let hs = ui.hovers(id)
 		if (hs) {
@@ -4074,6 +4632,7 @@ ui.widget('hue_bar', {
 
 	create: function(cmd, id, hue) {
 
+		keepalive(id)
 		ui.state_set_default(id, 'hue', hue)
 
 		if (ui.focused(id)) {
@@ -4138,7 +4697,7 @@ ui.widget('hue_bar', {
 		let h = a[ct_i+3]
 
 		let cs = ui.captured(id)
-		if (cs || (!captured_id && hit_rect(x, y, w, h)))
+		if (cs || (!ui.captured_id && hit_rect(x, y, w, h)))
 			hit_set_id(id)
 		let hs = ui.hovers(id)
 		if (hs)
@@ -4194,7 +4753,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
-				ui.bb('', ui.hsl(hue, sat, lum))
+				ui.bb('', [ui.hsl(hue, sat, lum)])
 			ui.end_aspect_box()
 			ui.record_play(sl_square)
 			ui.record_play(hue_bar)
@@ -4259,6 +4818,7 @@ ui.widget('bg_dots', {
 		if (!dot_num)
 			return
 
+		keepalive(id)
 		let dots = ui.state(id, 'dots')
 		if (!dots) {
 			dots = []
@@ -4292,7 +4852,7 @@ ui.widget('bg_dots', {
 
 		for (let t of dots) {
 			if (t != dots.mouse_dot) {
-				cx.fillStyle = ui.fg('label')[0]
+				cx.fillStyle = ui.fg_color('label')[0]
 				cx.beginPath()
 				cx.arc(t.x, t.y, 2, 0, Math.PI*2, true)
 				cx.closePath()
@@ -4307,7 +4867,7 @@ ui.widget('bg_dots', {
 				let dp = point_distance(t1, t2) / max_distance
 				if (dp < 1) {
 					let alpha = 1 - dp
-					cx.strokeStyle = ui.hsl_adjust(ui.fg('label'), 1, 1, 1, alpha)
+					cx.strokeStyle = ui.hsl_adjust(ui.fg_color('label'), 1, 1, 1, alpha)
 					cx.lineWidth = 0.8
 					cx.beginPath()
 					cx.moveTo(t1.x, t1.y)
@@ -4349,6 +4909,6 @@ ui.widget('bg_dots', {
 
 // prevent flicker
 theme = themes[ui.default_theme]
-screen.style.background = ui.bg('bg')[0]
+screen.style.background = ui.bg_color('bg')[0]
 
 }()) // module function

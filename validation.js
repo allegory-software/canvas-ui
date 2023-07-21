@@ -37,8 +37,10 @@ const G = window
 const ui = G.ui
 
 const {
-	isstr,
-	obj,
+	isstr, repl,
+	property,
+	assert,
+	obj, map,
 	wordset,
 	empty_array,
 	return_true,
@@ -108,8 +110,10 @@ G.create_validator = function(e) {
 
 	function add_global_rule(rule_name) {
 		let rule = global_rules[rule_name]
-		if (warn_if(!rule, 'unknown validation rule', rule_name))
+		if (!rule) {
+			warn('unknown validation rule', rule_name)
 			return
+		}
 		return add_rule(rule)
 	}
 

@@ -5,23 +5,97 @@
 * {
 	box-sizing: border-box;
 }
+@font-face {
+	font-family: 'far';
+	src: url('fa-regular-400.woff2');
+}
+@font-face {
+	font-family: 'fas';
+	src: url('fa-solid-900.woff2');
+}
 </style>
 </head>
 <body>
-<script src=glue.js global extend></script>
+<script src=glue.js></script>
 <script src=ui.js></script>
 <script src=validation.js></script>
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
 <script>
 
+const { isnum, isobject, isfunc, str, dec, format_kbytes } = glue
+
 let pr = console.log
 
 let tuts = []
 let demos = []
 
+demos.dropdown = `
+items = window.items || ['item1', 'item2', 'item3']
+ui.v(1, ui.sp(), 'l', 'c')
+	ui.h(1, ui.sp())
+		ui.label('dd1', 'First Input')
+		ui.dropdown('dd1', items, 1)
+	ui.end_h()
+ui.end_v()
+`
+
+demos.calendar = `
+ui.calendar('cal1')
+`
+
+demos.silder = `
+ui.slider('slider1')
+`
+
+demos.radio = `
+ui.v(0, ui.sp2(), 'c', 'c')
+for (let i = 0; i < 5; i++) {
+	ui.h(0, ui.sp(), 'c', 'c')
+		if (ui.radio('radio'+i, 'radio_group1'))
+			pr('checked', i)
+		ui.label('radio'+i, 'Radio '+i)
+	ui.end_h()
+}
+ui.end_v()
+`
+
+demos.toggle = `
+ui.h(0, ui.sp(), 'c', 'c')
+	let b = ui.toggle('toggle1')
+	if (b !== undefined)
+		pr('toggled', b)
+	ui.label('toggle1', 'Toggle me!')
+ui.end_h()
+`
+
+demos.checkbox = `
+ui.h(0, ui.sp(), 'c', 'c')
+	let b = ui.checkbox('cb1')
+	if (b !== undefined)
+		pr('toggled', b)
+	ui.label('cb1', 'Check me out!')
+ui.end_h()
+`
+
+// grid
+
+let rows = []
+for (let i = 1; i < 20; i++)
+	rows.push([i, 'Foo '+i, 'Le Foo'])
+let r1 = {
+	pk: 'id', can_change_rows: false,
+	fields: [
+		{name: 'id'},
+		{name: 'name'},
+		{name: 'desc', w: 200},
+	],
+	rows: rows,
+}
 demos.grid = `
-ui.grid('g1')
+ui.stack('', 0, 'c', 'c', 200, 500)
+	ui.grid('grid1', r1)
+ui.end_stack()
 `
 
 tuts.text = `
@@ -81,9 +155,12 @@ tuts.bb = `
 
 // ui.shadow() draws a box shadow on the next bb() call.
 
+ui.bg_style    ('*', 'crimson', 'normal', 348, .83, .47)
+ui.border_style('*', 'brown'  , 'normal',   0, .59, .41)
+
 ui.stack('', 0, 'c', 'c', 150, 50)
 	ui.shadow(2, 2, 5, 0, false, 'black')
-	ui.bb('', 'crimson', 'ltrb', 'brown', 10)
+	ui.bb('', 'crimson', null, 'ltrb', 'brown', null, 10)
 	ui.text('', 'Hello World!')
 ui.end()
 `
@@ -94,7 +171,7 @@ tuts.font_size = `
 
 ui.v(0, 20, 'c', 'c')
 	ui.font_size(24)
-	ui.color('teal')
+	ui.color(['teal'])
 	ui.text('', 'Buongiorno!')
 	ui.h(0, 10, 'c')
 		// font and color changes are scoped.
@@ -102,7 +179,7 @@ ui.v(0, 20, 'c', 'c')
 		ui.font('Serif')
 		ui.font_size(42)
 		ui.font_weight('bold')
-		ui.color('green')
+		ui.color(['green'])
 		ui.text('', 'Hello', 0)
 		ui.text('', 'World!', 0)
 	ui.end()
@@ -119,10 +196,10 @@ ui.v(1, 30, 'c', 'c')
 		ui.v(1, 10)
 		for (let valign of ['t', 'b', 'c', 's']) {
 			ui.h(1, 10, 'c', 'c', 30, 30)
-				ui.bb('bg3', null, 1, 'intense')
+				ui.bb('', null, null, 1, 'intense')
 				for (let i = 1; i <= 3; i++) {
 					ui.stack('', 1, align, valign, 10, 10)
-						ui.bb('', 'red')
+						ui.bb('', 'info')
 					ui.end_stack()
 				}
 			ui.end()
@@ -136,10 +213,10 @@ ui.v(1, 30, 'c', 'c')
 		ui.v(1, 10)
 		for (let valign of ['t', 'b', 'c', 's']) {
 			ui.v(1, 10, 'c', 'c', 30, 30)
-				ui.bb('', null, 1, 'intense')
+				ui.bb('', null, null, 1, 'intense')
 				for (let i = 1; i <= 3; i++) {
 					ui.stack('', 1, align, valign, 10, 10)
-						ui.bb('', 'red')
+						ui.bb('', 'info')
 					ui.end_stack()
 				}
 			ui.end()
@@ -156,19 +233,19 @@ ui.h(1, 30)
 for (let hv of ['h', 'v']) {
 	ui.hv(hv, 1, 10, 'c', 'c', 100, 100)
 		ui.stack('', 1)
-			ui.bb('', 'red')
+			ui.bb('', 'info')
 		ui.end_stack()
 		ui.stack('', 2)
-			ui.bb('', 'red')
+			ui.bb('', 'info')
 		ui.end_stack()
 		ui.stack('', 3)
-			ui.bb('', 'red')
+			ui.bb('', 'info')
 		ui.end_stack()
 		ui.stack('', 4)
-			ui.bb('', 'red')
+			ui.bb('', 'info')
 		ui.end_stack()
 		ui.stack('', 0, 's', 's', 100, 100)
-			ui.bb('', 'red')
+			ui.bb('', 'info')
 		ui.end_stack()
 	ui.end()
 }
@@ -285,15 +362,15 @@ ui.v(1, 10, 'c', 'c')
 	let i = 1
 	for (let inner of ['', 'i']) {
 		ui.h(1, 0, 'c', 'c', 200, 100)
-			ui.bb('', null, 1, 'gray')
+			ui.bb('', null, null, 1, 'light')
 			for (let align of ['c', '[', ']']) {
 				ui.m(20, 20)
 				ui.stack()
-					ui.bb('', null, 1, 'gray')
+					ui.bb('', null, null, 1, 'light')
 					for (let side of ['t', 'r', 'b', 'l', 'c']) {
 						if (side != 'c' || inner) {
 							ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
-								ui.bb('', null, 1, 'gray')
+								ui.bb('', null, null, 1, 'intense')
 							ui.end_popup()
 						}
 					}
@@ -311,14 +388,14 @@ for (let align of ['c', '[', ']']) {
 	for (let side of ['t', 'r', 'b', 'l']) {
 		let [x, y, p_i] = ui.drag_point('p'+j+i, 100+j*220, 100+i*120, 'red')
 		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 30, 30)
-			ui.bb('', null, 1, 'light')
+			ui.bb('', null, null, 1, 'light')
 			ui.m(
 				side == 'l' || side == 'r' ? ui.sp2() : 0,
 				side == 't' || side == 'b' ? ui.sp2() : 0,
 			)
 			ui.popup('tt'+j+i, null, ct_i, side, align, 100, 50, 'change_side constrain')
 				ui.shadow(1, 1, 3, 0, false, ui.dark ? 'black' : '#ccc')
-				ui.bb_tooltip('', 'bg2', 'intense', ui.sp1())
+				ui.bb_tooltip('', 'bg2', null, 'intense', null, ui.sp1())
 			ui.end_popup()
 		ui.end_popup()
 		i++
@@ -336,28 +413,28 @@ ui.v(0, 30, 'c', 'c')
 		// both scrollbars
 		ui.sb('sb1', 0, null, null, 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 300, 300)
-				ui.bb('', 'bg1', 1, 'intense')
+				ui.bb('', 'bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// max w/h before showing scrollbar
 		ui.sb('sb2', 0, 'scroll', 'scroll', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 100, 100)
-				ui.bb('', 'bg1', 1, 'intense')
+				ui.bb('', 'bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// hide on x-axis
 		ui.sb('sb3', 0, 'hide', 'auto', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 300, 300)
-				ui.bb('', 'bg1', 1, 'intense')
+				ui.bb('', 'bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// hide on y-axis
 		ui.sb('sb4', 0, 'auto', 'hide', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 300, 300)
-				ui.bb('', 'bg1', 1, 'intense')
+				ui.bb('', 'bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
@@ -368,14 +445,14 @@ ui.v(0, 30, 'c', 'c')
 		// contain on x-axis
 		ui.sb('sb5', 0, 'contain', 'auto', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 200, 200)
-				ui.bb('', 'bg1', 1, 'intense')
+				ui.bb('', 'bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// contain on y-axis
-		ui.sb('sb5', 0, 'auto', 'contain', 'c', 'c', 100, 100)
+		ui.sb('sb6', 0, 'auto', 'contain', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 200, 200)
-				ui.bb('', 'bg1', 1, 'intense')
+				ui.bb('', 'bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
@@ -403,7 +480,7 @@ let test_template = {
 	t: 'v', fr: 2, gap: 20, e: [
 		{t: 'text', id: 't1', s: 'TP Hello!'},
 		{t: 'stack', id: 'st1', fr: 1, e: [
-			{t: 'bb', id: 'r1', bg_color: 'hsl(120deg 50% 16%)'},
+			{t: 'bb', id: 'r1', bg_color: 'bg3'},
 		]},
 	]}
 demos.template = `
@@ -413,7 +490,7 @@ ui.template('tpl1', test_template)
 demos.color_picker = `
 ui.p(ui.sp())
 ui.stack('', 0, 'c', 'c', 400)
-	ui.bb('', null, 1, 'light')
+	ui.bb('', null, null, 1, 'light')
 	ui.color_picker('cp1')
 ui.end_stack()
 `
@@ -427,6 +504,7 @@ demos_array = Object.keys(demos)
 }
 
 let a_length = 0
+let a_strlen = 0
 let dark_mode = true
 ui.frame = function() {
 
@@ -434,38 +512,49 @@ ui.frame = function() {
 
 		ui.p(ui.sp())
 		ui.h(0, ui.sp2(), 's')
-			ui.bb('', null, 'b', 'light')
+			ui.bb('', null, null, 'b', 'light')
+
 			ui.color('label')
 			ui.text('', 'max frame', 0)
 			ui.color('link')
 			ui.text('', (ui.max_frame_duration * 1000).toFixed(1)+' ms', 0, 'r', 'c', 1/0, ui.em(4))
+
 			ui.color('label')
 			ui.text('', 'last frame', 0)
 			ui.color('link')
 			ui.text('', (ui.last_frame_duration * 1000).toFixed(1)+' ms', 0, 'r', 'c', 1/0, ui.em(4))
+
 			ui.color('label')
 			ui.text('', 'a.length', 0)
 			ui.color('link')
 			ui.text('', a_length+'', 0, 'r', 'c', 1/0, ui.em(3))
+
+			ui.color('label')
+			ui.text('', 'JSON', 0)
+			ui.color('link')
+			ui.text('', format_kbytes(a_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
+
 			if (ui.button('btn_light', 'lights')) {
 				dark_mode = !dark_mode
 				ui.redraw()
 			}
 			ui.default_theme = dark_mode ? 'dark' : 'light'
+
 			ui.color('label')
 			ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')
+
 		ui.end_h()
 
 		ui.h()
 
 			ui.sb('demos_list_sb', .2)
-				let demo = ui.list('demos', demos_array)
+				let demo = ui.list('demos_list', demos_array)
 			ui.end_sb()
 
 			let s = (demos[demo] ?? '').trim()
 
-			ui.sb('demo_code', .5)
-				ui.bb('', 'bg1', 'r', 'light')
+			ui.sb('demo_code_sb', .5)
+				ui.bb('', 'bg1', null, 'r', 'light')
 				ui.font('monospace')
 				ui.p(ui.sp4())
 				if (s)
@@ -477,11 +566,97 @@ ui.frame = function() {
 					eval(s)
 			ui.end_stack()
 
+			ui.v(0, 0, 's', 's', 200)
+				ui.bb('', null, null, 1, 'intense')
+
+				ui.stack('', 0)
+					ui.bb('', 'bg2')
+					ui.color('text')
+					ui.p(ui.sp())
+					ui.text('', 'ID STATES', 1, 'l')
+				ui.end_stack()
+				ui.scrollbox('demo_id_states_sb')
+					ui.v(0, 0, 's', '[')
+						for (let [id, m] of ui._id_state_maps) {
+							ui.p(ui.sp(), ui.sp05())
+							ui.color('link')
+							ui.text('', id, 1, 'l')
+							for (let [k, v] of m) {
+								ui.ml(ui.sp2())
+								ui.h(1, ui.sp())
+									let s = isobject(v) || isfunc(v) ? typeof v : str(v)
+									ui.color('text')
+									ui.text('', k, 1, 'l', 'c', 1/0, 0)
+									if (isobject(v) || isfunc(v))
+										ui.color('label')
+									ui.text('', s, 1, 'l', 'c', 1/0, 0)
+								ui.end_h()
+							}
+						}
+					ui.end_v()
+				ui.end_scrollbox()
+
+				ui.bb('', null, null, 1, 'light')
+				ui.stack('', 0)
+					ui.bb('', 'bg2')
+					ui.color('text')
+					ui.p(ui.sp())
+					ui.text('', 'HIT STATES', 1, 'l')
+				ui.end_stack()
+				ui.scrollbox('demo_hit_states_sb', .5)
+					ui.v(0, 0, 's', '[')
+						for (let id of ui._hit_set) {
+							ui.p(ui.sp(), ui.sp05())
+							ui.color('link')
+							ui.text('', id, 1, 'l')
+							let m = ui.hovers(id)
+							if (m) {
+								for (let [k, v] of m) {
+									ui.ml(ui.sp2())
+									ui.h(1, ui.sp())
+										let s = isobject(v) || isfunc(v) ? typeof v : str(v)
+										ui.color('text')
+										ui.text('', k, 1, 'l', 'c', 1/0, 0)
+										if (isobject(v) || isfunc(v))
+											ui.color('label')
+										ui.text('', s, 1, 'l', 'c', 1/0, 0)
+									ui.end_h()
+								}
+							}
+						}
+					ui.end_v()
+				ui.end_scrollbox()
+
+				ui.stack('', 0)
+					ui.bb('', 'bg2')
+					ui.color(ui.captured_id ? 'text' : 'label')
+					ui.p(ui.sp())
+					ui.text('', ui.captured_id ? 'CAP '+ui.captured_id : 'CAPTURED', 1, 'l', 'c', 1/0, 0)
+				ui.end_stack()
+				ui.scrollbox('demo_captured_state_sb', .5)
+					ui.v(0, 0, 's', '[')
+						if (ui.captured_id)
+							for (let [k, v] of ui.captured(ui.captured_id)) {
+								ui.ml(ui.sp2())
+								ui.h(1, ui.sp())
+									let s = isobject(v) || isfunc(v) ? typeof v : str(v)
+									ui.color('text')
+									ui.text('', k, 1, 'l', 'c', 1/0, 0)
+									if (isobject(v) || isfunc(v))
+										ui.color('label')
+									ui.text('', s, 1, 'l', 'c', 1/0, 0)
+								ui.end_h()
+							}
+					ui.end_v()
+				ui.end_scrollbox()
+
+			ui.end_v()
 		ui.end_h()
 
 	ui.end_v()
 
 	a_length = ui.a.length
+	a_strlen = JSON.stringify(ui.a).length
 }
 
 ui.ready()

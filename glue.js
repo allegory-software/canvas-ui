@@ -187,7 +187,7 @@ DATE/TIME PARSING
 
 FILE SIZE FORMATTING
 
-	x.kbytes(x, [dec], [mag], [mul = 1024]) -> s
+	format_kbytes(x, [dec], [mag], [mul = 1024]) -> s
 
 COLORS
 
@@ -1476,19 +1476,19 @@ format_duration = function(ss, format) {  // approx[+s] | long | null
 	let s = abs(ss)
 	if (format == 'approx') {
 		if (s > 2 * 365 * 24 * 3600)
-			return S('n_years', '{0} years', ss / (365 * 24 * 3600).dec())
+			return S('n_years', '{0} years', dec(ss / (365 * 24 * 3600)))
 		else if (s > 2 * 30.5 * 24 * 3600)
-			return S('n_months', '{0} months', (ss / (30.5 * 24 * 3600)).dec())
+			return S('n_months', '{0} months', dec(ss / (30.5 * 24 * 3600)))
 		else if (s > 1.5 * 24 * 3600)
-			return S('n_days', '{0} days', (ss / (24 * 3600)).dec())
+			return S('n_days', '{0} days', dec(ss / (24 * 3600)))
 		else if (s > 2 * 3600)
-			return S('n_hours', '{0} hours', (ss / 3600).dec())
+			return S('n_hours', '{0} hours', dec(ss / 3600))
 		else if (s > 2 * 60)
-			return S('n_minutes', '{0} minutes', (ss / 60).dec())
+			return S('n_minutes', '{0} minutes', dec(ss / 60))
 		else if (s >= 60)
 			return S('one_minute', '1 minute')
 		else if (format == 'approx+s')
-			return S('n_seconds', '{0} seconds', ss.dec())
+			return S('n_seconds', '{0} seconds', dec(ss))
 		else
 			return S('seconds', 'seconds')
 	} else {
@@ -1528,11 +1528,10 @@ let format_kbytes
 {
 let suffixes = ['B', 'K', 'M', 'G', 'T', 'P', 'E']
 let magnitudes = {K: 1, M: 2, G: 3, T: 4, P: 5, E: 6}
-format_kbytes = function(x, dec, mag) {
-	dec = dec || 0
+format_kbytes = function(x, d, mag) {
 	let i = mag ? magnitudes[mag] : clamp(floor(logbase(x, 1024)), 0, suffixes.length-1)
 	let z = x / 1024**i
-	return z.dec(dec) + suffixes[i]
+	return dec(z, d) + suffixes[i]
 }
 }
 
@@ -1540,11 +1539,10 @@ let format_kcount
 {
 let suffixes = ['', 'K', 'M', 'G', 'T', 'P', 'E']
 let magnitudes = {K: 1, M: 2, G: 3, T: 4, P: 5, E: 6}
-format_kcount = function(dec, mag, mul) {
-	dec = dec || 0
+format_kcount = function(d, mag, mul) {
 	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1000)), 0, suffixes.length-1)
 	let z = this / 1000**i
-	return z.dec(dec) + suffixes[i]
+	return dec(z, d) + suffixes[i]
 }
 }
 
@@ -2470,17 +2468,19 @@ n.base       = nm(format_base)
 
 let a = Array.prototype
 
-a.extend            = m(extend                  )
-a.set               = m(array_set               )
-a.insert            = m(insert                  )
-a.remove            = m(remove                  )
-a.remove_value      = m(remove_value            )
-a.remove_values     = m(remove_values           )
-a.move              = m(array_move              )
-a.equals            = m(array_equals            )
-a.binsearch         = m(binsearch               )
-a.uniq_sorted       = m(uniq_sorted             )
-a.remove_duplicates = m(remove_duplicates       )
+// NOTE: making these non-enumerable methods to avoid affecting Object.keys(array).
+
+method(a, 'extend           ', m(extend                  ))
+method(a, 'set              ', m(array_set               ))
+method(a, 'insert           ', m(insert                  ))
+method(a, 'remove           ', m(remove                  ))
+method(a, 'remove_value     ', m(remove_value            ))
+method(a, 'remove_values    ', m(remove_values           ))
+method(a, 'move             ', m(array_move              ))
+method(a, 'equals           ', m(array_equals            ))
+method(a, 'binsearch        ', m(binsearch               ))
+method(a, 'uniq_sorted      ', m(uniq_sorted             ))
+method(a, 'remove_duplicates', m(remove_duplicates       ))
 
 // Map extensions ------------------------------------------------------------
 

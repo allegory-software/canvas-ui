@@ -20,18 +20,17 @@ Rowset structure:
 	ROWSET_ATTR: VAL,                          // rowset attributes, see below.
 }
 
-Loading a rowset into a nav:
+Creating a nav:
 
-	e.rowset = {fields: ..., rows: ...}
+	ui.nav({rowset: {fields: ..., rows: ...}})
 
-		Assign a rowset directly in code. Call reset() to (re)load it!
+		Assign a rowset directly in code.
 
-	e.rowset_name = NAME
+	ui.nav({rowset_name: NAME})
 
 		Loads the rowset from the server at /rowset.json/NAME.
-		If a HTML rowset with id=rowset_NAME is present, loads thats instead.
 
-	e.rowset_url = URL
+	ui.nav({rowset_url: URL})
 
 		Loads the rowset from the server at URL.
 
@@ -145,10 +144,6 @@ Field attributes:
 
 NAV API ----------------------------------------------------------------------
 
-Typing:
-
-	isnav: t
-
 Cell state:
 
 	row[i]             : cell value as last seen on the server (always valid).
@@ -173,8 +168,6 @@ Fields:
 	publishes:
 		e.all_fields_map[col] -> field
 		e.all_fields[fi] -> field
-		e.get_prop('col.ATTR') -> val
-		e.set_prop('col.ATTR', val)
 		e.get_col_attr(col, attr) -> val
 		e.set_col_attr(col, attr, val)
 	announces:
@@ -218,18 +211,6 @@ Tree:
 		e.each_child_row(row, f)
 		e.row_and_each_child_row(row, f)
 		e.expanded_child_row_count(ri) -> n
-
-Rendering:
-	calls:
-		e.update({
-			fields:  fields changed
-			rows:    row count changed
-			vals:    row values changed
-			state:   row/cell state changed
-			sort_order: sort order changed
-			scroll_to_focused_cell: scroll to focused cell
-			enter_edit: enter edit mode
-		})
 
 focusing and selection:
 	config:
@@ -465,12 +446,16 @@ const G = window
 const ui = G.ui
 
 const {
-	num, bool,
-	obj, set, map,
-	return_arg,
-	assign,
+	num, bool, isarray, isstr,
+	assert,
+	strict_sign, round, abs, clamp,
+	obj, set, map, words,
+	do_before, do_after, property, override,
+	assign, assign_opt, attr, empty,
+	noop, return_true, return_arg,
 	memoize,
 	S,
+	display_name,
 	parse_date,
 	format_base,
 } = glue
@@ -555,6 +540,7 @@ G.shared_nav = function(id, opt) {
 		let ln = bare_nav(opt)
 		ln.ref = function() { head.add(this) }
 		ln.unref = function() { this.del() }
+
 		return ln
 	}
 
@@ -601,9 +587,11 @@ let errors_no_messages = []
 errors_no_messages.failed = true
 errors_no_messages.client_side = true
 
-ui.nav = function() {
+ui.nav = function(e) {
 
-	let e = {}
+	e.announce = noop
+	e.disable = noop
+	e.update = noop
 
 	e.override = function(method, func) {
 		this[method] = wrap(this[method], func)
@@ -675,22 +663,15 @@ ui.nav = function() {
 
 	e.ready = false
 
-	e.do_after('init', function() {
+	function init() {
 
-		bind_rowset_name(e.rowset_name, on)
-		update_param_vals()
+		if (e.rowset_name) {
+			bind_rowset_name(e.rowset_name, true)
+			e.rowset_url = v1 ? '/rowset.json/' + e.rowset_name : null
+		}
+
+		// update_param_vals()
 		e.reload()
-		e.update_action_band()
-
-		if (e.dropdown)
-			e.init_as_picker()
-	})
-
-	function init_all() {
-		e.changed_rows = null // set(row)
-		rows_moved = false
-		init_row_validators()
-		init_all_fields()
 	}
 
 	e.free = function() {
@@ -698,29 +679,29 @@ ui.nav = function() {
 		e.announce('ready', false)
 		abort_all_requests()
 		e.unfocus_focused_cell({cancel: true})
-		init_all()
 		e.announce('reset')
-		disable_all(false)
+		bind_rowset_name(e.rowset_name, false)
 	}
 
-	/*
-	e.set_static_rowset = function(rs) {
-		e.rowset = rs
-		e.reload()
-	}
-	e.prop('static_rowset', {})
+	e.reset = function(ev) {
 
-	e.set_row_vals = function() {
-		if (save_barrier) return
-		e.reload()
-	}
-	e.prop('row_vals', {slot: 'app'})
+		abort_all_requests()
 
-	e.set_row_states = function() {
-		if (save_barrier) return
-		e.reload()
+		let fs = e.refocus_state('val') || e.refocus_state('pk')
+		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
+
+		e.changed_rows = null // set(row)
+		rows_moved = false
+		init_row_validators()
+		init_all_fields()
+
+		if (e.dropdown)
+			e.init_as_picker()
+
+		e.refocus(fs)
+
+		e.announce('reset', ev)
 	}
-	e.prop('row_states', {slot: 'app'})
 
 	function bind_rowset_name(name, on) {
 		if (!name)
@@ -738,14 +719,7 @@ ui.nav = function() {
 		}
 	}
 
-	e.set_rowset_name = function(v1, v0) {
-		bind_rowset_name(v0, false)
-		bind_rowset_name(v1, true)
-		e.rowset_url = v1 ? '/rowset.json/' + v1 : null
-		e.reload()
-	}
-	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
-	*/
+	// e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 
 	// fields utils -----------------------------------------------------------
 
@@ -945,13 +919,13 @@ ui.nav = function() {
 
 	function check_field(which, col) {
 		if (col == null) return
-		if (!e.bound) return
-		if (!e.ready) return
 		let field = e.optfld(col)
 		if (!field)
 			warn(which+' "'+col+'" not in rowset "'+e.rowset_name+'"')
 		return field
 	}
+
+	e.all_fields = [] // fields in row value order.
 
 	function init_all_fields() {
 
@@ -959,13 +933,10 @@ ui.nav = function() {
 			for (let field of e.all_fields)
 				free_field(field)
 
-		e.all_fields = [] // fields in row value order.
+		e.all_fields.length = 0
 		e.all_fields_map = obj() // {col->field}
 
-		// not creating fields and rows unless bound because we don't get
-		// events while not attached to DOM so the nav might get stale.
-		let rs = e.bound && e.rowset || empty
-		e.ready = rs != empty
+		let rs = e.rowset
 
 		if (rs.fields)
 			for (let fi = 0; fi < rs.fields.length; fi++)
@@ -993,12 +964,12 @@ ui.nav = function() {
 		init_fields()
 		init_rows()
 
-		if (e.ready)
-			e.announce('ready', true)
+		e.ready = true
+		e.announce('ready', true)
 	}
 
 	function init_tree_fields() {
-		let rs = e.bound && e.rowset || empty
+		let rs = e.rowset
 		e.id_field = check_field('id_col', rs.id_col)
 		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
 			e.id_field = e.pk_fields[0]
@@ -1028,7 +999,6 @@ ui.nav = function() {
 	}
 
 	function flat_changed() {
-		if (!e.bound) return
 		reset_tree()
 		init_tree_fields()
 		init_tree()
@@ -1046,25 +1016,21 @@ ui.nav = function() {
 	// `*_col` properties
 
 	e.set_val_col = function(v) {
-		if (!e.bound) return
 		init_all_fields()
 	}
 	e.prop('val_col', {type: 'col'})
 
 	e.set_tree_col = function() {
-		if (!e.bound) return
 		init_all_fields()
 	}
 	e.prop('tree_col', {type: 'col'})
 
 	e.set_name_col = function(v) {
-		if (!e.bound) return
 		init_all_fields()
 	}
 	e.prop('name_col', {type: 'col'})
 
 	e.set_quicksearch_col = function(v) {
-		if (!e.bound) return
 		e.quicksearch_field = check_field('quicksearch_col', v)
 		reset_quicksearch()
 		e.update({state: true})
@@ -1143,8 +1109,10 @@ ui.nav = function() {
 
 	// all_fields subset in custom order --------------------------------------
 
+	e.fields = []
+
 	function init_fields() {
-		e.fields = []
+		e.fields.length = 0
 		if (e.all_fields.length)
 			for (let col of cols_array()) {
 				let field = check_field('col', col)
@@ -1290,7 +1258,7 @@ ui.nav = function() {
 		let pv
 		for (let [param_nav, pmap] of e.params) {
 			let te = isstr(param_nav) ? window[param_nav] : param_nav
-			if (!te || !te.bound)
+			if (!te)
 				return false
 			let pv1 = []
 			if (te.isnav) {
@@ -1371,6 +1339,7 @@ ui.nav = function() {
 		return e.params.has(te) || (te.id && e.params.has(te.id))
 	}
 
+	/*
 	e.listen('selected_rows_changed', function(te) {
 		if (!e.params)
 			return
@@ -1424,6 +1393,7 @@ ui.nav = function() {
 				}
 		}
 	})
+	*/
 
 	// tabname ----------------------------------------------------------------
 
@@ -1515,7 +1485,7 @@ ui.nav = function() {
 		free_all_rows()
 		e.do_update_load_fail(false)
 		update_indices('invalidate')
-		e.all_rows = e.bound && e.rowset && (
+		e.all_rows = e.rowset && (
 				   e.deserialize_all_row_states(e.row_states)
 				|| e.deserialize_all_row_vals(e.row_vals)
 				|| e.deserialize_all_row_vals(e.rowset.row_vals)
@@ -2536,9 +2506,6 @@ ui.nav = function() {
 	}
 
 	function sort_rows() {
-		if (!e.bound)
-			return
-
 		let must_create_rows = !e.rows || !order_by_map.size
 		let must_sort = !!order_by_map.size
 		let cmp = row_comparator(order_by_map)
@@ -3285,82 +3252,6 @@ ui.nav = function() {
 		return false
 	}
 
-	let disabled_widgets
-	function disable_all(disabled) {
-		disabled = !!disabled
-		if ((disabled_widgets != null) == disabled)
-			return
-
-		if (!disabled) {
-			for (let ce of disabled_widgets)
-				ce.disable(e, disabled)
-			disabled_widgets = null
-			return
-		}
-
-		if (e.hidden)
-			return // bare nav
-
-		let all_widgets = document.body.$('.widget')
-		let skip = set()
-		// skip self
-		skip.add(e)
-		// skip others with same nav or same edit group
-		for (let ce of all_widgets) {
-			if (e._nav && ce._nav == e)
-				skip.add(ce)
-			if (e.edit_group && ce.edit_group == e.edit_group)
-				skip.add(ce)
-		}
-		// skip parents of skipped
-		let skip_parents = set()
-		for (let pe of skip) {
-			while (pe) {
-				if (pe.initialized)
-					skip_parents.add(pe)
-				pe = pe.parent
-			}
-		}
-		// skip children of skipped
-		let skip_all = set(skip)
-		for (let se of skip) {
-			for (let ce of se.$('.widget'))
-				skip_all.add(ce)
-		}
-		// skip popups of skipped and of their children
-		let skip_popups = set()
-		for (let ce of $('.widget.popup'))
-			for (let se of skip_all)
-				if (se.contains(ce))
-					skip_popups.add(ce)
-		skip_all.addset(skip_popups)
-		skip_all.addset(skip_parents)
-		// finally, disable the rest
-		disabled_widgets = []
-		for (let ce of all_widgets) {
-			if (!skip_all.has(ce)) {
-				ce.disable(e, disabled)
-				disabled_widgets.push(ce)
-			}
-		}
-
-	}
-
-	document.on('stopped_event', e, function(ev) {
-		if (disabled_widgets == null)
-			return
-		if (ev.type != 'pointerdown')
-			return
-		if (!ev.target.effectively_disabled)
-			return
-		if (e.contains(ev.target))
-			return // disabled but inside self
-		if (e.action_band) {
-			e.action_band.buttons.save.draw_attention()
-			e.action_band.buttons.cancel.draw_attention()
-		}
-	})
-
 	e.enter_edit = function(editor_state, focus) {
 		let row = e.focused_row
 		let field = e.focused_field
@@ -3533,6 +3424,7 @@ ui.nav = function() {
 			init_lookup_nav(field, ln)
 	}
 
+	/*
 	e.listen('reset', function(ln) {
 		for (let field of e.all_fields) {
 			if (ln == field.lookup_nav) {
@@ -3574,6 +3466,7 @@ ui.nav = function() {
 	e.listen('col_vals_changed', function(ln, ln_field) {
 		check_lookup_field_changed(ln, ln_field)
 	})
+	*/
 
 	// cell value multi-target rendering --------------------------------------
 
@@ -4200,25 +4093,6 @@ ui.nav = function() {
 
 	// loading ----------------------------------------------------------------
 
-	e.reset = function(ev) {
-
-		if (!e.bound)
-			return
-
-		abort_all_requests()
-
-		let fs = e.refocus_state('val') || e.refocus_state('pk')
-		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
-
-		init_all()
-
-		e.update({fields: true, rows: true})
-		e.refocus(fs)
-
-		e.announce('reset', ev)
-
-	}
-
 	// compress param_vals into a value array for single-key pks.
 	function param_vals_filter() {
 		if (!e.param_vals)
@@ -4249,9 +4123,6 @@ ui.nav = function() {
 	e.reload = function(opt) {
 
 		opt = opt || empty
-
-		if (!e.bound)
-			return
 
 		if (!e.rowset_url || e.param_vals === false) {
 			// client-side rowset or param vals not available: reset it.
@@ -4767,8 +4638,6 @@ ui.nav = function() {
 	}
 
 	e.do_update_load_fail = function(on, error, type, status, message, body) {
-		if (!e.bound)
-			return
 		if (type == 'abort')
 			e.load_overlay(false)
 		else
@@ -5034,8 +4903,6 @@ ui.nav = function() {
 		let show = !!(e.action_band_visible != 'auto' || e.changed_rows)
 		ab.update({show: show})
 
-		disable_all(!!(e.changed_rows && e.changed_rows.size))
-
 	}
 
 	// quick-search -----------------------------------------------------------
@@ -5101,22 +4968,6 @@ ui.nav = function() {
 	// e.prop('row_display_val_template_name', {attr: 'row_display_val_template'})
 
 	e.draw_row = function(row, cx) { // stub
-		if (isnode(cx)) {
-			if (window.template) { // have webb_spa.js
-				let ts = e.row_display_val_template
-				if (!ts) {
-					let tn = e.row_display_val_template_name
-					if (tn)
-						ts = template(tn)
-					else
-						ts = template(e.id + '_item') || template(e.tag + '_item')
-				}
-				if (ts) {
-					cx.unsafe_html = render_string(ts, row && e.serialize_row_vals(row))
-					return true
-				}
-			}
-		}
 		if (!row)
 			return
 		let field = e.display_field
@@ -5131,8 +4982,9 @@ ui.nav = function() {
 				e.fire('val_picked', ev)
 	}
 
-	init_all()
+	init()
 
+	return e
 }
 
 /* view-less nav -------------------------------------------------------------
@@ -5209,7 +5061,6 @@ ui.make_nav_data_widget = function() {
 	// NOTE: internal nav takes priority to external nav. This decision is
 	// arbitrary, but also more stable (external nav can go anytime).
 	function get_nav() {
-		if (!e.bound) return
 		if (e.rowset_name || e.rowset) { // internal
 			if (nav && nav._internal
 				&& ((e.rowset_name && nav.rowset_name == e.rowset_name) ||
@@ -5231,7 +5082,7 @@ ui.make_nav_data_widget = function() {
 			nav = nav1
 			bind_nav(true)
 		}
-		e.ready = !!(e.bound && (!e.nav_based || nav))
+		e.ready = !!(!e.nav_based || nav)
 	}
 
 	e.on_bind(update_nav)
@@ -5301,7 +5152,7 @@ ui.make_nav_col_widget = function() {
 			nav = nav1
 			bind_field(true)
 		}
-		e.ready = !!(e.bound && (!e.nav_based || field))
+		e.ready = !!(!e.nav_based || field)
 	}
 
 	function update_field() {
@@ -5612,10 +5463,6 @@ all_field_types.fixed_width = 0
 all_field_types.draw_text = function(s, cx) {
 	if (!cx)
 		return s
-	if (isnode(cx)) {
-		cx.set(s)
-		return true
-	}
 	cx.font = cx.text_font
 	if (cx.measure) {
 		cx.measured_width = cx.measureText(s).width + this.fixed_width
@@ -5708,11 +5555,6 @@ filesize.to_text = function(s) {
 filesize.draw = function(x, cx) {
 	let small = this.is_small(x)
 	let s = this.to_text(x)
-	if (isnode(cx)) {
-		cx.set(s)
-		cx.class('dba-insignificant-size', small)
-		return true
-	}
 	if (cx) {
 		if (small)
 			cx.fg_text = cx.fg_disabled
@@ -5762,12 +5604,6 @@ date.to_text = function(v) {
 
 let inh_draw = all_field_types.draw
 date.draw = function(v, cx) {
-	if (isnode(cx)) {
-		cx.attr('timeago', !!this.timeago)
-		cx.time = t
-		cx.set(t.timeago())
-		return true
-	}
 	return inh_draw.call(this, v, cx)
 }
 
@@ -5830,10 +5666,6 @@ let bool = {align: 'center', min_w: 28, w: 40, is_bool: true}
 field_types.bool = bool
 
 bool.draw_null = function(cx) {
-	if (isnode(cx)) {
-		cx.class('fa fa-square', true)
-		return true
-	}
 	if (cx) {
 		let text_font = cx.text_font
 		cx.text_font = cx.icon_font
@@ -5846,11 +5678,6 @@ bool.draw_null = function(cx) {
 bool.draw = function(v, cx) {
 	if (!isbool(v))
 		return bool.draw_null.call(this, cx)
-	if (isnode(cx)) {
-		cx.class('fa fa-check', v == true)
-		cx.class('fa-square', false)
-		return true
-	}
 	if (cx) {
 		if (!v) {
 			if (cx.measure)
