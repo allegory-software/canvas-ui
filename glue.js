@@ -51,8 +51,11 @@ MATH
 	lerp(x, x0, x1, y0, y1)
 	mod(a, b)
 	nextpow2(x)
+
+NUMBER FORMATTING
+
 	dec(x, [decimals])
-	base(x, [base], [digits])
+	format_base(x, [base], [digits])
 
 CALLBACKS
 

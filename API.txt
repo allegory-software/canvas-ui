@@ -1,0 +1,45 @@
+
+USING
+
+	ui.frame = function() {
+
+		ui.text('', 'Hello World!')
+
+	}
+
+ui.frame API
+
+ FLEX
+
+	ui.hv     ('h v', fr=1, gap=0, align='s', valign='s', min_w=0, min_h=0)  ... ui.end_hv()
+	ui.h      (       fr=1, gap=0, align='s', valign='s', min_w=0, min_h=0)  ... ui.end_h()
+	ui.v      (       fr=1, gap=0, align='s', valign='s', min_w=0, min_h=0)  ... ui.end_v()
+		align  : 'stretch center left right s c l r [ ]'
+		valign : 'stretch center top bottom s c t b [ ]'
+
+ OVERLAYS
+
+	ui.stack  (id='', fr=1, gap=0, align='s', valign='s', min_w=0, min_h=0) ...
+
+ OVERFLOW
+
+	ui.scrollbar (id, overflow_x='auto', overflow_y='auto', align='s', valign='s', min_w=0, min_h=0, sx=0, sy=0)
+		overflow_x|_y : 'auto hide scroll contain'
+
+ TEXT
+
+	ui.text   (id='', text, fr=1, align='c', valign='c', max_min_w=-1, min_w=-1, min_h=-1, wrap=null, editable=false)
+		wrap : 'line word'
+
+ BORDER & BACKGROUND
+
+	ui.bb     (id='',
+					bg_color=null, bg_state=null,
+					border_sides=null, border_color=null, border_color_state=null, border_radius=0)
+
+ BUTTONS
+
+	ui.button         (id='', text, style, align='c', valign)
+	ui.button_primary (id='', text, align='c', valign='c')
+
+

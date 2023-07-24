@@ -1,3 +1,4 @@
+
 THINK
 
 - solve the IMGUI achilles heel:
@@ -6,6 +7,7 @@ THINK
 			- cmd record buffers
 			- events
 			- forced re-layouting without redrawing
+			- update callback when reading state(id)
 
 - toolbox z-index
 - toolbox move by all sides, with all alignment combinations

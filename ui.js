@@ -6,11 +6,10 @@
 LOADING
 
 	<body>
-		<script src=ui.js [global]>
+		<script src=ui.js [global]>       <-- put it inside the <body> tag!
 	</body>
 
-	NOTE: You must put it inside the <body> tag!
-	NOTE: The global flag publishes all as globals instead of in the ui namespace.
+	global flag:   dump the `ui` namespace into `window`.
 
 */
 
@@ -29,8 +28,7 @@ const {
 	repl,
 	isarray, isstr, isnum,
 	assert, pr, trace,
-	floor, ceil, round, max, min, abs, clamp,
-	lerp,
+	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str,
 	obj, set, map, array,
 	assign,
@@ -42,6 +40,7 @@ const {
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
 	PI,
+	runevery,
 } = glue
 
 let map_freelist   = () => freelist(map, m => m.clear())
@@ -444,7 +443,7 @@ ui.ready = function() {
 	resize_canvas()
 }
 
-// input event handling ------------------------------------------------------
+// mouse events --------------------------------------------------------------
 
 ui.pressed = false
 ui.click = false
@@ -477,7 +476,6 @@ canvas.addEventListener('pointerdown', function(ev) {
 		ui.click = true
 		ui.pressed = true
 		this.setPointerCapture(ev.pointerId)
-		hit_all()
 		animate()
 	}
 })
@@ -488,14 +486,12 @@ canvas.addEventListener('pointerup', function(ev) {
 		ui.pressed = false
 		ui.clickup = true
 		this.releasePointerCapture(ev.pointerId)
-		hit_all()
 		animate()
 	}
 })
 
 canvas.addEventListener('pointermove', function(ev) {
 	update_mouse(ev)
-	hit_all()
 	animate()
 })
 
@@ -512,7 +508,6 @@ canvas.addEventListener('pointerleave', function(ev) {
 		ui.mouseleave = true
 	}
 	ui.set_cursor()
-	hit_all()
 	animate()
 })
 
@@ -522,9 +517,10 @@ canvas.addEventListener('wheel', function(ev) {
 		return
 	ui.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
 	update_mouse(ev)
-	hit_all()
 	animate()
 })
+
+// mouse capturing -----------------------------------------------------------
 
 let capture_state = map()
 
@@ -535,7 +531,7 @@ ui.capture = function(id) {
 		return
 	if (!ui.pressed)
 		return
-	if (!ui.realhit(id))
+	if (!ui.hovers(id))
 		return
 	ui.captured_id = id
 	capture_state.clear()
@@ -545,12 +541,10 @@ ui.capture = function(id) {
 }
 
 ui.captured = function(id) {
-	if (!id)
-		return
-	if (ui.captured_id != id)
-		return
-	return capture_state
+	return id && ui.captured_id == id && capture_state || null
 }
+
+// keyboard events -----------------------------------------------------------
 
 let key_state_now = map()
 let key_state = set()
@@ -580,6 +574,8 @@ ui.keyup = function(key) {
 ui.key = function(key) {
 	return key_state.has(key)
 }
+
+// custom events -------------------------------------------------------------
 
 let event_state = map()
 
@@ -692,33 +688,20 @@ let id_remove_set  = set() // {id}
 
 ui._id_state_maps = id_state_maps
 
-function keepalive(id) {
+function keepalive(id, update_f) {
 	assert(id, 'id required')
 	id_current_set.add(id)
 	id_remove_set.delete(id)
+
+	if (update_f) {
+		let m = ui.state(id)
+		m.set('update', update_f)
+		state_update(id, m)
+	}
 }
 ui.keepalive = keepalive
 
 let updated_set = set() // {id}
-
-function state_map(id) {
-	let m = id_state_maps.get(id)
-	if (!m) {
-		m = id_state_map_freelist.alloc()
-		id_state_maps.set(id, m)
-	}
-	return m
-}
-
-ui.state_update = function(id, update_f) {
-	if (!id)
-		return
-	if (!update_f)
-		return
-	let m = state_map(id)
-	m.set('update', update_f)
-	state_update(id, m)
-}
 
 function state_update(id, m) {
 	let update_f = m.get('update')
@@ -731,30 +714,21 @@ function state_update(id, m) {
 	}
 }
 
-ui.state_map = function(id) {
-	if (!id)
-		return
-	let m = state_map(id)
-	state_update(id, m)
-	return m
-}
-
 ui.state = function(id, k) {
 	if (!id)
 		return
 	let m = id_state_maps.get(id)
-	if (!m)
-		return
-	state_update(id, m)
-	return m.get(k)
+	if (!m) {
+		m = id_state_map_freelist.alloc()
+		id_state_maps.set(id, m)
+	} else {
+		state_update(id, m)
+	}
+	return k ? m.get(k) : m
 }
 
-ui.state_set = function(id, k, v) {
-	ui.state_map(id).set(k, v)
-}
-
-ui.state_set_default = function(id, k, v) {
-	let s = ui.state_map(id)
+ui.state_init = function(id, k, v) {
+	let s = ui.state(id)
 	if (s.has(k)) return
 	s.set(k, v)
 }
@@ -764,6 +738,7 @@ function id_state_gc() {
 		let m = id_state_maps.get(id)
 		if (!m)
 			continue
+		assert(!(ui.captured_id == id), 'id removed while captured')
 		let free = m.get('free')
 		if (free)
 			free(m, id)
@@ -778,7 +753,7 @@ function id_state_gc() {
 }
 
 ui.on_free = function(id, free1) {
-	let s = ui.state_map(id)
+	let s = ui.state(id)
 	let free0 = s.get('free')
 	if (!free0) {
 		s.set('free', free1)
@@ -803,7 +778,7 @@ function measure_req_all() {
 	for (let k = 0, n = measure_req.length; k < n; k += 2) {
 		let dest = measure_req[k+0]
 		let i    = measure_req[k+1]
-		let s = isstr(dest) ? ui.state_map(dest) : dest
+		let s = isstr(dest) ? ui.state(dest) : dest
 		s.set('x', a[i+0])
 		s.set('y', a[i+1])
 		s.set('w', a[i+2])
@@ -1119,6 +1094,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 	let ID = t.ID
 	return ui.widget(cmd_name, assign({
 		measure: function(a, i, axis) {
+			a[i+2+axis] += paddings(a, i, axis)
 			let fr = a[i+FR]
 			let w  = a[i+2+axis]
 			add_ct_min_wh(a, axis, w, fr)
@@ -1138,7 +1114,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 			let h = a[i+3]
 			let id = a[i+ID]
 			if (hit_rect(x, y, w, h)) {
-				hit_set_id(id)
+				ui.hover(id)
 				return true
 			}
 		},
@@ -1207,9 +1183,9 @@ const CMD_SCROLLBOX = cmd_ct('scrollbox')
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
 	keepalive(id)
-	let ss = ui.state_map(id)
-	sx = sx ?? (ss ? ss.get('scroll_x') : 0)
-	sy = sy ?? (ss ? ss.get('scroll_y') : 0)
+	let ss = ui.state(id)
+	sx = sx ?? ss?.get('scroll_x') ?? 0
+	sy = sy ?? ss?.get('scroll_y') ?? 0
 
 	begin_scope()
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
@@ -1221,10 +1197,8 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 		sx ?? 0, // scroll x
 		sy ?? 0, // scroll y
 	)
-	if (ss) {
-		if (sx != null) ss.set('scroll_x', sx)
-		if (sy != null) ss.set('scroll_y', sy)
-	}
+	if (ss && sx != null) ss.set('scroll_x', sx)
+	if (ss && sy != null) ss.set('scroll_y', sy)
 
 	return i
 }
@@ -1846,6 +1820,38 @@ measure[CMD_FONT_SIZE] = set_font_size
 measure[CMD_FONT_WEIGHT] = set_font_weight
 measure[CMD_LINE_GAP] = set_line_gap
 
+let measure_text; {
+let tm = map()
+let TSM = obj()
+measure_text = function(cx, font, s) {
+	let fm = tm.get(font)
+	if (!fm) { fm = map(); tm.set(font, fm); fm.set(TSM, map()) }
+	let tsm = fm.get(TSM)
+	tsm.set(s, performance.now())
+	let m = fm.get(s)
+	if (!m) { m = cx.measureText(s); fm.set(s, m); }
+	return m
+}
+
+runevery(120, function() {
+	let t = performance.now()
+	let n = 0
+	for (let fm of tm.values()) {
+		let tsm = fm.get(TSM)
+		for (let [s, ts] of tsm) {
+			if (t - ts > 120) {
+				tsm.delete(s)
+				fm.delete(s)
+				n++
+			}
+		}
+	}
+	if (n)
+		pr('gc text measure ', n)
+})
+
+}
+
 let word_wrapper_freelist = freelist(function() {
 
 	let s
@@ -1885,7 +1891,7 @@ let word_wrapper_freelist = freelist(function() {
 		if (cx.font == last_font)
 			return
 		last_font = cx.font
-		let m = cx.measureText(' ') // makes garbage!
+		let m = measure_text(cx, last_font, ' ')
 		sp_w = m.width
 		ww.sp_w = sp_w
 		ww.asc = m.fontBoundingBoxAscent
@@ -1904,7 +1910,7 @@ let word_wrapper_freelist = freelist(function() {
 		}
 		ww.min_w = 0
 		for (let s of words) {
-			let m = cx.measureText(s) // makes garbage!
+			let m = measure_text(cx, last_font, s)
 			widths.push(m.width)
 			ww.min_w = max(ww.min_w, m.width)
 		}
@@ -1962,7 +1968,7 @@ function free_word_wrapper(s) {
 }
 
 function word_wrapper(id, text) {
-	let s = ui.state_map(id)
+	let s = ui.state(id)
 	let ww = s.get('ww')
 	if (!ww) {
 		ww = word_wrapper_freelist.alloc()
@@ -2005,7 +2011,8 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let text_w
 		let text_h
 		if (isstr(s)) { // single-line
-			let m = cx.measureText(s) // makes garbage!
+			let cx_font = cx.font
+			let m = measure_text(cx, cx_font, s)
 			asc = m.fontBoundingBoxAscent
 			dsc = m.fontBoundingBoxDescent
 			text_w = ceil(m.width)
@@ -2013,8 +2020,9 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		} else { // multi-line, pre-wrapped
 			text_w = 0
 			text_h = 0
+			let cx_font = cx.font
 			for (let ss of s) {
-				let m = cx.measureText(ss)
+				let m = measure_text(cx, cx_font, ss)
 				asc = m.fontBoundingBoxAscent
 				dsc = m.fontBoundingBoxDescent
 				text_w = max(text_w, ceil(m.width))
@@ -2238,6 +2246,7 @@ function position_flex(a, i, axis, sx, sw) {
 		// take it. each child shrinks to take in the percent of the overflow
 		// equal to the child's percent of free space.
 		i = next_i
+		let sw0 = sw
 		while (a[i-1] != CMD_END) {
 
 			let cmd = a[i-1]
@@ -2407,7 +2416,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			if (axis && ui.wheel_dy && ui.hit(id)) {
 				let sy0 = ui.state(id, 'scroll_y') ?? 0
 				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
-				ui.state_set(id, 'scroll_y', sy)
+				ui.state(id).set('scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
 
@@ -2419,13 +2428,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 					let psx0 = cs.get('ps0')
 					let dpsx = (ui.mx - ui.mx0) / (w - tw)
 					sx = clamp(round((psx0 + dpsx) * (cw - w)), 0, cw - w)
-					ui.state_set(id, 'scroll_x', sx)
+					ui.state(id).set('scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
 					let psy0 = cs.get('ps0')
 					let dpsy = (ui.my - ui.my0) / (h - th)
 					sy = clamp(round((psy0 + dpsy) * (ch - h)), 0, ch - h)
-					ui.state_set(id, 'scroll_y', sy)
+					ui.state(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
 				break
@@ -2661,7 +2670,7 @@ function input_blur(ev) {
 
 function input_input(ev) {
 	let id = this._ui_id
-	ui.state_set(id, 'text', this.value)
+	ui.state(id).set('text', this.value)
 	animate()
 }
 
@@ -2685,7 +2694,7 @@ function input_create(id, input_type) {
 	input.addEventListener('input', input_input)
 	input.addEventListener('keydown', input_keydown)
 	screen.appendChild(input)
-	ui.state_set(id, 'input', input)
+	ui.state(id).set('input', input)
 	ui.on_free(id, input_free)
 	return input
 }
@@ -2868,14 +2877,14 @@ draw[CMD_END] = function(a, end_i) {
 
 			let sbar_id = id+'.scrollbar'+axis
 			let cs = ui.captured(sbar_id)
-			let hs = ui.hovers(sbar_id)
+			let hit = ui.hit(sbar_id)
 
-			if (cs || hs)
+			if (cs || hit)
 				[visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
 
 			cx.beginPath()
 			cx.rect(tx, ty, tw, th)
-			cx.fillStyle = ui.bg_color('scrollbar', cs && 'active' || hs && 'hover' || 'normal')[0]
+			cx.fillStyle = ui.bg_color('scrollbar', cs && 'active' || hit && 'hover' || 'normal')[0]
 			cx.fill()
 
 		}
@@ -3043,30 +3052,21 @@ function draw_all() {
 
 // hit-testing phase ---------------------------------------------------------
 
-let hit_set = set() // {id}
-
 let hit_state_map_freelist = map_freelist()
 let hit_state_maps = map() // {id->map}
 
 ui._hit_state_maps = hit_state_maps
-ui._hit_set = hit_set
 
-function hit_set_id(id) {
-	if (id)
-		hit_set.add(id)
+ui.hit = function(id, k) {
+	if (!id) return
+	if (ui.captured_id) // unavailable while captured
+		return
+	let m = hit_state_maps.get(id)
+	return k ? m?.get(k) : m
 }
 
-ui.realhit = function(id) {
-	return hit_set.has(id)
-}
-
-ui.hit = function(id) {
-	if (ui.captured_id)
-		return ui.captured_id == id
-	return hit_set.has(id)
-}
-
-function hit_state_map(id) {
+ui.hover = function(id) {
+	if (!id) return
 	let m = hit_state_maps.get(id)
 	if (!m) {
 		m = hit_state_map_freelist.alloc()
@@ -3075,32 +3075,10 @@ function hit_state_map(id) {
 	return m
 }
 
-ui.realhit_state = function(id) {
-	return id && hit_state_map(id)
-}
-
-ui.hit_state = function(id) {
-	return id && hit_state_map(id)
-}
-
-ui.hovers = function(id) {
-	if (!id)
-		return
-	if (!ui.hit(id))
-		return
-	return hit_state_map(id)
-}
-
-ui.hitstate = function(id, k) {
-	if (!id)
-		return
+ui.hovers = function(id, k) {
+	if (!id) return
 	let m = hit_state_maps.get(id)
-	return m && m.get(k)
-}
-
-ui.hit_set = function(id, k, v) {
-	hit_set_id(id)
-	hit_state_map(id).set(k, v)
+	return k ? m?.get(k) : m
 }
 
 function hit_rect(x, y, w, h) {
@@ -3124,7 +3102,7 @@ function hit_box(a, i) {
 
 hit[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
-		hit_set_id(a[i+TEXT_ID])
+		ui.hover(a[i+TEXT_ID])
 		hit_template(a, i)
 		return true
 	}
@@ -3159,7 +3137,7 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 	if (!hit_box(a, i))
 		return
 
-	hit_set_id(id)
+	ui.hover(id)
 
 	hit_template(a, i)
 
@@ -3170,7 +3148,7 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 			continue
 		if (!hit_rect(tx, ty, tw, th))
 			continue
-		hit_set_id(id+'.scrollbar'+axis)
+		ui.hover(id+'.scrollbar'+axis)
 		return true
 	}
 
@@ -3201,11 +3179,11 @@ hit[CMD_V] = hit_flex
 
 hit[CMD_STACK] = function(a, i) {
 	if (hit_children(a, i)) {
-		hit_set_id(a[i+STACK_ID])
+		ui.hover(a[i+STACK_ID])
 		return true
 	}
 	if (hit_box(a, i)) {
-		hit_set_id(a[i+STACK_ID])
+		ui.hover(a[i+STACK_ID])
 		hit_template(a, i)
 	}
 }
@@ -3214,13 +3192,15 @@ hit[CMD_BB] = function(a, i) {
 	let ct_i     = a[i+1]
 	let bg_color = a[i+2]
 	if (bg_color != null && hit_box(a, ct_i)) {
-		hit_set_id(a[i+BB_ID])
+		ui.hover(a[i+BB_ID])
 		hit_template(a, i)
 		return true
 	}
 }
 
 function hit_all() {
+
+	ui.set_cursor()
 
 	hit_template_id = null
 	hit_template_i0 = null
@@ -3229,7 +3209,6 @@ function hit_all() {
 	for (let m of hit_state_maps.values())
 		hit_state_map_freelist.free(m)
 	hit_state_maps.clear()
-	hit_set.clear()
 
 	if (ui.mx == null)
 		return
@@ -3263,6 +3242,7 @@ ui.redraw = function() {
 function redraw_all() {
 	while (want_redraw) {
 		want_redraw = false
+		hit_all()
 		measure_req_all()
 		a.length = 0
 		for (let layer of a.layers)
@@ -3271,7 +3251,6 @@ function redraw_all() {
 
 		let i = ui.stack()
 		begin_layer(layer_base, i)
-		ui.set_cursor()
 		ui.frame()
 		ui.end()
 		end_layer()
@@ -3387,7 +3366,7 @@ function template_find_node(a, i, t, t_i) {
 function hit_template(a, i) {
 	let id = hit_template_id
 	if (id && i >= hit_template_i0 && i < hit_template_i1) {
-		let hs = ui.hovers(id)
+		let hs = ui.hit(id)
 		if (!hs)
 			return
 		let root_t = hs.get('root')
@@ -3454,7 +3433,7 @@ ui.box_widget('template_overlay', {
 			hit_template_id = id
 			hit_template_i0 = i0
 			hit_template_i1 = i1
-			ui.hit_set(id, 'root', t)
+			ui.hover(id).set('root', t)
 		}
 	},
 	draw: function(a, i) {
@@ -3487,8 +3466,8 @@ ui.box_widget('template_overlay', {
 function draw_node(id, t_t, t, depth) {
 	ui.p(depth * 20, ui.sp05(), 0)
 	ui.stack(t)
-		let hit = ui.hit(t)
-		if (hit && ui.click)
+		let hs = ui.hit(t)
+		if (hs && ui.click)
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
 		if (sel) {
@@ -3498,7 +3477,7 @@ function draw_node(id, t_t, t, depth) {
 					: 'item-focused item-selected'
 			)
 		}
-		ui.color('text', hit ? 'hover' : null)
+		ui.color('text', hs ? 'hover' : null)
 		ui.text('', t.t, 1, 'l')
 	ui.end_stack()
 	if (t.e)
@@ -3558,8 +3537,8 @@ let out = [0, 0, null]
 ui.widget('drag_point', {
 	create: function(cmd, id, x, y, color) {
 		keepalive(id)
-		ui.state_set_default(id, 'x', x)
-		ui.state_set_default(id, 'y', y)
+		ui.state_init(id, 'x', x)
+		ui.state_init(id, 'y', y)
 		x = ui.state(id, 'x')
 		y = ui.state(id, 'y')
 		let [state, dx, dy] = ui.drag(id)
@@ -3568,8 +3547,8 @@ ui.widget('drag_point', {
 			y += dy
 		}
 		if (state == 'drop') {
-			ui.state_set(id, 'x', x)
-			ui.state_set(id, 'y', y)
+			ui.state(id).set('x', x)
+			ui.state(id).set('y', y)
 		}
 
 		// NOTE: we're making it a zero-sized box so that a popup can be anchored to it.
@@ -3608,7 +3587,7 @@ ui.widget('drag_point', {
 		let y  = a[i+1]
 		let id = a[i+ID]
 		if (hit_rect(x-r, y-r, 2*r, 2*r)) {
-			hit_set_id(id)
+			ui.hover(id)
 			return true
 		}
 	},
@@ -3618,8 +3597,8 @@ ui.widget('drag_point', {
 // button --------------------------------------------------------------------
 
 ui.button = function(id, s, style, align, valign) {
-	let hit = ui.hit(id)
-	let state = hit ? ui.pressed ? 'active' : 'hover' : 'normal'
+	let hs = ui.hit(id)
+	let state = hs ? ui.pressed ? 'active' : 'hover' : 'normal'
 	style = style ?? 'button'
 	ui.p(ui.sp2(), ui.sp())
 	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
@@ -3629,7 +3608,7 @@ ui.button = function(id, s, style, align, valign) {
 		ui.color('text', state)
 		ui.text('', s, 0, 'c', 'c')
 	ui.end_stack()
-	return hit && ui.clickup
+	return hs && ui.clickup
 }
 ui.button_primary = function(id, s, align, valign) {
 	return ui.button(id, s, 'button-primary', align, valign)
@@ -3682,7 +3661,7 @@ function split(hv, id, size, unit, fixed_side,
 	let W = horiz ? 'w' : 'h'
 	let [state, dx, dy] = ui.drag(id)
 	keepalive(id)
-	let s = ui.state_map(id)
+	let s = ui.state(id)
 	let cs = ui.captured(id)
 	let max_size = (cs?.get(W) ?? s.get(W) ?? 1/0) - splitter_w
 	assert(!unit || unit == 'px' || unit == '%')
@@ -3803,7 +3782,7 @@ ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', fr, 's', 's')
 		ui.bb('', 'input', null, 1, 'intense', ui.focused(id) ? 'hover' : 'normal')
 		ui.p(ui.sp())
-		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(10), min_h, null, true)
+		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(12), min_h, null, true)
 	ui.end_stack()
 }
 
@@ -3821,57 +3800,73 @@ ui.radio_label = function(for_id, for_group_id, s, fr, align, valign) {
 
 // list ----------------------------------------------------------------------
 
+ui.valid_list_index = function(i, items) {
+	return items.length ? clamp(i, 0, items.length-1) : null
+}
+
 function list_update(id, m) {
-	let items = m.get('items')
-	let focused_item_i = m.get('focused_item_i') ?? 0
+	let items  = m.get('items')
+	let fi     = m.get('focused_item_i')
+	let before_fi = fi
 	let d = ui.focused(id) && (
 			ui.keydown('arrowdown') &&  1 ||
 			ui.keydown('arrowup'  ) && -1
 		) || 0
-	if (d) {
-		focused_item_i = clamp(focused_item_i + d, 0, items.length-1)
-		m.set('focused_item_i', focused_item_i)
-	}
+	fi = fi != null ? fi + d : d >= 0 ? 0 : items.length-1
+	fi = ui.valid_list_index(fi, items)
+	let fi_changed = d && 'key'
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
 		if (ui.hit(item_id) && ui.click) {
 			ui.focus(id)
-			focused_item_i = i
-			m.set('focused_item_i', i)
+			fi = i
+			fi_changed = 'click'
 		}
 		i++
 	}
+	m.set('focused_item_i', fi)
+	m.set('focused_item_changed', before_fi != fi ? fi_changed : false)
+	m.set('item_picked', fi_changed == 'click' || (fi != null && ui.key('enter')))
 }
-ui.list = function(id, items, focused_item_i, fr, gap, align, valign, item_align, item_valign, item_fr, hv) {
-	keepalive(id)
-	ui.state_set(id, 'items', items)
-	ui.state_update(id, list_update)
-	focused_item_i = ui.state(id, 'focused_item_i') ?? focused_item_i ?? 0
+function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_fr, max_min_w, min_w) {
+	let s = ui.state(id)
+	s.set('items', items)
+	keepalive(id, list_update)
+	let fi = s.get('focused_item_i')
 	let list_focused = ui.focused(id)
 	let i = 0
-	ui.hv(hv ?? 'v', fr, gap, align, valign, 120)
+	hv = hv || 'v'
+	assert(hv == 'v' || hv == 'h')
+	ui.hv(hv, fr, 0, align, valign, min_w ?? 120)
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(ui.sp(), ui.sp05())
 		ui.stack(item_id, 0)
-			let item_focused = focused_item_i == i
-			ui.bb('',
-				item_focused ? 'item' : 'bg',
-				item_focused
-					? list_focused
-						? 'item-focused item-selected focused'
-						: 'item-focused item-selected'
-					: null
-			)
+			let item_focused = fi == i
+			 ui.bb('',
+			 	item_focused ? 'item' : 'bg',
+			 	item_focused
+			 		? list_focused
+			 			? 'item-focused item-selected focused'
+			 			: 'item-focused item-selected'
+			 		: null
+			 )
 			ui.color('text', ui.hit(item_id) ? 'hover' : null)
-		ui.text('', item, item_fr, item_align ?? 'l', item_valign ?? 'c')
+			ui.text('', item, item_fr,
+				item_align  ?? hv == 'v' ? 'l' : 'c',
+				item_valign ?? hv == 'v' ? 'c' : 'c',
+				max_min_w)
 		ui.end_stack()
 		i++
 	}
 	ui.end()
-	return items[focused_item_i]
+	return items[fi]
 }
+ui.hvlist = hvlist
+ui.vlist = function(...args) { return hvlist('v', ...args) }
+ui.hlist = function(...args) { return hvlist('h', ...args) }
+ui.list = ui.vlist
 
 // polyline ------------------------------------------------------------------
 
@@ -3960,7 +3955,7 @@ ui.widget('polyline', {
 		let pi2 = cmd_end_i(a, i)
 		set_points(cx, x0, y0, a, pi1, pi2, closed)
 		if (cx.isPointInPath(mx, my)) {
-			hit_set_id(id)
+			ui.hover(id)
 			return true
 		}
 	},
@@ -3968,48 +3963,82 @@ ui.widget('polyline', {
 
 // dropdown ------------------------------------------------------------------
 
-ui.dropdown = function(id, items, focused_item_i, fr, min_w, min_h) {
+ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
+
 	keepalive(id)
-	let fi = ui.state(id+'.list', 'focused_item_i') ?? focused_item_i
-	let s = fi != null ? assert(items[fi]) : ''
-	let focused = ui.focused(id)
-	let open = true
+	let open = ui.state(id, 'open')
+	let foc_i = open ? ui.state(id+'.list', 'focused_item_i') : null
+	let sel_i = foc_i ?? ui.state(id, 'i') ?? 0
+	sel_i = ui.valid_list_index(sel_i, items)
+	ui.state(id).set('i', sel_i)
 
-	ui.stack('', fr, 's', 's', min_w ?? ui.em(10), min_h)
+	let click = ui.hit(id) && ui.click
+	let toggle = click
+		|| (ui.focused(id) && ui.keydown('enter'))
+		|| (ui.focused(id+'.list') && ui.keydown('enter'))
+		|| ui.state(id+'.list', 'item_picked')
 
-		// placeholder for popup
+	if (toggle) {
+		open = !open
+	} else if (open && ui.click && !ui.hit(id) && !(ui.hit(id+'.list') || ui.captured(id+'.list'))) {
+		open = false
+	}
+
+	ui.state(id).set('open', open)
+
+	if (click)
+		if (open)
+			ui.focus(id+'.list')
+		else
+			ui.focus(id)
+
+	if (!open && ui.focused(id)) {
+		let d = ui.key('arrowup') && -1 || ui.key('arrowdown') && 1 || 0
+		if (d) {
+			sel_i = ui.valid_list_index(sel_i + d, items)
+			ui.state(id).set('i', sel_i)
+			ui.state(id+'.list').set('focused_item_i', sel_i)
+		}
+	}
+
+	let s = sel_i != null ? items[sel_i] : ''
+
+	ui.stack('', fr, 's', 's', min_w ?? ui.em(12), min_h)
+
+		// placeholder to align popup to it.
+		ui.m(1)
 		ui.p(ui.sp())
-		ui.text('', '', 1, 'l', 'c')
+		ui.text('', '', 0, 'l', 'c')
 
 		if (open)
 			ui.popup(id+'.popup', layer_popup, null, 'il', 's', 0, 0, 'constrain change_side')
 
-		ui.v()
-
 			if (open)
 				ui.shadow('picker')
-			ui.bb('', 'input', null, 1, 'intense', focused ? 'hover' : null)
 
-			ui.stack(id)
-				ui.p(ui.sp())
-				ui.h(1, ui.sp())
-					ui.text('', s, 1, 'l', 'c')
-					ui.stack('', 0)
-						ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
-					ui.end_stack()
-				ui.end_h()
-			ui.end_stack()
+			ui.bb('', 'input', null, 1, 'intense', ui.focused(id) || ui.focused(id+'.list') ? 'hover' : null)
 
-			if (open) {
-				ui.mt(1)
+			ui.m(1)
+			ui.v()
+
+				ui.stack(id)
+					ui.p(ui.sp())
+					ui.h(0, ui.sp())
+						ui.text('', s, 1, 'l', 'c', max_min_w ?? ui.em(8))
+						ui.stack('', 0)
+							ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
+						ui.end_stack()
+					ui.end_h()
+				ui.end_stack()
+
+				if (open) {
 					ui.stack()
-						ui.bb('', 'bg2', null, 1, 'intense')
-						ui.m(1)
-						ui.list(id+'.list', items, focused_item_i)
+						ui.state_init(id+'.list', 'focused_item_i', sel_i)
+						ui.list(id+'.list', items, 0, 's', 's', 'l', 'c', 0, max_min_w)
 					ui.end_stack()
-			}
+				}
 
-		ui.end_v()
+			ui.end_v()
 
 		if (open)
 			ui.end_popup()
@@ -4058,7 +4087,7 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 	keepalive(id)
 	let align_start = parse_align(align || '[') == ALIGN_START
 	let [dstate, dx, dy] = ui.drag(id+'.title')
-	let s = ui.state_map(id)
+	let s = ui.state(id)
 	let mx1 =  align_start ? (s.get('mx1') ?? x0) + dx : 0
 	let mx2 = !align_start ? (s.get('mx2') ?? x0) - dx : 0
 	let my1 =  align_start ? (s.get('my1') ?? y0) + dy : 0
@@ -4090,7 +4119,6 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 
 ui.end_toolbox = function() {
 			ui.end_v()
-			pr(scope_get('toolbox_id'))
 			ui.resizer(scope_get('toolbox_id'))
 		ui.end_stack()
 	ui.end_popup()
@@ -4168,13 +4196,12 @@ ui.widget('resizer', {
 
 		let side = hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h)
 		if (side) {
-			hit_set_id(id)
-			let rs = ui.hovers(id)
-			rs.set('side', side)
-			rs.set('measured_x', x)
-			rs.set('measured_y', y)
-			rs.set('measured_w', w + borders)
-			rs.set('measured_h', h + borders)
+			let hs = ui.hover(id)
+			hs.set('side', side)
+			hs.set('measured_x', x)
+			hs.set('measured_y', y)
+			hs.set('measured_w', w + borders)
+			hs.set('measured_h', h + borders)
 		}
 
 		let [dstate, dx, dy] = ui.drag(id)
@@ -4203,11 +4230,11 @@ ui.widget('resizer', {
 			ui.set_cursor(cursors[side])
 			if (side == 'right' || side == 'bottom_right') {
 				let min_w = cs.get('min_w')
-				ui.state_map(ct_id).set('min_w', min_w + dx)
+				ui.state(ct_id).set('min_w', min_w + dx)
 			}
 			if (side == 'bottom' || side == 'bottom_right') {
 				let min_h = cs.get('min_h')
-				ui.state_map(ct_id).set('min_h', min_h + dy)
+				ui.state(ct_id).set('min_h', min_h + dy)
 			}
 		}
 
@@ -4232,7 +4259,7 @@ function toggle_toggle(id) {
 	let on
 	if (clicked) {
 		on = !ui.state(id, 'on')
-		ui.state_set(id, 'on', on)
+		ui.state(id).set('on', on)
 	}
 	return on
 }
@@ -4354,11 +4381,11 @@ radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
 	keepalive(id)
 	keepalive(group_id)
 	let clicked = (ui.hit(group_id) || ui.hit(group_id+'.label')) && ui.click
-	let clicked_id = clicked && ui.hovers(group_id).get('id')
+	let clicked_id = clicked && ui.hit(group_id, 'id')
 	let on = clicked ? clicked_id == id && !ui.state(id, 'on') : null
 	if (clicked) {
-		ui.state_set(id, 'on', false)
-		ui.state_set(clicked_id, 'on', true)
+		ui.state(id).set('on', false)
+		ui.state(clicked_id).set('on', true)
 	}
 	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(1.5),
@@ -4408,8 +4435,7 @@ radio.hit = function(a, i) {
 	let id = a[i+TOGGLE_ID]
 	let group_id = a[i+RADIO_GROUP_ID]
 	if (hit_rect(x, y, w, h)) {
-		hit_set_id(id)
-		ui.hit_set(group_id, 'id', id)
+		ui.hover(group_id).set('id', id)
 		return true
 	}
 }
@@ -4418,53 +4444,209 @@ ui.box_widget('radio', radio)
 
 // slider --------------------------------------------------------------------
 
-/*
-ui.box_widget('slider', {
+function compute_step_and_range(wanted_n, min, max, scale_base, scales, decimals) {
+	scale_base = scale_base || 10
+	scales = scales || [1, 2, 2.5, 5]
+	let d = max - min
+	let min_scale_exp = floor((d ? logbase(d, scale_base) : 0) - 2)
+	let max_scale_exp = floor((d ? logbase(d, scale_base) : 0) + 2)
+	let n0, step
+	let step_multiple = decimals != null ? 10**(-decimals) : null
+	for (let scale_exp = min_scale_exp; scale_exp <= max_scale_exp; scale_exp++) {
+		for (let scale of scales) {
+			let step1 = scale_base ** scale_exp * scale
+			let n = d / step1
+			if (n0 == null || abs(n - wanted_n) < n0) {
+				if (step_multiple == null || floor(step1 / step_multiple) == step1 / step_multiple) {
+					n0 = n
+					step = step1
+				}
+			}
+		}
+	}
+	min = ceil  (min / step) * step
+	max = floor (max / step) * step
+	return [step, min, max]
+}
 
-	create: function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
-		let clicked = ui.hit(id) && ui.click
-		ui_cmd_box(cmd, fr, align ?? 's', valign ?? 'c',
-			min_w ?? ui.em(2),
-			min_h ?? ui.em(1.5),
+let SLIDER_ID         = S-1
+let SLIDER_FROM       = S+0
+let SLIDER_TO         = S+1
+let SLIDER_P          = S+2 // progress in 0..1
+let SLIDER_MARKED     = S+3
+let SLIDER_SCALE_BASE = S+4
+let SLIDER_SCALES     = S+5
+let SLIDER_DECIMALS   = S+6
+
+let fr0, align0, valign0, min_w0, min_h0
+
+ui.box_args = function(fr, align, valign, min_w, min_h) {
+	fr0     = fr
+	align0  = align
+	valign0 = valign
+	min_w0  = min_w
+	min_h0  = min_h
+}
+
+ui.clear_box_args = function() {
+	fr0     = null
+	align0  = null
+	valign0 = null
+	min_w0  = null
+	min_h0  = null
+}
+
+ui.slider_mark_w_em = 2 // em
+
+ui.slider_progress = function(id, from, to) {
+	return lerp(ui.state(id, 'p') ?? .5, 0, 1, from ?? 0, to ?? 1)
+}
+
+ui.box_widget('_slider', {
+
+	create: function(cmd, id, from, to, marked, scale_base, scales, decimals) {
+
+		keepalive(id)
+
+		let hit = ui.hit(id)
+		let click = hit && ui.click
+
+		if (click)
+			ui.capture(id)
+
+		let i = ui_cmd_box(cmd, fr0 ?? 1, align0 ?? 's', valign0 ?? 'c',
+			min_w0 ?? ui.em(12),
+			min_h0 ?? ui.em(),
 			id,
-			)
+			from ?? 0,
+			to ?? 1,
+			0, // p
+			marked ?? true,
+			scale_base,
+			scales,
+			decimals ?? 2,
+		)
+
+		ui.clear_box_args()
+
+		return i
 	},
+
+	ID: SLIDER_ID,
+
+	translate: function(a, i, dx, dy) {
+		a[i+0] += dx
+		a[i+1] += dy
+		let id = a[i+SLIDER_ID]
+
+		let p = ui.state(id, 'p') ?? .5
+
+		if (ui.captured(id)) {
+			let x = a[i+0]
+			let w = a[i+2]
+			p = clamp((ui.mx - x) / w, 0, 1)
+			ui.state(id).set('p', p)
+		}
+
+		let from  = a[i+SLIDER_FROM]
+		let to    = a[i+SLIDER_TO]
+		let v = lerp(p, 0, 1, from, to)
+		ui.state(id).set('v', v)
+		ui.state(id).set('v', v)
+
+		a[i+SLIDER_P] = p
+	},
+
 	draw: function(a, i) {
 
 		let x = a[i+0]
 		let y = a[i+1]
 		let w = a[i+2]
 		let h = a[i+3]
-		let id = a[i+S-1]
+
+		let id = a[i+SLIDER_ID]
+		let p  = a[i+SLIDER_P]
+
+		let hit = ui.hit(id)
+
+		let r = round(h / 4) // shaft corner radius
+		let thumb_r = ui.em(.6)
+		let thumb_cx = x + p * w
+		let thumb_cy = y + round((h - thumb_r) / 2)
+
+		// draw shaft
+		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
+		let shaft_color = ui.bg_color('bg2', hit ? 'hover' : null)
+		cx.fillStyle = shaft_color[0]
+		cx.fill()
+
+		bg_path(cx, x + .5 - r, y + .5, thumb_cx, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
+		let fill_color = ui.bg_color('link', hit ? 'hover' : null)
+		cx.fillStyle = fill_color[0]
+		cx.fill()
+
+		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
+		let border_color = ui.border_color('light', null)
+		cx.strokeStyle = border_color[0]
+		cx.lineWidth = 1
+		cx.stroke()
+
+		// draw thumb
+		fill_color = ui.fg_color('link', hit ? 'hover' : null)
+		cx.fillStyle = fill_color[0]
+		ui.set_shadow('button')
+		cx.beginPath()
+		cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
+		cx.fill()
+
+		if (a[i+SLIDER_MARKED]) {
+
+			let from       = a[i+SLIDER_FROM]
+			let to         = a[i+SLIDER_TO]
+			let scale_base = a[i+SLIDER_SCALE_BASE]
+			let scales     = a[i+SLIDER_SCALES]
+			let decimals   = a[i+SLIDER_DECIMALS]
+
+			let max_n = floor(w / ui.em(ui.slider_mark_w_em))
+			let [step, min, max] = compute_step_and_range(
+				max_n, from, to, scale_base, scales, decimals)
+
+			cx.textAlign = 'center'
+			cx.fillStyle = ui.fg_color('text')[0]
+			cx.strokeStyle = ui.fg_color('text')[0]
+			cx.lineWidth = 1
+			let m = measure_text(cx, cx.font, ' ')
+			let asc = m.fontBoundingBoxAscent
+			let dsc = m.fontBoundingBoxDescent
+			let x0 = x
+			for (let v = min; v <= max; v += step) {
+				let x = round(x0 + lerp(v, from, to, 0, w)) + .5
+
+				cx.beginPath()
+				cx.moveTo(x, round(y - ui.em(1.0)) + .5)
+				cx.lineTo(x, round(y - ui.em(0.6)) + .5)
+				cx.stroke()
+
+				let s = str(v)
+				cx.fillText(s, x, y - ui.em(1.2)) //  - asc - dsc)
+			}
+
+		}
 
 	},
 
 })
-*/
 
-ui.bg_style('dark', 'red', 'normal', 0, 1, .5)
-
-ui.slider = function(id, fr, align, valign, min_w, min_h) {
-	ui.p(ui.sp())
-	ui.stack(id, fr, align, valign, min_w, min_h)
-
-		ui.stack(id+'.shaft', 0, 's', 'c', ui.em(), ui.em() / 2)
-			let hit_shaft = ui.hit(id+'.shaft')
-			ui.bb('', 'bg2', hit_shaft ? 'hover' : null, 1, 'light', null, 1000)
-		ui.end_stack()
-
-		ui.stack(id+'.thumb', 0, 'l', 'c', ui.em(), ui.em())
-			let hit_thumb = ui.hit(id+'.thumb')
-			ui.bb('', 'link', hit ? 'hover' : null, 1, 'light', null, 1000)
-			if (hit_thumb || hit_shaft) {
-				ui.popup(id+'.popup', layer_popup, null, 't', 'c', 0, 0, 'constrain change_side')
-					ui.bb_tooltip('', 'bg2')
-					ui.text('', '1234')
-				ui.end_popup()
-			}
-		ui.end_stack()
-
-	ui.end_stack()
+ui.slider = function(id, from, to, marked, scale_base, scales, decimals) {
+	let slider_i = ui._slider(id, from, to, marked, scale_base, scales, decimals)
+	if (ui.hit(id) || ui.captured(id)) {
+		ui.m(ui.sp())
+		ui.p(ui.sp2(), ui.sp())
+		ui.popup(id+'.popup', layer_popup, slider_i, 't', 'c')
+			ui.bb_tooltip('', 'info', null, 'light', null, ui.sp05())
+			ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
+		ui.end_popup()
+	}
 }
 
 // calendar ------------------------------------------------------------------
@@ -4476,7 +4658,7 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 // blit'able -----------------------------------------------------------------
 
 ui.image_data = function(id, key, w, h) {
-	let s = ui.state_map(id)
+	let s = ui.state(id)
 	let idata = s.get(key)
 	if (!idata
 		|| s.get(key+'.w') != w
@@ -4517,8 +4699,19 @@ ui.widget('sat_lum_square', {
 		sat = sat ?? .5
 		lum = lum ?? .5
 
-		ui.state_set_default(id, 'sat', sat)
-		ui.state_set_default(id, 'lum', lum)
+		ui.state_init(id, 'sat', sat)
+		ui.state_init(id, 'lum', lum)
+
+		let cs = ui.captured(id)
+		if (cs) {
+			ui.state(id).set('sat', cs.get('sat'))
+			ui.state(id).set('lum', cs.get('lum'))
+		}
+
+		if (ui.hit(id) && ui.click) {
+			ui.focus(id)
+			ui.capture(id)
+		}
 
 		// doesn't look too good...
 		// if (ui.hit(id))
@@ -4529,11 +4722,11 @@ ui.widget('sat_lum_square', {
 			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
 			if (lum_step) {
 				let lum = ui.state(id, 'lum')
-				ui.state_set(id, 'lum', lum + (ui.key('shift') ? 0.1 : 1) * 0.1 * lum_step)
+				ui.state(id).set('lum', lum + (ui.key('shift') ? 0.1 : 1) * 0.1 * lum_step)
 			}
 			if (sat_step) {
 				let sat = ui.state(id, 'sat')
-				ui.state_set(id, 'sat', sat + (ui.key('shift') ? 0.1 : 1) * 0.1 * sat_step)
+				ui.state(id).set('sat', sat + (ui.key('shift') ? 0.1 : 1) * 0.1 * sat_step)
 			}
 		}
 
@@ -4573,8 +4766,8 @@ ui.widget('sat_lum_square', {
 
 		cx.putImageData(idata, x, y)
 
-		let hit_sat = ui.hitstate(id, 'sat')
-		let hit_lum = ui.hitstate(id, 'lum')
+		let hit_sat = ui.hit(id).get('sat')
+		let hit_lum = ui.hit(id).get('lum')
 		let sel_sat = ui.state(id, 'sat')
 		let sel_lum = ui.state(id, 'lum')
 
@@ -4593,21 +4786,12 @@ ui.widget('sat_lum_square', {
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
-		let cs = ui.captured(id)
-		if (cs || (!ui.captured_id && hit_rect(x, y, w, h)))
-			hit_set_id(id)
-		let hs = ui.hovers(id)
-		if (hs) {
+		let hit = hit_rect(x, y, w, h)
+		if (hit) {
+			ui.hover(id)
+
 			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
 			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
-		}
-		if (!cs && hs && ui.click) {
-			ui.focus(id)
-			cs = ui.capture(id)
-		}
-		if (cs) {
-			ui.state_set(id, 'sat', hs.get('sat'))
-			ui.state_set(id, 'lum', hs.get('lum'))
 		}
 
 		return !!hs
@@ -4633,14 +4817,22 @@ ui.widget('hue_bar', {
 	create: function(cmd, id, hue) {
 
 		keepalive(id)
-		ui.state_set_default(id, 'hue', hue)
+		ui.state_init(id, 'hue', hue)
+
+		if (ui.hit(id) && ui.click) {
+			ui.focus(id)
+			ui.capture(id)
+		}
+		let cs = ui.captured(id)
+		if (cs)
+			ui.state(id).set('hue', ui.cs(id, 'hue'))
 
 		if (ui.focused(id)) {
 			let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
 			if (step) {
 				let hue = ui.state(id, 'hue')
 				hue = clamp(round(hue + (ui.key('shift') ? 1 : 10) * step), 0, 360)
-				ui.state_set(id, 'hue', hue)
+				ui.state(id).set('hue', hue)
 			}
 		}
 
@@ -4679,7 +4871,7 @@ ui.widget('hue_bar', {
 		cx.putImageData(idata, x, y)
 
 		let sel_hue = ui.state(id, 'hue')
-		let hit_hue = ui.hovers(id)?.get('hue')
+		let hit_hue = ui.hit(id, 'hue')
 
 		draw_hue_line(x, y, h, w, hit_hue, 0.3)
 		draw_hue_line(x, y, h, w, sel_hue, 1.0)
@@ -4696,19 +4888,14 @@ ui.widget('hue_bar', {
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
+		let hit = hit_rect(x, y, w, h)
+		let hs = hit && ui.hover(id)
 		let cs = ui.captured(id)
-		if (cs || (!ui.captured_id && hit_rect(x, y, w, h)))
-			hit_set_id(id)
-		let hs = ui.hovers(id)
-		if (hs)
-			hs.set('hue', clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360))
-		if (!cs && hs && ui.click) {
-			ui.focus(id)
-			cs = ui.capture(id)
+		if (cs || hs) {
+			let hue = clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360)
+			(cs || hs).set('hue', hue)
 		}
-		if (cs)
-			ui.state_set(id, 'hue', hs.get('hue'))
-
+		return hit
 	},
 
 })
@@ -4822,7 +5009,7 @@ ui.widget('bg_dots', {
 		let dots = ui.state(id, 'dots')
 		if (!dots) {
 			dots = []
-			ui.state_set(id, 'dots', dots)
+			ui.state(id).set('dots', dots)
 
 			dots.mouse_dot = {}
 			dots.push(dots.mouse_dot)
