@@ -35,10 +35,13 @@ let tuts = []
 let demos = []
 
 demos.silder = `
-ui.p(ui.sp8())
-let p = ui.slider('slider1', 20, 40)
-//if (p != null)
-//	pr(p)
+ui.v(0, 0, 'c', 'c', 400)
+	ui.bb('', null, null, 1, 'intense')
+	let p1 = ui.slider('slider1', 20, 40, 1, false)
+	//if (p != null)
+	//	pr(p)
+	let p2 = ui.slider('slider2')
+ui.end_v()
 `
 
 demos.dropdown = `
@@ -396,7 +399,7 @@ for (let align of ['c', '[', ']']) {
 	let i = 0
 	for (let side of ['t', 'r', 'b', 'l']) {
 		let [x, y, p_i] = ui.drag_point('p'+j+i, 100+j*220, 100+i*120, 'red')
-		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 30, 30)
+		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 50, 50)
 			ui.bb('', null, null, 1, 'light')
 			ui.m(
 				side == 'l' || side == 'r' ? ui.sp2() : 0,
@@ -546,9 +549,9 @@ ui.frame = function() {
 
 				if (ui.button('btn_light', 'lights')) {
 					dark_mode = !dark_mode
+					ui.default_theme = dark_mode ? 'dark' : 'light'
 					ui.redraw()
 				}
-				ui.default_theme = dark_mode ? 'dark' : 'light'
 
 				ui.color('label')
 				ui.text('', 'canvas-ui v'+ui.VERSION, 1, 'r')

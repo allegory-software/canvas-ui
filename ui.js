@@ -27,7 +27,7 @@ ui.VERSION = '0.1'
 const {
 	repl,
 	isarray, isstr, isnum,
-	assert, pr, trace,
+	assert, pr, debug, trace,
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str,
 	obj, set, map, array,
@@ -111,7 +111,7 @@ ui.hsl = function(h, s, L, a) {
 ui.rgb = hsl_to_rgb_hex
 
 ui.hsl_adjust = function(c, h, s, L, a) {
-	return ui.hsl(c[1] * h, c[2] * s, c[3] * L, c[4] * a)
+	return ui.hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * a)
 }
 
 // themes --------------------------------------------------------------------
@@ -798,6 +798,7 @@ ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
 ui.font_size_normal = 14
 
 function reset_canvas() {
+	theme = themes[ui.default_theme]
 	color = 'text'
 	color_state = 'normal'
 	font = ui.default_font
@@ -812,6 +813,7 @@ function reset_canvas() {
 	scope_set('font_weight', font_weight)
 	scope_set('line_gap', line_gap)
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
+	reset_shadow()
 }
 
 // container stack -----------------------------------------------------------
@@ -826,12 +828,12 @@ ui.ct_i = function() {
 function check_stacks() {
 	if (ct_stack.length) {
 		for (let i of ct_stack)
-			pr(C(a, i), 'not closed')
+			debug(C(a, i), 'not closed')
 		assert(false)
 	}
 	if (layer_stack.length) {
 		for (let layer of layer_stack)
-			pr('layer', layer.name, 'not closed')
+			debug('layer', layer.name, 'not closed')
 		assert(false)
 	}
 	assert(!scope_stack.length, 'scope not closed')
@@ -1403,7 +1405,6 @@ ui.widget('bb_tooltip', {
 		// find tooltip tip's tip point.
 		let [tx1, ty1, tx2, ty2] = ui.popup_target_rect(a, ct_i)
 		let tx, ty
-
 		if (side == T && align == S) {
 			tx = tx1 + m
 			ty = ty1
@@ -1437,9 +1438,6 @@ ui.widget('bb_tooltip', {
 				tx = side == L ? tx1 : tx2
 			}
 		}
-		// in case `m` was too big...
-		tx = clamp(tx, tx1, tx2)
-		ty = clamp(ty, ty1, ty2)
 
 		// find tooltip tip's base points.
 		let bx, by // tip's center point between its two base points.
@@ -1472,6 +1470,10 @@ ui.widget('bb_tooltip', {
 			tx = clamp(bx, tx1+d, tx2-d)
 		}
 
+		// in case `m` was too big...
+		tx = clamp(tx, tx1, tx2)
+		ty = clamp(ty, ty1, ty2)
+
 		if (bg_color != null) {
 			bg_color = ui.bg_color(bg_color, bg_color_state)
 			set_theme_dark_from(bg_color)
@@ -1480,12 +1482,8 @@ ui.widget('bb_tooltip', {
 				side, tx, ty, b1x, b1y, b2x, b2y, r, d)
 			cx.fill()
 		}
-		if (shadow_set) {
-			cx.shadowBlur    = 0
-			cx.shadowOffsetX = 0
-			cx.shadowOffsetY = 0
-			shadow_set = false
-		}
+		if (shadow_set)
+			reset_shadow()
 		if (border_color != null) {
 			border_color = ui.border_color(border_color, border_color_state)
 			cx.strokeStyle = border_color[0]
@@ -1847,7 +1845,7 @@ runevery(120, function() {
 		}
 	}
 	if (n)
-		pr('gc text measure ', n)
+		debug('gc text measure ', n)
 })
 
 }
@@ -2967,6 +2965,13 @@ draw[CMD_SHADOW] = function(a, i) {
 	shadow_set = true
 }
 
+function reset_shadow() {
+	cx.shadowBlur    = 0
+	cx.shadowOffsetX = 0
+	cx.shadowOffsetY = 0
+	shadow_set = false
+}
+
 draw[CMD_BB] = function(a, i) {
 	let ct_i = a[i+1]
 	let px1 = a[ct_i+PX1+0]
@@ -2990,12 +2995,8 @@ draw[CMD_BB] = function(a, i) {
 		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
 		cx.fill()
 	}
-	if (shadow_set) {
-		cx.shadowBlur    = 0
-		cx.shadowOffsetX = 0
-		cx.shadowOffsetY = 0
-		shadow_set = false
-	}
+	if (shadow_set)
+		reset_shadow()
 	if (border_sides && border_color != null) {
 		border_color = ui.border_color(border_color, border_color_state)
 		cx.strokeStyle = border_color[0]
@@ -3026,7 +3027,6 @@ function draw_all() {
 			let next_ext_i = get_next_ext_i(a, i)
 			check_stacks()
 			reset_canvas()
-			theme = themes[ui.default_theme]
 			while (i < next_ext_i) {
 
 				let cmd = a[i-1]
@@ -3288,6 +3288,11 @@ ui.focused = function(id) {
 ui.focusing = function(id) {
 	return id && focusing_id == id
 }
+
+// frame widget --------------------------------------------------------------
+
+// TODO:
+// ui.widget('frame',
 
 // template widget -----------------------------------------------------------
 
@@ -4472,11 +4477,12 @@ function compute_step_and_range(wanted_n, min, max, scale_base, scales, decimals
 let SLIDER_ID         = S-1
 let SLIDER_FROM       = S+0
 let SLIDER_TO         = S+1
-let SLIDER_P          = S+2 // progress in 0..1
-let SLIDER_MARKED     = S+3
-let SLIDER_SCALE_BASE = S+4
-let SLIDER_SCALES     = S+5
-let SLIDER_DECIMALS   = S+6
+let SLIDER_DECIMALS   = S+2
+let SLIDER_P          = S+3 // progress in 0..1
+let SLIDER_MARKERS    = S+4
+let SLIDER_SCALE_BASE = S+5
+let SLIDER_SCALES     = S+6
+let SLIDER_THUMB_I    = S+7
 
 let fr0, align0, valign0, min_w0, min_h0
 
@@ -4496,40 +4502,133 @@ ui.clear_box_args = function() {
 	min_h0  = null
 }
 
-ui.slider_mark_w_em = 2 // em
+ui.slider_mark_w_em = 2
+ui.slider_thumb_r_em = .6
+ui.slider_shaft_h_em = 0.2
 
-ui.slider_progress = function(id, from, to) {
-	return lerp(ui.state(id, 'p') ?? .5, 0, 1, from ?? 0, to ?? 1)
+ui.slider_progress = function(id) {
+	return ui.state(id, 'p') ?? .5
 }
 
-ui.box_widget('_slider', {
+ui.slider_value = function(id, from, to) {
+	return lerp(ui.slider_progress(id), 0, 1, from ?? 0, to ?? 1)
+}
 
-	create: function(cmd, id, from, to, marked, scale_base, scales, decimals) {
+ui.slider_set_progress = function(id, p) {
+	p = clamp(p, 0, 1)
+	ui.state(id).set('p', p)
+}
+
+ui.slider_set_value = function(id, from, to, v) {
+	let p = lerp(v, from ?? 0, to ?? 1, 0, 1)
+	ui.slider_set_progress(id, p)
+}
+
+function dot(x, y) {
+	cx.beginPath()
+	cx.arc(x, y, 10, 0, 2 * PI)
+	cx.strokeStyle = 'red'
+	cx.stroke()
+}
+
+function rect(x, y, w, h) {
+	cx.beginPath()
+	cx.rect(x, y, w, h)
+	cx.strokeStyle = 'red'
+	cx.stroke()
+}
+
+function a_rect(a, i) {
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	let mx1 = a[i+MX1+0]
+	let my1 = a[i+MX1+1]
+	let mx2 = a[i+MX2+0]
+	let my2 = a[i+MX2+1]
+	let px1 = a[i+PX1+0]
+	let py1 = a[i+PX1+1]
+	let px2 = a[i+PX2+0]
+	let py2 = a[i+PX2+1]
+
+	cx.beginPath()
+	cx.rect(x, y, w, h)
+	cx.strokeStyle = 'red'
+	cx.stroke()
+
+	cx.rect(x-px1, y-py1, w+px1+px2, h+py1+py2)
+	cx.strokeStyle = 'green'
+	cx.stroke()
+
+	cx.rect(x-px1-mx1, y-py1-my1, w+px1+px2+mx1+mx2, h+py1+py2+my1+my2)
+	cx.strokeStyle = 'blue'
+	cx.stroke()
+}
+
+ui.box_widget('slider', {
+
+	create: function(cmd, id, from, to, decimals, markers, scale_base, scales) {
 
 		keepalive(id)
+
+		markers = markers ?? true
+
+		let fr = fr0 ?? 1
+		let align = align0 ?? 's'
+		let valign = valign0 ?? 'c'
+		let min_w = min_w0 ?? ui.em(12)
+		let min_h = min_h0 ?? ui.em((markers ? 2.8 : 1.2))
+		ui.clear_box_args()
 
 		let hit = ui.hit(id)
 		let click = hit && ui.click
 
-		if (click)
+		if (click) {
+			ui.focus(id)
 			ui.capture(id)
+		}
 
-		let i = ui_cmd_box(cmd, fr0 ?? 1, align0 ?? 's', valign0 ?? 'c',
-			min_w0 ?? ui.em(12),
-			min_h0 ?? ui.em(),
-			id,
-			from ?? 0,
-			to ?? 1,
-			0, // p
-			marked ?? true,
-			scale_base,
-			scales,
-			decimals ?? 2,
-		)
+		if (ui.focused(id)) {
+			let d = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
+			if (d) {
+				let p = ui.slider_progress(id)
+				p += d * (ui.key('shift') ? .01 : .1)
+				ui.slider_set_progress(id, p)
+			}
+		}
 
-		ui.clear_box_args()
+		ui.stack()
 
-		return i
+			ui.m(markers ? ui.sp8() : ui.sp2(), ui.sp2())
+			let i = ui_cmd_box(cmd, fr, align, valign,
+				min_w,
+				min_h,
+				id,
+				from ?? 0,
+				to ?? 1,
+				decimals ?? 2,
+				0, // p
+				markers,
+				scale_base,
+				scales,
+				0, // thumb_i
+			)
+
+			let thumb_i = ui.stack('', 0, 'l', 't'); ui.end_stack()
+			a[i+SLIDER_THUMB_I] = thumb_i
+
+		ui.end_stack()
+
+		if (!markers && (hit || ui.captured(id))) {
+			ui.mb(10)
+			ui.p(ui.sp2(), ui.sp())
+			ui.popup(id+'.popup', layer_popup, thumb_i, 't', 'c', 0, 0, 'change_side constrain')
+				ui.bb_tooltip('', 'info', null, 'light', null, ui.sp05())
+				ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
+			ui.end_popup()
+		}
+
 	},
 
 	ID: SLIDER_ID,
@@ -4542,8 +4641,10 @@ ui.box_widget('_slider', {
 		let p = ui.state(id, 'p') ?? .5
 
 		if (ui.captured(id)) {
-			let x = a[i+0]
-			let w = a[i+2]
+			let thumb_r = ui.em(ui.slider_thumb_r_em)
+			let margin_x = thumb_r
+			let x = a[i+0] + margin_x
+			let w = a[i+2] - 2*margin_x
 			p = clamp((ui.mx - x) / w, 0, 1)
 			ui.state(id).set('p', p)
 		}
@@ -4552,9 +4653,27 @@ ui.box_widget('_slider', {
 		let to    = a[i+SLIDER_TO]
 		let v = lerp(p, 0, 1, from, to)
 		ui.state(id).set('v', v)
-		ui.state(id).set('v', v)
 
 		a[i+SLIDER_P] = p
+
+		// find thumb's center point and position the thumb anchor stack.
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
+		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
+		let r = round(shaft_h / 2) // shaft corner radius
+		let thumb_r = ui.em(ui.slider_thumb_r_em)
+		let margin_x = thumb_r
+		let thumb_cx = x + margin_x + p * (w - 2 * margin_x)
+		let thumb_cy = y + h - 2*thumb_r
+
+		let thumb_i = a[i+SLIDER_THUMB_I]
+
+		// HACK: set position of thumb_i manually.
+		a[thumb_i+0] = thumb_cx
+		a[thumb_i+1] = thumb_cy
+
 	},
 
 	draw: function(a, i) {
@@ -4564,23 +4683,32 @@ ui.box_widget('_slider', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let id = a[i+SLIDER_ID]
-		let p  = a[i+SLIDER_P]
+		let id      = a[i+SLIDER_ID]
+		let p       = a[i+SLIDER_P]
+		let markers = a[i+SLIDER_MARKERS]
 
 		let hit = ui.hit(id)
+		let focused = ui.focused(id)
 
-		let r = round(h / 4) // shaft corner radius
-		let thumb_r = ui.em(.6)
+		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
+		let r = round(shaft_h / 2) // shaft corner radius
+		let thumb_r = ui.em(ui.slider_thumb_r_em)
+		let margin_x = thumb_r
+
+		y += h - r - thumb_r
+		x += margin_x
+		w -= 2 * margin_x
+
 		let thumb_cx = x + p * w
-		let thumb_cy = y + round((h - thumb_r) / 2)
+		let thumb_cy = y + r
 
 		// draw shaft
-		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
+		bg_path(cx, x - r, y, x + w + r, y + 2*r, BORDER_SIDE_ALL, 1000)
 		let shaft_color = ui.bg_color('bg2', hit ? 'hover' : null)
 		cx.fillStyle = shaft_color[0]
 		cx.fill()
 
-		bg_path(cx, x + .5 - r, y + .5, thumb_cx, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
+		bg_path(cx, x - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
 		let fill_color = ui.bg_color('link', hit ? 'hover' : null)
 		cx.fillStyle = fill_color[0]
 		cx.fill()
@@ -4591,6 +4719,15 @@ ui.box_widget('_slider', {
 		cx.lineWidth = 1
 		cx.stroke()
 
+		// draw focus ring under thumb
+		if (focused) {
+			let color = ui.bg_color('item', 'item-focused item-selected focused')
+			cx.fillStyle = ui.hsl_adjust(color, 1, 1, 1, .5)
+			cx.beginPath()
+			cx.arc(thumb_cx, thumb_cy, thumb_r * 2, 0, 2 * PI)
+			cx.fill()
+		}
+
 		// draw thumb
 		fill_color = ui.fg_color('link', hit ? 'hover' : null)
 		cx.fillStyle = fill_color[0]
@@ -4599,7 +4736,7 @@ ui.box_widget('_slider', {
 		cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
 		cx.fill()
 
-		if (a[i+SLIDER_MARKED]) {
+		if (markers) {
 
 			let from       = a[i+SLIDER_FROM]
 			let to         = a[i+SLIDER_TO]
@@ -4612,22 +4749,47 @@ ui.box_widget('_slider', {
 				max_n, from, to, scale_base, scales, decimals)
 
 			cx.textAlign = 'center'
-			cx.fillStyle = ui.fg_color('text')[0]
-			cx.strokeStyle = ui.fg_color('text')[0]
+			let color = ui.fg_color('label')
 			cx.lineWidth = 1
 			let m = measure_text(cx, cx.font, ' ')
 			let asc = m.fontBoundingBoxAscent
 			let dsc = m.fontBoundingBoxDescent
 			let x0 = x
+
+			let v = ui.slider_value(id, from, to)
+			let vx = round(x0 + lerp(v, from, to, 0, w)) + .5
+
 			for (let v = min; v <= max; v += step) {
 				let x = round(x0 + lerp(v, from, to, 0, w)) + .5
+
+				// shadow markers that are too close to the current value.
+				let alpha = clamp(abs(vx - x) / ui.em(3) - .7, 0, 1)
+
+				let c = ui.hsl_adjust(color, 1, 1, 1, alpha)
+				cx.fillStyle  = c
+				cx.strokeStyle = c
 
 				cx.beginPath()
 				cx.moveTo(x, round(y - ui.em(1.0)) + .5)
 				cx.lineTo(x, round(y - ui.em(0.6)) + .5)
 				cx.stroke()
 
-				let s = str(v)
+				let s = dec(v, decimals)
+				cx.fillText(s, x, y - ui.em(1.2)) //  - asc - dsc)
+			}
+
+			// show a marker for the current value
+			{
+				let x = vx
+				cx.fillStyle = ui.fg_color('text')[0]
+				cx.strokeStyle = ui.fg_color('text')[0]
+
+				cx.beginPath()
+				cx.moveTo(x, round(y - ui.em(1.0)) + .5)
+				cx.lineTo(x, round(y - ui.em(0.6)) + .5)
+				cx.stroke()
+
+				let s = dec(v, decimals)
 				cx.fillText(s, x, y - ui.em(1.2)) //  - asc - dsc)
 			}
 
@@ -4636,18 +4798,6 @@ ui.box_widget('_slider', {
 	},
 
 })
-
-ui.slider = function(id, from, to, marked, scale_base, scales, decimals) {
-	let slider_i = ui._slider(id, from, to, marked, scale_base, scales, decimals)
-	if (ui.hit(id) || ui.captured(id)) {
-		ui.m(ui.sp())
-		ui.p(ui.sp2(), ui.sp())
-		ui.popup(id+'.popup', layer_popup, slider_i, 't', 'c')
-			ui.bb_tooltip('', 'info', null, 'light', null, ui.sp05())
-			ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
-		ui.end_popup()
-	}
-}
 
 // calendar ------------------------------------------------------------------
 
