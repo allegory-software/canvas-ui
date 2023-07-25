@@ -4321,12 +4321,11 @@ let cursors = {
 	bottom       : 'ns-resize',
 	right        : 'ew-resize',
 	bottom_right : 'nwse-resize',
-	// TODO:
-	//top          : 'ns-resize',
-	//left         : 'ew-resize',
-	//top_left     : 'nwse-resize',
-	//top_right    : 'nesw-resize',
-	//bottom_left  : 'nesw-resize',
+	top          : 'ns-resize',
+	left         : 'ew-resize',
+	top_left     : 'nwse-resize',
+	top_right    : 'nesw-resize',
+	bottom_left  : 'nesw-resize',
 }
 
 ui.widget('resizer', {
