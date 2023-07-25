@@ -32,7 +32,7 @@ const {
 	dec, num, str,
 	obj, set, map, array,
 	assign,
-	noop, return_true,
+	noop, return_true, do_after,
 	clock,
 	memoize,
 	freelist,
@@ -771,8 +771,8 @@ let color, color_state, font, font_size, font_weight, line_gap
 
 ui.get_font_size = () => font_size
 
-ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
-ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
+ui.default_theme = document.body.getAttribute('theme') ?? 'light'
+ui.default_font  = document.body.getAttribute('font' ) ?? 'Arial'
 ui.font_size_normal = 14
 
 function reset_canvas() {
@@ -843,7 +843,7 @@ function C(a, i) { return cmd_names[a[i-1]] }
 
 function cmd(name, is_ct) {
 	let code = hash32(name)
-	code = (is_ct ? -1 : 1) * abs(code)
+	code = (is_ct ? -1 : 1) * abs(code) // test for container: `cmd < 0`
 	assert(!cmd_names[code], 'duplicate command code ', code, ' for ', name)
 	cmd_names[code] = name
 	cmd_name_map.set(name, code)
@@ -898,8 +898,6 @@ ui.record_play = function(a1) {
 		let reindex_f = reindex[cmd]
 		if (reindex_f)
 			reindex_f(a1, i, offset)
-		if (cmd < 0) // container
-			a1[i+NEXT_EXT_I] += offset
 		i = next_i
 	}
 
@@ -921,9 +919,9 @@ let is_flex_child = {}
 
 // measuring phase (per-axis) ------------------------------------------------
 
-// calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1) of all boxes
-// by walking the container tree bottom-up (non-recursive, uses ct_stack).
-// the minimum dimensions include margins and paddings.
+// walk the element tree bottom-up and call the measure function for each
+// element that has it. non-recursive, uses ct_stack and containers'
+// measure_end callback to do the work.
 
 function measure_record(a, axis) {
 	let i = 2
@@ -947,11 +945,8 @@ function measure_all(axis) {
 
 // positioning phase (per-axis) ----------------------------------------------
 
-// calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1)
-// of all boxes by walking the container tree top-down, and using different
-// positioning algorithms based on container type (recursive).
-// the resulting boxes at a[i+0..3] exclude margins and paddings.
-// scrolling and popup positioning is done at a later stage.
+// walk the element tree top-down, and call the position function for each
+// element that has it. recursive, uses call stack to pass ct_i.
 
 function position_record(a, axis, ct_w) {
 	let i = 2
@@ -1178,6 +1173,9 @@ function redraw_all() {
 // widget API ----------------------------------------------------------------
 
 ui.widget = function(cmd_name, t, is_ct) {
+	let reindex_f = t.reindex
+	if (is_ct)
+		reindex_f = reindex_f ? do_after(box_ct_reindex, reindex_f) : box_ct_reindex
 	let _cmd = cmd(cmd_name, is_ct)
 	measure       [_cmd] = t.measure
 	measure_end   [_cmd] = t.measure_end
@@ -1186,7 +1184,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	draw          [_cmd] = t.draw
 	draw_end      [_cmd] = t.draw_end
 	hit           [_cmd] = t.hit
-	reindex       [_cmd] = t.reindex
+	reindex       [_cmd] = reindex_f
 	is_flex_child [_cmd] = t.is_flex_child
 	let create = t.create
 	if (create) {
@@ -1214,19 +1212,12 @@ const PX2        =  6
 const MX1        =  8
 const MX2        = 10
 
-const FR         = 12 // children of v,h: fraction from main-axis size.
-const ALIGN      = 13 // all children: align v,h.
+const FR         = 12 // all `is_flex_child` widgets: fraction from main-axis size.
+const ALIGN      = 13 // all boxes: align v,h.
 const NEXT_EXT_I = 15 // all containers: next command after this one's END command.
 const S          = 16 // first index after the ui_cmd_box_ct header.
 
 const FLEX_GAP = S+0
-
-function get_next_ext_i(a, i) {
-	let cmd = a[i-1]
-	if (cmd < 0) // container
-		return a[i+NEXT_EXT_I]
-	return a[i-2] // next_i
-}
 
 ui.PX1 = PX1
 ui.PX2 = PX2
@@ -1330,6 +1321,8 @@ function reset_paddings() {
 }
 reset_paddings()
 
+// box command
+
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	let i = ui_cmd(cmd,
 		0, // x
@@ -1348,38 +1341,7 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 }
 ui.cmd_box = ui_cmd_box
 
-ui.box_widget = function(cmd_name, t, is_ct) {
-	let ID = t.ID
-	return ui.widget(cmd_name, assign({
-		measure: function(a, i, axis) {
-			a[i+2+axis] += paddings(a, i, axis)
-			let w = a[i+2+axis]
-			add_ct_min_wh(a, axis, w)
-		},
-		position: function(a, i, axis, sx, sw) {
-			a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-			a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
-		},
-		translate: function(a, i, dx, dy) {
-			a[i+0] += dx
-			a[i+1] += dy
-		},
-		hit: ID != null && function(a, i) {
-			let x = a[i+0]
-			let y = a[i+1]
-			let w = a[i+2]
-			let h = a[i+3]
-			let id = a[i+ID]
-			if (hit_rect(x, y, w, h)) {
-				ui.hover(id)
-				return true
-			}
-		},
-		is_flex_child: true,
-	}, t), is_ct)
-}
-
-// measure phase utils
+// box measure phase
 
 function is_main_axis(cmd, axis) {
 	return (
@@ -1408,7 +1370,15 @@ function ct_stack_push(a, i) {
 	ct_stack.push(i)
 }
 
-// position phase utils
+// calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
+// the minimum dimensions include margins and paddings.
+function box_measure(a, i, axis) {
+	a[i+2+axis] += paddings(a, i, axis)
+	let w = a[i+2+axis]
+	add_ct_min_wh(a, axis, w)
+}
+
+// box position phase
 
 function align_w(a, i, axis, sw) {
 	let align = a[i+ALIGN+axis]
@@ -1443,7 +1413,22 @@ ui.align_w = align_w
 ui.inner_x = inner_x
 ui.inner_w = inner_w
 
-// hit phase utils
+// calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1).
+// the resulting box at a[i+0..3] exclude margins and paddings.
+// NOTE: scrolling and popup positioning is done in the translation phase.
+function box_position(a, i, axis, sx, sw) {
+	a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
+}
+
+// box translate phase
+
+function box_translate(a, i, dx, dy) {
+	a[i+0] += dx
+	a[i+1] += dy
+}
+
+// box hit phase
 
 function hit_rect(x, y, w, h) {
 	return (
@@ -1464,7 +1449,36 @@ function hit_box(a, i) {
 	return hit_rect(x, y, w, h)
 }
 
+ui.box_widget = function(cmd_name, t, is_ct) {
+	let ID = t.ID
+	function box_hit(a, i) {
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
+		let id = a[i+ID]
+		if (hit_rect(x, y, w, h)) {
+			ui.hover(id)
+			return true
+		}
+	}
+	return ui.widget(cmd_name, assign({
+		position  : box_position,
+		measure   : box_measure,
+		translate : box_translate,
+		hit       : ID != null && box_hit,
+		is_flex_child: true,
+	}, t), is_ct)
+}
+
 // container-box widgets -----------------------------------------------------
+
+function get_next_ext_i(a, i) {
+	let cmd = a[i-1]
+	if (cmd < 0) // container
+		return a[i+NEXT_EXT_I]
+	return a[i-2] // next_i
+}
 
 // NOTE: `ct` is short for container, which must end with ui.end().
 function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
@@ -1481,6 +1495,10 @@ ui.box_ct_widget = function(cmd_name, t) {
 	let cmd = cmd_name_map.get(cmd_name)
 	ui['end_'+cmd_name] = function() { ui.end(cmd) }
 	return ret
+}
+
+function box_ct_reindex(a, i, offset) {
+	a[i+NEXT_EXT_I] += offset
 }
 
 const CMD_END = cmd('end')
@@ -1622,6 +1640,9 @@ ui.hv = function(hv, ...args) {
 ui.end_h = function() { ui.end(CMD_H) }
 ui.end_v = function() { ui.end(CMD_V) }
 
+reindex[CMD_H] = box_ct_reindex
+reindex[CMD_V] = box_ct_reindex
+
 measure[CMD_H] = ct_stack_push
 measure[CMD_V] = ct_stack_push
 
@@ -1760,6 +1781,8 @@ ui.stack = function(id, fr, align, valign, min_w, min_h) {
 		id)
 }
 
+reindex[CMD_STACK] = box_ct_reindex
+
 measure[CMD_STACK] = ct_stack_push
 
 position[CMD_STACK] = function(a, i, axis, sx, sw) {
@@ -1837,6 +1860,8 @@ ui.scroll_xy = function(a, i, axis) {
 
 ui.end_scrollbox = function() { ui.end(CMD_SCROLLBOX) }
 ui.end_sb = ui.end_scrollbox
+
+reindex[CMD_SCROLLBOX] = box_ct_reindex
 
 measure[CMD_SCROLLBOX] = ct_stack_push
 
@@ -2177,6 +2202,7 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 }
 
 reindex[CMD_POPUP] = function(a, i, offset) {
+	box_ct_reindex(a, i, offset)
 	if (a[i+POPUP_TARGET_I] >= 0)
 		a[i+POPUP_TARGET_I] += offset
 }
