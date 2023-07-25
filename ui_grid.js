@@ -559,7 +559,7 @@ ui.spy_input = function() {
 ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 
 	ui.keepalive(id)
-	let s = ui.state_map(id)
+	let s = ui.state(id)
 	let nav = s.get('nav')
 	if (!nav) {
 		nav = ui.nav({

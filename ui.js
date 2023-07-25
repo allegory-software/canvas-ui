@@ -27,7 +27,7 @@ ui.VERSION = '0.1'
 const {
 	repl,
 	isarray, isstr, isnum,
-	assert, pr, debug, trace,
+	assert, warn, pr, debug, trace,
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str,
 	obj, set, map, array,
@@ -421,7 +421,6 @@ function raf_animate() {
 	raf_id = null
 	let t0 = clock()
 	cx.clearRect(0, 0, canvas.width, canvas.height)
-	want_redraw = true
 	redraw_all()
 	ui.last_frame_duration = clock() - t0
 	if (ui.max_frame_duration)
@@ -439,11 +438,11 @@ ui.animate = animate
 
 ui.ready = function() {
 	ready = true
-	assert(ui.frame, 'ui.frame not set')
+	assert(ui.main, 'ui.main not set')
 	resize_canvas()
 }
 
-// mouse events --------------------------------------------------------------
+// mouse state ---------------------------------------------------------------
 
 ui.pressed = false
 ui.click = false
@@ -453,17 +452,6 @@ ui.wheel_dy = 0
 ui.trackpad = false
 ui.mouseenter = false
 ui.mouseleave = false
-
-function reset_mouse() {
-	if (ui.clickup)
-		ui.captured_id = null
-	ui.click = false
-	ui.clickup = false
-	ui.wheel_dy = 0
-	ui.trackpad = false
-	ui.mouseenter = false
-	ui.mouseleave = false
-}
 
 function update_mouse(ev) {
 	ui.mx = round(ev.clientX * dpr)
@@ -520,7 +508,7 @@ canvas.addEventListener('wheel', function(ev) {
 	animate()
 })
 
-// mouse capturing -----------------------------------------------------------
+// mouse capture state -------------------------------------------------------
 
 let capture_state = map()
 
@@ -544,7 +532,7 @@ ui.captured = function(id) {
 	return id && ui.captured_id == id && capture_state || null
 }
 
-// keyboard events -----------------------------------------------------------
+// keyboard state ------------------------------------------------------------
 
 let key_state_now = map()
 let key_state = set()
@@ -679,7 +667,19 @@ function scope_prev_var(ended_scope, k) {
 ui.scope = begin_scope
 ui.end_scope = end_scope
 
-// id state maps -------------------------------------------------------------
+/* id state maps -------------------------------------------------------------
+
+Persistence between frames is kept in per-id state maps. Widgets need to
+call keepalive(id) otherwise their state map is garbage-collected at the end
+of the frame. Widgets can also register a `free` callback to be called if
+the widget doesn't appear again on a future frame. State updates should be
+done inside an update callback registered with keepalive() so that the widget
+state can be updated in advance of the widget appearing in the frame in case
+the widget state is queried from outside before the widget appears in the frame.
+The update callback will be called once per frame, either from a state access
+or from the widget command call.
+
+*/
 
 let id_state_map_freelist = map_freelist()
 let id_state_maps  = map() // {id->map}
@@ -765,28 +765,6 @@ ui.on_free = function(id, free1) {
 	}
 }
 
-// measure state -------------------------------------------------------------
-
-let measure_req = []
-
-ui.measure = function(dest) {
-	let i = assert(ct_stack.at(-1), 'measure outside container')
-	measure_req.push(dest, i)
-}
-
-function measure_req_all() {
-	for (let k = 0, n = measure_req.length; k < n; k += 2) {
-		let dest = measure_req[k+0]
-		let i    = measure_req[k+1]
-		let s = isstr(dest) ? ui.state(dest) : dest
-		s.set('x', a[i+0])
-		s.set('y', a[i+1])
-		s.set('w', a[i+2])
-		s.set('h', a[i+3])
-	}
-	measure_req.length = 0
-}
-
 // command state -------------------------------------------------------------
 
 let color, color_state, font, font_size, font_weight, line_gap
@@ -805,7 +783,6 @@ function reset_canvas() {
 	font_size = ui.font_size_normal
 	font_weight = 'normal'
 	line_gap = 0.5
-	reset_paddings()
 	scope_set('color', color)
 	scope_set('theme', theme)
 	scope_set('font', font)
@@ -814,6 +791,24 @@ function reset_canvas() {
 	scope_set('line_gap', line_gap)
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
 	reset_shadow()
+}
+
+// focus state ---------------------------------------------------------------
+
+ui.focused_id = null
+let focusing_id
+
+ui.focus = function(id) {
+	ui.focused_id = id
+	focusing_id = id
+}
+
+ui.focused = function(id) {
+	return id && ui.focused_id == id
+}
+
+ui.focusing = function(id) {
+	return id && focusing_id == id
 }
 
 // container stack -----------------------------------------------------------
@@ -839,7 +834,7 @@ function check_stacks() {
 	assert(!scope_stack.length, 'scope not closed')
 }
 
-// imgui command array -------------------------------------------------------
+// command array -------------------------------------------------------------
 
 let cmd_names = []
 let cmd_name_map = map()
@@ -866,8 +861,8 @@ function ui_cmd(cmd, ...args) {
 }
 ui.cmd = ui_cmd
 
-// first index after the last cmd arg.
-let cmd_end_i = (a, i) => a[i-2] - 3
+// index after the last arg.
+let cmd_arg_end_i = (a, i) => a[i-2] - 3
 
 // cmd buffers ---------------------------------------------------------------
 
@@ -913,22 +908,286 @@ ui.record_play = function(a1) {
 	record_freelist.free(a1)
 }
 
-// widget API ----------------------------------------------------------------
+// rendering phases ----------------------------------------------------------
 
-let measure   = {}
-let position  = {}
-let translate = {}
-let draw      = {}
-let hit       = {}
+let measure       = {}
+let measure_end   = {}
+let position      = {}
+let translate     = {}
+let draw          = {}
+let draw_end      = {}
+let hit           = {}
+let is_flex_child = {}
+
+// measuring phase (per-axis) ------------------------------------------------
+
+// calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1) of all boxes
+// by walking the container tree bottom-up (non-recursive, uses ct_stack).
+// the minimum dimensions include margins and paddings.
+
+function measure_record(a, axis) {
+	let i = 2
+	let n = a.length
+	while (i < n) {
+		let cmd    = a[i-1]
+		let next_i = a[i-2]
+		let measure_f = measure[cmd]
+		if (measure_f)
+			measure_f(a, i, axis)
+		i = next_i
+	}
+}
+
+function measure_all(axis) {
+	check_stacks()
+	reset_canvas()
+	measure_record(a, axis)
+	check_stacks()
+}
+
+// positioning phase (per-axis) ----------------------------------------------
+
+// calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1)
+// of all boxes by walking the container tree top-down, and using different
+// positioning algorithms based on container type (recursive).
+// the resulting boxes at a[i+0..3] exclude margins and paddings.
+// scrolling and popup positioning is done at a later stage.
+
+function position_record(a, axis, ct_w) {
+	let i = 2
+	let cmd = a[i-1]
+	let min_w = a[i+2+axis]
+	let position_f = position[cmd]
+	position_f(a, i, axis, 0, max(min_w, ct_w))
+}
+
+function position_all(axis) {
+	let ct_w = axis ? screen_h : screen_w
+	position_record(a, axis, ct_w)
+}
+
+// translation phase ---------------------------------------------------------
+
+// do scrolling and popup positioning and offset all boxes (top-down, recursive).
+
+function translate_record(a) {
+	let i = 2
+	let cmd = a[i-1]
+	let translate_f = translate[cmd]
+	translate_f(a, i, 0, 0)
+}
+
+function translate_all() {
+	translate_record(a)
+}
+
+ui.translate = function(a, i) {
+	// TODO
+}
+
+// drawing phase -------------------------------------------------------------
+
+let theme_stack = []
+
+function draw_all() {
+	screen.style.background = ui.bg_color('bg')[0]
+	for (layer of a.layers) {
+		// ^^NOTE: we're setting the global variable called layer!
+		for (let i of layer) {
+			let next_ext_i = get_next_ext_i(a, i)
+			check_stacks()
+			reset_canvas()
+			while (i < next_ext_i) {
+
+				let cmd = a[i-1]
+				if (cmd < 0) // ct
+					theme_stack.push(theme)
+				else if (cmd == CMD_END)
+					theme = theme_stack.pop()
+
+				let draw_f = draw[cmd]
+				if (draw_f && draw_f(a, i)) {
+					i = get_next_ext_i(a, i)
+					if (cmd < 0)
+						theme = theme_stack.pop()
+				} else {
+					i = a[i-2] // next_i
+				}
+			}
+			check_stacks()
+			assert(!theme_stack.length)
+		}
+	}
+}
+
+// hit-testing phase ---------------------------------------------------------
+
+let hit_state_map_freelist = map_freelist()
+let hit_state_maps = map() // {id->map}
+
+ui._hit_state_maps = hit_state_maps
+
+ui.hit = function(id, k) {
+	if (!id) return
+	if (ui.captured_id) // unavailable while captured
+		return
+	let m = hit_state_maps.get(id)
+	return k ? m?.get(k) : m
+}
+
+ui.hover = function(id) {
+	if (!id) return
+	let m = hit_state_maps.get(id)
+	if (!m) {
+		m = hit_state_map_freelist.alloc()
+		hit_state_maps.set(id, m)
+	}
+	return m
+}
+
+ui.hovers = function(id, k) {
+	if (!id) return
+	let m = hit_state_maps.get(id)
+	return k ? m?.get(k) : m
+}
+
+function hit_all() {
+
+	ui.set_cursor()
+
+	hit_template_id = null
+	hit_template_i0 = null
+	hit_template_i1 = null
+
+	for (let m of hit_state_maps.values())
+		hit_state_map_freelist.free(m)
+	hit_state_maps.clear()
+
+	if (ui.mx == null)
+		return
+
+	// iterate layers in reverse order.
+	for (let j = a.layers.length-1; j >= 0; j--) {
+		layer = a.layers[j]
+		// iterate layer's cointainers in reverse order.
+		for (let k = layer.length-1; k >= 0; k--) {
+			reset_canvas()
+			let i = layer[k]
+			let hit_f = hit[a[i-1]]
+			if (hit_f(a, i)) {
+				j = -1
+				break
+			}
+		}
+	}
+	layer = null
+
+}
+
+// measuring requests --------------------------------------------------------
+
+let measure_req = []
+
+ui.measure = function(dest) {
+	let i = assert(ct_stack.at(-1), 'measure outside container')
+	measure_req.push(dest, i)
+}
+
+function measure_req_all() {
+	for (let k = 0, n = measure_req.length; k < n; k += 2) {
+		let dest = measure_req[k+0]
+		let i    = measure_req[k+1]
+		let s = isstr(dest) ? ui.state(dest) : dest
+		s.set('x', a[i+0])
+		s.set('y', a[i+1])
+		s.set('w', a[i+2])
+		s.set('h', a[i+3])
+	}
+	measure_req.length = 0
+}
+
+// animation frame -----------------------------------------------------------
+
+let want_redraw
+
+ui.redraw = function() {
+	want_redraw = true
+}
+
+function layout_record(rec_a) {
+	let a0 = a
+	a = null
+	measure_record(rec_a); position_record(rec_a) // x-axis
+	measure_record(rec_a); position_record(rec_a) // y-axis
+	translate_record(a)
+	a = a0
+}
+
+function redraw_all() {
+	let redraw_count = 0
+	while (1) {
+		want_redraw = false
+
+		hit_all()
+		measure_req_all()
+
+		a.length = 0
+		for (let layer of a.layers)
+			layer_clear(layer)
+		check_stacks()
+
+		let i = ui.stack()
+		begin_layer(layer_base, i)
+		ui.main()
+		ui.end()
+		end_layer()
+		reset_paddings()
+
+		measure_all(0); position_all(0) // x-axis
+		measure_all(1); position_all(1) // y-axis
+		translate_all()
+
+		id_state_gc()
+
+		if (!want_redraw)
+			draw_all()
+		reset_canvas()
+
+		if (ui.clickup)
+			ui.captured_id = null
+		ui.click = false
+		ui.clickup = false
+		ui.wheel_dy = 0
+		ui.trackpad = false
+		ui.mouseenter = false
+		ui.mouseleave = false
+		key_state_now.clear()
+		event_state.clear()
+		focusing_id = null
+
+		if (!want_redraw)
+			break
+		redraw_count++
+		if (redraw_count > 2) {
+			warn('redraw loop detected')
+			break
+		}
+	}
+}
+
+// widget API ----------------------------------------------------------------
 
 ui.widget = function(cmd_name, t, is_ct) {
 	let _cmd = cmd(cmd_name, is_ct)
-	measure   [_cmd] = t.measure
-	position  [_cmd] = t.position
-	translate [_cmd] = t.translate
-	draw      [_cmd] = t.draw
-	hit       [_cmd] = t.hit
-	reindex   [_cmd] = t.reindex
+	measure       [_cmd] = t.measure
+	measure_end   [_cmd] = t.measure_end
+	position      [_cmd] = t.position
+	translate     [_cmd] = t.translate
+	draw          [_cmd] = t.draw
+	draw_end      [_cmd] = t.draw_end
+	hit           [_cmd] = t.hit
+	reindex       [_cmd] = t.reindex
+	is_flex_child [_cmd] = t.is_flex_child
 	let create = t.create
 	if (create) {
 		function wrapper(...args) {
@@ -948,7 +1207,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	}
 }
 
-// box & box-container widgets -----------------------------------------------
+// box widgets ---------------------------------------------------------------
 
 const PX1        =  4
 const PX2        =  6
@@ -960,8 +1219,7 @@ const ALIGN      = 13 // all children: align v,h.
 const NEXT_EXT_I = 15 // all containers: next command after this one's END command.
 const S          = 16 // first index after the ui_cmd_box_ct header.
 
-const FLEX_GAP      = S+0
-const FLEX_TOTAL_FR = S+1
+const FLEX_GAP = S+0
 
 function get_next_ext_i(a, i) {
 	let cmd = a[i-1]
@@ -978,6 +1236,13 @@ ui.FR         = FR
 ui.ALIGN      = ALIGN
 ui.NEXT_EXT_I = NEXT_EXT_I
 ui.S          = S
+
+function paddings(a, i, axis) {
+	return (
+		a[i+MX1+axis] + a[i+MX2+axis] +
+		a[i+PX1+axis] + a[i+PX2+axis]
+	)
+}
 
 const ALIGN_STRETCH = 0
 const ALIGN_START   = 1
@@ -1063,6 +1328,7 @@ function reset_paddings() {
 	mx2 = 0
 	my2 = 0
 }
+reset_paddings()
 
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	let i = ui_cmd(cmd,
@@ -1082,24 +1348,13 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 }
 ui.cmd_box = ui_cmd_box
 
-// NOTE: `ct` is short for container, which must end with ui.end().
-function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
-	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-		0, // next_ext_i
-		...args
-	)
-	ct_stack.push(i)
-	return i
-}
-
 ui.box_widget = function(cmd_name, t, is_ct) {
 	let ID = t.ID
 	return ui.widget(cmd_name, assign({
 		measure: function(a, i, axis) {
 			a[i+2+axis] += paddings(a, i, axis)
-			let fr = a[i+FR]
-			let w  = a[i+2+axis]
-			add_ct_min_wh(a, axis, w, fr)
+			let w = a[i+2+axis]
+			add_ct_min_wh(a, axis, w)
 		},
 		position: function(a, i, axis, sx, sw) {
 			a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
@@ -1120,7 +1375,105 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 				return true
 			}
 		},
+		is_flex_child: true,
 	}, t), is_ct)
+}
+
+// measure phase utils
+
+function is_main_axis(cmd, axis) {
+	return (
+		(cmd == CMD_V ? 1 : 2) == axis ||
+		(cmd == CMD_H ? 0 : 2) == axis
+	)
+}
+
+function add_ct_min_wh(a, axis, w) {
+	let i = ct_stack.at(-1)
+	if (i == null) // root ct
+		return
+	let cmd = a[i-1]
+	let main_axis = is_main_axis(cmd, axis)
+	let min_w = a[i+2+axis]
+	if (main_axis) {
+		let gap = a[i+FLEX_GAP]
+		a[i+2+axis] = min_w + w + gap
+	} else {
+		a[i+2+axis] = max(min_w, w)
+	}
+}
+ui.add_ct_min_wh = add_ct_min_wh
+
+function ct_stack_push(a, i) {
+	ct_stack.push(i)
+}
+
+// position phase utils
+
+function align_w(a, i, axis, sw) {
+	let align = a[i+ALIGN+axis]
+	if (align == ALIGN_STRETCH)
+		return sw
+	return a[i+2+axis] // min_w
+}
+
+function align_x(a, i, axis, sx, sw) {
+	let align = a[i+ALIGN+axis]
+	if (align == ALIGN_END) {
+		let min_w = a[i+2+axis]
+		return sx + sw - min_w
+	} else if (align == ALIGN_CENTER) {
+		let min_w = a[i+2+axis]
+		return sx + round((sw - min_w) / 2)
+	} else {
+		return sx
+	}
+}
+
+// outer-box (ct_x, ct_w) -> inner-box (x, w).
+function inner_x(a, i, axis, ct_x) {
+	return ct_x + a[i+MX1+axis] + a[i+PX1+axis]
+}
+function inner_w(a, i, axis, ct_w) {
+	return ct_w - paddings(a, i, axis)
+}
+
+ui.align_x = align_x
+ui.align_w = align_w
+ui.inner_x = inner_x
+ui.inner_w = inner_w
+
+// hit phase utils
+
+function hit_rect(x, y, w, h) {
+	return (
+		(ui.mx >= x && ui.mx < x + w) &&
+		(ui.my >= y && ui.my < y + h)
+	)
+}
+
+function hit_box(a, i) {
+	let px1 = a[i+PX1+0]
+	let py1 = a[i+PX1+1]
+	let px2 = a[i+PX2+0]
+	let py2 = a[i+PX2+1]
+	let x = a[i+0] - px1
+	let y = a[i+1] - py1
+	let w = a[i+2] + px1 + px2
+	let h = a[i+3] + py1 + py2
+	return hit_rect(x, y, w, h)
+}
+
+// container-box widgets -----------------------------------------------------
+
+// NOTE: `ct` is short for container, which must end with ui.end().
+function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
+	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+		0, // next_ext_i
+		...args
+	)
+	ct_stack.push(i)
+	return i
 }
 
 ui.box_ct_widget = function(cmd_name, t) {
@@ -1130,13 +1483,129 @@ ui.box_ct_widget = function(cmd_name, t) {
 	return ret
 }
 
+const CMD_END = cmd('end')
+ui.end = function(cmd) {
+	end_scope()
+	let i = assert(ct_stack.pop(), 'end command outside container')
+	if (cmd && a[i-1] != cmd)
+		assert(false, 'closing ', cmd_names[cmd], ' instead of ', C(a, i))
+	let end_i = ui_cmd(CMD_END, i)
+	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
+
+	if (a[i-1] == CMD_POPUP) { // TOOD: make this non-specific
+		end_layer()
+	}
+}
+
+reindex[CMD_END] = function(a, i, offset) {
+	a[i+0] += offset
+}
+
+measure[CMD_END] = function(a, _, axis) {
+	let i = assert(ct_stack.pop(), 'end command outside a container')
+	let cmd = a[i-1]
+	let measure_end_f = measure_end[cmd]
+	if (measure_end_f) {
+		measure_end_f(a, i, axis)
+	} else {
+		let main_axis = is_main_axis(cmd, axis)
+		if (main_axis)
+			a[i+2+axis] = max(0, a[i+2+axis] - a[i+FLEX_GAP]) // remove last element's gap
+		a[i+2+axis] += paddings(a, i, axis)
+		let min_w = a[i+2+axis]
+		add_ct_min_wh(a, axis, min_w)
+	}
+}
+
+draw[CMD_END] = function(a, end_i) {
+	let i = a[end_i]
+	let draw_end_f = draw_end[a[i-1]]
+	if (draw_end_f)
+		draw_end_f(a, i)
+}
+
+// position phase utils
+
+function position_children_stacked(a, ct_i, axis, sx, sw) {
+
+	let i = a[ct_i-2] // next_i
+	while (a[i-1] != CMD_END) {
+
+		let cmd = a[i-1]
+		let position_f = position[cmd]
+		if (position_f) {
+			// position item's children recursively.
+			position_f(a, i, axis, sx, sw, ct_i)
+		}
+
+		i = get_next_ext_i(a, i)
+	}
+}
+
+// translate phase utils
+
+function translate_children(a, i, dx, dy) {
+	let ct_i = i
+	i = a[i-2] // next_i
+	while (a[i-1] != CMD_END) {
+		let cmd = a[i-1]
+		let next_ext_i = get_next_ext_i(a, i)
+		let translate_f = translate[cmd]
+		if (translate_f)
+			translate_f(a, i, dx, dy, ct_i)
+		i = next_ext_i
+	}
+}
+
+function translate_ct(a, i, dx, dy) {
+	a[i+0] += dx
+	a[i+1] += dy
+	translate_children(a, i, dx, dy)
+}
+
+// hit phase utils
+
+function hit_children(a, i) {
+
+	// hit direct children in reverse paint order.
+	let ct_i = i
+	let next_ext_i = get_next_ext_i(a, i)
+	let end_i = a[next_ext_i-3] // prev_i
+	i = a[end_i-3] // prev_i
+	let found
+	while (i > ct_i) {
+		if (a[i-1] == CMD_END)
+			i = a[i] // start_i
+		let hit_f = hit[a[i-1]]
+		if (hit_f && hit_f(a, i)) {
+			found = true
+			break
+		}
+		i = a[i-3] // prev_i
+	}
+
+	return found
+}
+
+/* ---------------------------------------------------------------------------
+
+COMMANDS
+	color
+	font
+	font_size
+	font_weight
+	line_gap
+	text
+
+
+*/
+
 // flex ----------------------------------------------------------------------
 
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 	begin_scope()
 	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 		gap ?? 0,
-		0, // total_fr
 	)
 }
 
@@ -1150,6 +1619,136 @@ ui.hv = function(hv, ...args) {
 	return ui_hv(cmd, ...args)
 }
 
+ui.end_h = function() { ui.end(CMD_H) }
+ui.end_v = function() { ui.end(CMD_V) }
+
+measure[CMD_H] = ct_stack_push
+measure[CMD_V] = ct_stack_push
+
+function position_flex(a, i, axis, sx, sw) {
+
+	sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	sw = inner_w(a, i, axis, align_w(a, i, axis, sw))
+
+	a[i+0+axis] = sx
+	a[i+2+axis] = sw
+
+	let ct_i = i
+	if (is_main_axis(a[i-1], axis)) {
+
+		let i = ct_i
+
+		let next_i = a[i-2]
+		let gap    = a[i+FLEX_GAP]
+
+		// compute total gap and total fr.
+		let total_fr = 0
+		let gap_w = 0
+		let n = 0
+		i = next_i
+		while (a[i-1] != CMD_END) {
+			if (is_flex_child[a[i-1]]) {
+				total_fr += a[i+FR]
+				n++
+			}
+			i = get_next_ext_i(a, i)
+		}
+		gap_w = max(0, (n - 1) * gap)
+
+		if (!total_fr)
+			total_fr	= 1
+
+		let total_w = sw - gap_w
+
+		// compute total overflow width and total free width.
+		let total_overflow_w = 0
+		let total_free_w     = 0
+		i = next_i
+		while (a[i-1] != CMD_END) {
+			if (is_flex_child[a[i-1]]) {
+
+				let min_w = a[i+2+axis]
+				let fr    = a[i+FR]
+
+				let flex_w = total_w * fr / total_fr
+				let overflow_w = max(0, min_w - flex_w)
+				let free_w = max(0, flex_w - min_w)
+				total_overflow_w += overflow_w
+				total_free_w     += free_w
+
+			}
+			i = get_next_ext_i(a, i)
+		}
+
+		// distribute the overflow to children which have free space to
+		// take it. each child shrinks to take in the percent of the overflow
+		// equal to the child's percent of free space.
+		i = next_i
+		let ct_sx = sx
+		let ct_sw = sw
+		while (a[i-1] != CMD_END) {
+			if (is_flex_child[a[i-1]]) {
+
+				let min_w = a[i+2+axis]
+				let fr    = a[i+FR]
+
+				// compute item's stretched width.
+				let flex_w = total_w * fr / total_fr
+				let sw
+				if (min_w > flex_w) { // overflow
+					sw = min_w
+				} else {
+					let free_w = flex_w - min_w
+					let free_p = free_w / total_free_w
+					let shrink_w = total_overflow_w * free_p
+					if (shrink_w != shrink_w) // total_free_w == 0
+						shrink_w = 0
+					sw = floor(flex_w - shrink_w)
+				}
+
+				// TODO: check if this is the last element and if it is,
+				// set `sw = total_w - sx` so that it eats up all rounding errors.
+
+				// position item's children recursively.
+				let position_f = position[a[i-1]]
+				position_f(a, i, axis, sx, sw, ct_i)
+
+				sx += sw + gap
+
+			} else {
+
+				let position_f = position[a[i-1]]
+				if (position_f)
+					position_f(a, i, axis, ct_sx, ct_sw, ct_i)
+			}
+
+			i = get_next_ext_i(a, i)
+		}
+
+	} else {
+
+		position_children_stacked(a, i, axis, sx, sw)
+
+	}
+
+}
+position[CMD_H] = position_flex
+position[CMD_V] = position_flex
+is_flex_child[CMD_H] = true
+is_flex_child[CMD_V] = true
+
+translate[CMD_H] = translate_ct
+translate[CMD_V] = translate_ct
+
+function hit_flex(a, i) {
+	if (hit_children(a, i))
+		return true
+	if (hit_box(a, i))
+		hit_template(a, i)
+}
+hit[CMD_H] = hit_flex
+hit[CMD_V] = hit_flex
+
 // stack ---------------------------------------------------------------------
 
 const STACK_ID = S+0
@@ -1159,6 +1758,32 @@ ui.stack = function(id, fr, align, valign, min_w, min_h) {
 	begin_scope()
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
 		id)
+}
+
+measure[CMD_STACK] = ct_stack_push
+
+position[CMD_STACK] = function(a, i, axis, sx, sw) {
+	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	a[i+0+axis] = x
+	a[i+2+axis] = w
+	position_children_stacked(a, i, axis, x, w)
+}
+is_flex_child[CMD_STACK] = true
+
+ui.end_stack = function() { ui.end(CMD_STACK) }
+
+translate[CMD_STACK] = translate_ct
+
+hit[CMD_STACK] = function(a, i) {
+	if (hit_children(a, i)) {
+		ui.hover(a[i+STACK_ID])
+		return true
+	}
+	if (hit_box(a, i)) {
+		ui.hover(a[i+STACK_ID])
+		hit_template(a, i)
+	}
 }
 
 // scrollbox -----------------------------------------------------------------
@@ -1208,6 +1833,243 @@ ui.sb = ui.scrollbox
 
 ui.scroll_xy = function(a, i, axis) {
 	return a[i+SB_SX+axis]
+}
+
+ui.end_scrollbox = function() { ui.end(CMD_SCROLLBOX) }
+ui.end_sb = ui.end_scrollbox
+
+measure[CMD_SCROLLBOX] = ct_stack_push
+
+measure_end[CMD_SCROLLBOX] = function(a, i, axis) {
+	let co_min_w = a[i+2+axis] // content min_w
+	let contain = a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_CONTAIN
+	let min_w = contain ? co_min_w : 0
+	let sb_min_w = max(a[i+SB_CW+axis], min_w) + paddings(a, i, axis) // scrollbox min_w
+	a[i+SB_CW+axis] = co_min_w
+	a[i+2+axis] = sb_min_w
+	add_ct_min_wh(a, axis, sb_min_w)
+}
+
+// NOTE: scrolling is done later in the translation phase.
+position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
+	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	a[i+0+axis] = x
+	a[i+2+axis] = w
+	let content_w = a[i+SB_CW+axis]
+	position_children_stacked(a, i, axis, x, max(content_w, w))
+}
+is_flex_child[CMD_SCROLLBOX] = true
+
+translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
+
+	let x  = a[i+0] + dx
+	let y  = a[i+1] + dy
+	let w  = a[i+2]
+	let h  = a[i+3]
+	let cw = a[i+SB_CW+0]
+	let ch = a[i+SB_CW+1]
+	let sx = a[i+SB_SX+0]
+	let sy = a[i+SB_SX+1]
+
+	a[i+0] = x
+	a[i+1] = y
+
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+
+	let psx = sx / (cw - w)
+	let psy = sy / (ch - h)
+
+	let id = a[i+SB_ID]
+	if (id) {
+		for (let axis = 0; axis < 2; axis++) {
+
+			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+			if (!visible)
+				continue
+
+			// wheel scrolling
+			if (axis && ui.wheel_dy && ui.hit(id)) {
+				let sy0 = ui.state(id, 'scroll_y') ?? 0
+				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
+				ui.state(id).set('scroll_y', sy)
+				a[i+SB_SX+1] = sy
+			}
+
+			// drag-scrolling
+			let sbar_id = id+'.scrollbar'+axis
+			let cs = ui.captured(sbar_id)
+			if (cs) {
+				if (!axis) {
+					let psx0 = cs.get('ps0')
+					let dpsx = (ui.mx - ui.mx0) / (w - tw)
+					sx = clamp(round((psx0 + dpsx) * (cw - w)), 0, cw - w)
+					ui.state(id).set('scroll_x', sx)
+					a[i+SB_SX+0] = sx
+				} else {
+					let psy0 = cs.get('ps0')
+					let dpsy = (ui.my - ui.my0) / (h - th)
+					sy = clamp(round((psy0 + dpsy) * (ch - h)), 0, ch - h)
+					ui.state(id).set('scroll_y', sy)
+					a[i+SB_SX+1] = sy
+				}
+				break
+			} else {
+				if (!ui.hit(sbar_id))
+					continue
+				let cs = ui.capture(sbar_id)
+				if (!cs)
+					continue
+				cs.set('ps0', !axis ? psx : psy)
+			}
+		}
+	}
+
+	translate_children(a, i, dx - sx, dy - sy)
+
+}
+
+// can be used inside the translate phase of a widget to re-scroll
+// another widget that might have already been scrolled.
+ui.force_scroll = function(a, i, sx, sy) {
+
+	let w   = a[i+2]
+	let h   = a[i+3]
+	let cw  = a[i+SB_CW+0]
+	let ch  = a[i+SB_CW+1]
+	let sx0 = a[i+SB_SX+0]
+	let sy0 = a[i+SB_SX+1]
+
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+
+	a[i+SB_SX+0] = sx
+	a[i+SB_SX+1] = sy
+
+	translate_children(a, i, sx0-sx, sy0-sy)
+
+}
+
+draw[CMD_SCROLLBOX] = function(a, i) {
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+
+	cx.save()
+	cx.beginPath()
+	cx.rect(x, y, w, h)
+	cx.clip()
+}
+
+let scrollbar_rect; {
+let r = [false, 0, 0, 0, 0]
+scrollbar_rect = function(a, i, axis, active) {
+	let x  = a[i+0]
+	let y  = a[i+1]
+	let w  = a[i+2]
+	let h  = a[i+3]
+	let cw = a[i+SB_CW+0]
+	let ch = a[i+SB_CW+1]
+	let sx = a[i+SB_SX+0]
+	let sy = a[i+SB_SX+1]
+	let overflow_x = a[i+SB_OVERFLOW+0]
+	let overflow_y = a[i+SB_OVERFLOW+1]
+	sx = max(0, min(sx, cw - w))
+	sy = max(0, min(sy, ch - h))
+	let psx = sx / (cw - w)
+	let psy = sy / (ch - h)
+	let pw = w / cw
+	let ph = h / ch
+	let thickness = ui.scrollbar_thickness
+	let thickness_active = active ? ui.scrollbar_thickness_active : thickness
+	let visible, tx, ty, tw, th
+	let h_visible = overflow_x != SB_OVERFLOW_HIDE && pw < 1
+	let v_visible = overflow_y != SB_OVERFLOW_HIDE && ph < 1
+	let both_visible = h_visible && v_visible && 1 || 0
+	let bar_min_len = round(2 * ui.font_size_normal)
+	if (!axis) {
+		visible = h_visible
+		if (visible) {
+			let bw = w - both_visible * thickness
+			tw = max(min(bar_min_len, bw), pw * bw)
+			th = thickness_active
+			tx = psx * (bw - tw)
+			ty = h - th
+		}
+	} else {
+		visible = v_visible
+		if (visible) {
+			let bh = h - both_visible * thickness
+			th = max(min(bar_min_len, bh), ph * bh)
+			tw = thickness_active
+			ty = psy * (bh - th)
+			tx = w - tw
+		}
+	}
+	r[0] = visible
+	r[1] = x + tx
+	r[2] = y + ty
+	r[3] = tw
+	r[4] = th
+	return r
+}
+}
+
+draw_end[CMD_SCROLLBOX] = function(a, i) {
+
+	cx.restore()
+
+	let id = a[i+SB_ID]
+	for (let axis = 0; axis < 2; axis++) {
+
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+		if (!visible)
+			continue
+
+		let sbar_id = id+'.scrollbar'+axis
+		let cs = ui.captured(sbar_id)
+		let hit = ui.hit(sbar_id)
+
+		if (cs || hit)
+			[visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
+
+		cx.beginPath()
+		cx.rect(tx, ty, tw, th)
+		cx.fillStyle = ui.bg_color('scrollbar', cs && 'active' || hit && 'hover' || 'normal')[0]
+		cx.fill()
+
+	}
+}
+
+hit[CMD_SCROLLBOX] = function(a, i) {
+	let id = a[i+SB_ID]
+
+	// fast-test the outer box since we're clipping the contents.
+	if (!hit_box(a, i))
+		return
+
+	ui.hover(id)
+
+	hit_template(a, i)
+
+	// test the scrollbars
+	for (let axis = 0; axis < 2; axis++) {
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
+		if (!visible)
+			continue
+		if (!hit_rect(tx, ty, tw, th))
+			continue
+		ui.hover(id+'.scrollbar'+axis)
+		return true
+	}
+
+	// test the children
+	hit_children(a, i)
+
+	return true
 }
 
 // popup ---------------------------------------------------------------------
@@ -1317,6 +2179,213 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 reindex[CMD_POPUP] = function(a, i, offset) {
 	if (a[i+POPUP_TARGET_I] >= 0)
 		a[i+POPUP_TARGET_I] += offset
+}
+
+ui.end_popup = function() { ui.end(CMD_POPUP) }
+
+measure[CMD_POPUP] = ct_stack_push
+
+measure_end[CMD_POPUP] = function(a, i, axis) {
+	a[i+2+axis] += paddings(a, i, axis)
+	// popups don't affect their target's layout so no add_ct_min_wh() call.
+}
+
+// NOTE: popup positioning is done later in the translation phase.
+// NOTE: sw is always 0 because popups have fr=0, so we don't use it.
+position[CMD_POPUP] = function(a, i, axis, sx, sw) {
+
+	// stretched popups stretch to the dimensions of their target.
+	let target_i = a[i+POPUP_TARGET_I]
+	let side     = a[i+POPUP_SIDE]
+	let align    = a[i+POPUP_ALIGN]
+	if (side && align == POPUP_ALIGN_STRETCH) {
+		if (target_i == POPUP_TARGET_SCREEN) {
+			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
+		} else {
+			// TODO: align border rects here!
+			let ct_w = a[target_i+2+axis] + paddings(a, target_i, axis)
+			a[i+2+axis] = max(a[i+2+axis], ct_w)
+		}
+	}
+
+	let w = inner_w(a, i, axis, a[i+2+axis])
+	a[i+2+axis] = w
+	position_children_stacked(a, i, axis, 0, w)
+}
+
+{
+let tx1, ty1, tx2, ty2
+let screen_margin = 10
+
+// a popup's target rect is the target's border rect.
+function get_popup_target_rect(a, i) {
+
+	let ct_i = a[i+POPUP_TARGET_I]
+
+	if (ct_i == POPUP_TARGET_SCREEN) {
+
+		let d = screen_margin
+		tx1 = d
+		ty1 = d
+		tx2 = screen_w - d
+		ty2 = screen_h - d
+
+	} else {
+
+		tx1 = a[ct_i+0] - a[ct_i+PX1+0]
+		ty1 = a[ct_i+1] - a[ct_i+PX1+1]
+		tx2 = a[ct_i+2] + tx1 + a[ct_i+PX2+0]
+		ty2 = a[ct_i+3] + ty1 + a[ct_i+PX2+1]
+
+	}
+
+}
+
+let x, y
+
+function position_popup(w, h, side, align) {
+
+	let tw = tx2 - tx1
+	let th = ty2 - ty1
+
+	if (side == POPUP_SIDE_RIGHT) {
+		x = tx2 - 1
+		y = ty1
+	} else if (side == POPUP_SIDE_LEFT) {
+		x = tx1 - w + 1
+		y = ty1
+	} else if (side == POPUP_SIDE_TOP) {
+		x = tx1
+		y = ty1 - h + 1
+	} else if (side == POPUP_SIDE_BOTTOM) {
+		x = tx1
+		y = ty2 - 1
+	} else if (side == POPUP_SIDE_INNER_RIGHT) {
+		x = tx2 - w
+		y = ty1
+	} else if (side == POPUP_SIDE_INNER_LEFT) {
+		x = tx1
+		y = ty1
+	} else if (side == POPUP_SIDE_INNER_TOP) {
+		x = tx1
+		y = ty1
+	} else if (side == POPUP_SIDE_INNER_BOTTOM) {
+		x = tx1
+		y = ty2 - h
+	} else if (side == POPUP_SIDE_INNER_CENTER) {
+		x = tx1 + round((tw - w) / 2)
+		y = ty1 + round((th - h) / 2)
+	} else {
+		assert(false)
+	}
+
+	let sdx = side & POPUP_SIDE_LR
+	let sdy = side & POPUP_SIDE_TB
+
+	if (align == POPUP_ALIGN_CENTER && sdy)
+		x += round((tw - w) / 2)
+	else if (align == POPUP_ALIGN_CENTER && sdx)
+		y += round((th - h) / 2)
+	else if (align == POPUP_ALIGN_END && sdy)
+		x += tw - w
+	else if (align == POPUP_ALIGN_END && sdx)
+		y += th - h
+
+}
+
+translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
+
+	let bw = screen_w
+	let bh = screen_h
+
+	get_popup_target_rect(a, i)
+
+	let px    = paddings(a, i, 0)
+	let py    = paddings(a, i, 1)
+	let w     = a[i+2] + px
+	let h     = a[i+3] + py
+	let side  = a[i+POPUP_SIDE]
+	let align = a[i+POPUP_ALIGN]
+	let flags = a[i+POPUP_FLAGS]
+
+	position_popup(w, h, side, align)
+
+	if (flags & POPUP_FIT_CHANGE_SIDE) {
+
+		// if popup doesn't fit the screen, first try to change its side
+		// or alignment and relayout, and if that doesn't work, its offset.
+
+		let d = screen_margin
+		let out_x1 = x < d
+		let out_y1 = y < d
+		let out_x2 = x + w > (bw - d)
+		let out_y2 = y + h > (bh - d)
+
+		let side0 = side
+		if (side == POPUP_SIDE_BOTTOM && out_y2)
+			side = POPUP_SIDE_TOP
+		 else if (side == POPUP_SIDE_TOP && out_y1)
+			side = POPUP_SIDE_BOTTOM
+		 else if (side == POPUP_SIDE_RIGHT && out_x2)
+			side = POPUP_SIDE_LEFT
+		 else if (side == POPUP_SIDE_LEFT && out_x1)
+			side = POPUP_SIDE_RIGHT
+
+		if (side != side0) {
+			position_popup(w, h, side, align)
+			a[i+POPUP_SIDE_REAL] = side
+		}
+
+	}
+
+	// if nothing else works, adjust the offset to fit the screen.
+	if (flags & POPUP_FIT_CONSTRAIN) {
+		let d = screen_margin
+		let ox2 = max(0, x + w - (bw - d))
+		let ox1 = min(0, x - d)
+		let oy2 = max(0, y + h - (bh - d))
+		let oy1 = min(0, y - d)
+		x -= ox1 ? ox1 : ox2
+		y -= oy1 ? oy1 : oy2
+	}
+
+	x += a[i+MX1+0] + a[i+PX1+0]
+	y += a[i+MX1+1] + a[i+PX1+1]
+
+	a[i+0] = x
+	a[i+1] = y
+	a[i+2] = w - px
+	a[i+3] = h - py
+
+	translate_children(a, i, x, y)
+
+}
+
+let out = [0, 0, 0, 0]
+ui.popup_target_rect = function(a, i) {
+	get_popup_target_rect(a, i)
+	out[0] = tx1
+	out[1] = ty1
+	out[2] = tx2
+	out[3] = ty2
+	return out
+}
+
+}
+
+draw[CMD_POPUP] = function(a, i) {
+	let popup_layer = a[i+POPUP_LAYER]
+	if (popup_layer != layer)
+		return true
+}
+
+hit[CMD_POPUP] = function(a, i) {
+
+	let popup_layer = a[i+POPUP_LAYER]
+	if (popup_layer != layer)
+		return
+
+	return hit_children(a, i)
 }
 
 // tooltip background & border -----------------------------------------------
@@ -1497,68 +2566,6 @@ ui.widget('bb_tooltip', {
 	},
 })
 
-// common end command for all containers -------------------------------------
-
-const CMD_END = cmd('end')
-ui.end = function(cmd) {
-	end_scope()
-	let i = assert(ct_stack.pop(), 'end command outside container')
-	if (cmd && a[i-1] != cmd)
-		assert(false, 'closing ', cmd_names[cmd], ' instead of ', C(a, i))
-	let end_i = ui_cmd(CMD_END, i)
-	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
-
-	if (a[i-1] == CMD_POPUP) {
-		end_layer()
-	}
-}
-ui.end_h         = function() { ui.end(CMD_H) }
-ui.end_v         = function() { ui.end(CMD_V) }
-ui.end_stack     = function() { ui.end(CMD_STACK) }
-ui.end_scrollbox = function() { ui.end(CMD_SCROLLBOX) }
-ui.end_popup     = function() { ui.end(CMD_POPUP) }
-ui.end_sb = ui.end_scrollbox
-
-reindex[CMD_END] = function(a, i, offset) {
-	a[i+0] += offset
-}
-
-// background & border -------------------------------------------------------
-
-const BORDER_SIDE_T = 1
-const BORDER_SIDE_R = 2
-const BORDER_SIDE_B = 4
-const BORDER_SIDE_L = 8
-const BORDER_SIDE_ALL = 15
-
-function parse_border_sides(s) {
-	if (!s) // 0, null, undefined
-		return 0
-	if (s == true || s == 'all') // true, 1, 'all'
-		return BORDER_SIDE_ALL
-	let b = (
-		(s.includes('l') ? BORDER_SIDE_L : 0) |
-		(s.includes('r') ? BORDER_SIDE_R : 0) |
-		(s.includes('t') ? BORDER_SIDE_T : 0) |
-		(s.includes('b') ? BORDER_SIDE_B : 0)
-	)
-	if (s.startsWith('-'))
-		b = ~b & BORDER_SIDE_ALL
-	return b
-}
-
-const BB_ID            = 0
-const BB_CT_I          = 1
-
-const CMD_BB = cmd('bb') // border-background
-ui.bb = function(id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius) {
-	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, bg_color_state, parse_border_sides(sides), border_color, border_color_state, border_radius)
-}
-
-reindex[CMD_BB] = function(a, i, offset) {
-	a[i+BB_CT_I] += offset
-}
-
 // box shadow ----------------------------------------------------------------
 
 ui.shadow_style = function(theme, name, x, y, blur, spread, inset, h, s, L, a) {
@@ -1601,58 +2608,167 @@ ui.set_shadow = function(s) {
 	cx.shadowColor   = color
 }
 
-// text box ------------------------------------------------------------------
+let shadow_set
+draw[CMD_SHADOW] = function(a, i) {
+	cx.shadowOffsetX = a[i+0]
+	cx.shadowOffsetY = a[i+1]
+	cx.shadowBlur    = a[i+2]
+	// TODO: use a[i+3] spread
+	// TODO: use a[i+4] inset
+	cx.shadowColor   = a[i+5]
+	shadow_set = true
+}
 
-const TEXT_ASC      = S-1
-const TEXT_DSC      = S-0
-const TEXT_X        = S+1
-const TEXT_W        = S+2
-const TEXT_ID       = S+3
-const TEXT_S        = S+4
-const TEXT_FLAGS    = S+5
+function reset_shadow() {
+	cx.shadowBlur    = 0
+	cx.shadowOffsetX = 0
+	cx.shadowOffsetY = 0
+	shadow_set = false
+}
 
-const TEXT_WRAP      = 3 // bits 0 and 1
-const TEXT_WRAP_LINE = 1 // bit 1
-const TEXT_WRAP_WORD = 2 // bit 2
-const TEXT_EDITABLE  = 4 // bit 3
+// background & border -------------------------------------------------------
 
-const CMD_TEXT = cmd('text')
-ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
-	// NOTE: min_w and min_h are measured, not given.
-	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
-	if (wrap == TEXT_WRAP_LINE) {
- 		if (s.includes('\n'))
-			s = s.split('\n')
-	} else if (wrap == TEXT_WRAP_WORD) {
-		keepalive(id)
-		s = word_wrapper(id, s)
-	}
-	if (editable) {
-		keepalive(id)
-		s = ui.state(id, 'text') ?? s
-	}
-	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'c', valign ?? 'c',
-		min_w ?? -1, // -1=auto
-		min_h ?? -1, // -1=auto
-		0, // ascent
-		0, // descent
-		0, // text_x
-		max_min_w ?? -1, // -1=inf
-		id,
-		s,
-		wrap | (editable ? TEXT_EDITABLE : 0),
+const BORDER_SIDE_T = 1
+const BORDER_SIDE_R = 2
+const BORDER_SIDE_B = 4
+const BORDER_SIDE_L = 8
+const BORDER_SIDE_ALL = 15
+
+function parse_border_sides(s) {
+	if (!s) // 0, null, undefined
+		return 0
+	if (s == true || s == 'all') // true, 1, 'all'
+		return BORDER_SIDE_ALL
+	let b = (
+		(s.includes('l') ? BORDER_SIDE_L : 0) |
+		(s.includes('r') ? BORDER_SIDE_R : 0) |
+		(s.includes('t') ? BORDER_SIDE_T : 0) |
+		(s.includes('b') ? BORDER_SIDE_B : 0)
 	)
-	if (editable)
-		input_create(id, input_type)
+	if (s.startsWith('-'))
+		b = ~b & BORDER_SIDE_ALL
+	return b
 }
-ui.text_editable = function(id, s, fr, align, valign, max_min_w, min_w, min_h, input_type) {
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, null, true, input_type)
+
+const BB_ID            = 0
+const BB_CT_I          = 1
+
+const CMD_BB = cmd('bb') // border-background
+ui.bb = function(id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius) {
+	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, bg_color_state, parse_border_sides(sides), border_color, border_color_state, border_radius)
 }
-ui.text_lines = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'line', editable)
+
+reindex[CMD_BB] = function(a, i, offset) {
+	a[i+BB_CT_I] += offset
 }
-ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
+
+let border_paths
+{
+function T  (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2, y1) }
+function R  (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2) }
+function B  (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1, y2) }
+function L  (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1) }
+function TB (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2, y1); cx.moveTo(x2, y2); cx.lineTo(x1, y2) }
+function RL (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2); cx.moveTo(x1, y2); cx.lineTo(x1, y1) }
+function TR (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2) }
+function RB (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1, y2) }
+function BL (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1) }
+function LT (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2, y1) }
+function TRB(cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1, y2) }
+function RBL(cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1) }
+function BLT(cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2, y1) }
+function LTR(cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2) }
+
+border_paths = [noop, T, R, TR, B, TB, RB, TRB, L, LT, RL, LTR, BL, BLT, RBL]
+}
+
+let c2d = CanvasRenderingContext2D.prototype
+if (!c2d.roundRect) { // Firefox doesn't have it
+	c2d.roundRect = function(x1, y1, w, h, r) {
+		let x2 = x1 + w
+		let y2 = y1 + h
+		cx.moveTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r)
+		cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r)
+		cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r)
+		cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r)
+		cx.closePath()
+	}
+}
+
+function bg_path(cx, x1, y1, x2, y2, sides, r) {
+	cx.beginPath()
+	if (sides == BORDER_SIDE_ALL)
+		if (!r)
+			cx.rect(x1, y1, x2-x1, y2-y1)
+		else
+			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
+	else {
+		let rlb = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_B) && r || 0
+		let rlt = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_T) && r || 0
+		let rrt = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_T) && r || 0
+		let rrb = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_B) && r || 0
+		cx.moveTo(x1, y2-rlb);
+		cx.lineTo(x1, y1+rlt); if (rlt) cx.arcTo(x1, y1, x1+rlt, y1, rlt);
+		cx.lineTo(x2-rrt, y1); if (rrt) cx.arcTo(x2, y1, x2, y1+rrt, rrt);
+		cx.lineTo(x2, y2-rrb); if (rrb) cx.arcTo(x2, y2, x2-rrb, y2, rrb);
+		cx.lineTo(x1+rlb, y2); if (rlb) cx.arcTo(x1, y2, x1, y2-rlb, rlb);
+	}
+}
+
+function border_path(cx, x1, y1, x2, y2, sides, r) {
+	cx.beginPath()
+	if (sides == BORDER_SIDE_ALL)
+		if (!r)
+			cx.rect(x1, y1, x2-x1, y2-y1)
+		else
+			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
+	else
+		border_paths[sides](cx, x1, y1, x2, y2, r)
+}
+
+draw[CMD_BB] = function(a, i) {
+	let ct_i = a[i+1]
+	let px1 = a[ct_i+PX1+0]
+	let py1 = a[ct_i+PX1+1]
+	let px2 = a[ct_i+PX2+0]
+	let py2 = a[ct_i+PX2+1]
+	let x   = a[ct_i+0] - px1
+	let y   = a[ct_i+1] - py1
+	let w   = a[ct_i+2] + px1 + px2
+	let h   = a[ct_i+3] + py1 + py2
+	let bg_color           = a[i+2]
+	let bg_color_state     = a[i+3]
+	let border_sides       = a[i+4]
+	let border_color       = a[i+5]
+	let border_color_state = a[i+6]
+	let border_radius      = a[i+7]
+	if (bg_color != null) {
+		bg_color = ui.bg_color(bg_color, bg_color_state)
+		set_theme_dark_from(bg_color)
+		cx.fillStyle = bg_color[0]
+		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
+		cx.fill()
+	}
+	if (shadow_set)
+		reset_shadow()
+	if (border_sides && border_color != null) {
+		border_color = ui.border_color(border_color, border_color_state)
+		cx.strokeStyle = border_color[0]
+		cx.lineWidth = 1
+		cx.lineCap = 'square'
+		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
+		cx.stroke()
+	}
+}
+
+hit[CMD_BB] = function(a, i) {
+	let ct_i     = a[i+1]
+	let bg_color = a[i+2]
+	if (bg_color != null && hit_box(a, ct_i)) {
+		ui.hover(a[i+BB_ID])
+		hit_template(a, i)
+		return true
+	}
 }
 
 // text state ----------------------------------------------------------------
@@ -1776,47 +2892,73 @@ function set_line_gap(a, i) {
 	line_gap = a[i]
 }
 
-// measuring phase (per-axis) ------------------------------------------------
-
-// calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1) of all boxes
-// by walking the container tree bottom-up (non-recursive, uses ct_stack).
-// the minimum dimensions include margins and paddings.
-
-function is_main_axis(cmd, axis) {
-	return (
-		(cmd == CMD_V ? 1 : 2) == axis ||
-		(cmd == CMD_H ? 0 : 2) == axis
-	)
-}
-
-function paddings(a, i, axis) {
-	return (
-		a[i+MX1+axis] + a[i+MX2+axis] +
-		a[i+PX1+axis] + a[i+PX2+axis]
-	)
-}
-
-function add_ct_min_wh(a, axis, w, fr) {
-	let i = ct_stack.at(-1)
-	if (i == null) // root ct
-		return
-	let cmd = a[i-1]
-	let main_axis = is_main_axis(cmd, axis)
-	let min_w = a[i+2+axis]
-	if (main_axis) {
-		a[i+FLEX_TOTAL_FR] += fr
-		let gap = a[i+FLEX_GAP]
-		a[i+2+axis] = min_w + w + gap
-	} else {
-		a[i+2+axis] = max(min_w, w)
-	}
-}
-ui.add_ct_min_wh = add_ct_min_wh
-
 measure[CMD_FONT] = set_font
 measure[CMD_FONT_SIZE] = set_font_size
 measure[CMD_FONT_WEIGHT] = set_font_weight
 measure[CMD_LINE_GAP] = set_line_gap
+
+draw[CMD_COLOR] = function(a, i) {
+	color       = a[i+0]
+	color_state = a[i+1]
+}
+draw[CMD_FONT] = set_font
+draw[CMD_FONT_SIZE] = set_font_size
+draw[CMD_FONT_WEIGHT] = set_font_weight
+draw[CMD_LINE_GAP] = set_line_gap
+
+// text box ------------------------------------------------------------------
+
+const TEXT_ASC      = S-1
+const TEXT_DSC      = S-0
+const TEXT_X        = S+1
+const TEXT_W        = S+2
+const TEXT_ID       = S+3
+const TEXT_S        = S+4
+const TEXT_FLAGS    = S+5
+
+const TEXT_WRAP      = 3 // bits 0 and 1
+const TEXT_WRAP_LINE = 1 // bit 1
+const TEXT_WRAP_WORD = 2 // bit 2
+const TEXT_EDITABLE  = 4 // bit 3
+
+const CMD_TEXT = cmd('text')
+ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
+	// NOTE: min_w and min_h are measured, not given.
+	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
+	if (wrap == TEXT_WRAP_LINE) {
+ 		if (s.includes('\n'))
+			s = s.split('\n')
+	} else if (wrap == TEXT_WRAP_WORD) {
+		keepalive(id)
+		s = word_wrapper(id, s)
+	}
+	if (editable) {
+		keepalive(id)
+		s = ui.state(id, 'text') ?? s
+	}
+	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'c', valign ?? 'c',
+		min_w ?? -1, // -1=auto
+		min_h ?? -1, // -1=auto
+		0, // ascent
+		0, // descent
+		0, // text_x
+		max_min_w ?? -1, // -1=inf
+		id,
+		s,
+		wrap | (editable ? TEXT_EDITABLE : 0),
+	)
+	if (editable)
+		input_create(id, input_type)
+}
+ui.text_editable = function(id, s, fr, align, valign, max_min_w, min_w, min_h, input_type) {
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, null, true, input_type)
+}
+ui.text_lines = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'line', editable)
+}
+ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
+	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
+}
 
 let measure_text; {
 let tm = map()
@@ -2043,102 +3185,8 @@ measure[CMD_TEXT] = function(a, i, axis) {
 	}
 	a[i+2+axis] += paddings(a, i, axis)
 	let min_w = a[i+2+axis]
-	add_ct_min_wh(a, axis, min_w, a[i+FR])
+	add_ct_min_wh(a, axis, min_w)
 }
-
-function ct_stack_push(a, i) {
-	ct_stack.push(i)
-}
-
-measure[CMD_H        ] = ct_stack_push
-measure[CMD_V        ] = ct_stack_push
-measure[CMD_STACK    ] = ct_stack_push
-measure[CMD_SCROLLBOX] = ct_stack_push
-measure[CMD_POPUP    ] = ct_stack_push
-
-measure[CMD_END] = function(a, _, axis) {
-	let i = assert(ct_stack.pop(), 'end command outside a container')
-	let p = paddings(a, i, axis)
-	let cmd = a[i-1]
-	if (cmd == CMD_SCROLLBOX) {
-		let co_min_w = a[i+2+axis] // content min_w
-		let contain = a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_CONTAIN
-		let min_w = contain ? co_min_w : 0
-		let sb_min_w = max(a[i+SB_CW+axis], min_w) + p // scrollbox min_w
-		a[i+SB_CW+axis] = co_min_w
-		a[i+2+axis] = sb_min_w
-		let fr = a[i+FR]
-		add_ct_min_wh(a, axis, sb_min_w, fr)
-	} else if (cmd == CMD_POPUP) {
-		a[i+2+axis] += p
-		// popups don't affect their target's layout so no add_ct_min_wh() call.
-	} else {
-		let main_axis = is_main_axis(cmd, axis)
-		if (main_axis)
-			a[i+2+axis] = max(0, a[i+2+axis] - a[i+FLEX_GAP]) // remove last element's gap
-		a[i+2+axis] += p
-		let min_w = a[i+2+axis]
-		let fr    = a[i+FR]
-		add_ct_min_wh(a, axis, min_w, fr)
-	}
-}
-
-function measure_all(axis) {
-	check_stacks()
-	reset_canvas()
-	let i = 2
-	let n = a.length
-	while (i < n) {
-		let cmd    = a[i-1]
-		let next_i = a[i-2]
-		let measure_f = measure[cmd]
-		if (measure_f)
-			measure_f(a, i, axis)
-		i = next_i
-	}
-	check_stacks()
-}
-
-// positioning phase (per-axis) ----------------------------------------------
-
-// calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1)
-// of all boxes by walking the container tree top-down, and using different
-// positioning algorithms based on container type (recursive).
-// the resulting boxes at a[i+0..3] exclude margins and paddings.
-// scrolling and popup positioning is done at a later stage.
-
-function align_w(a, i, axis, sw) {
-	let align = a[i+ALIGN+axis]
-	if (align == ALIGN_STRETCH)
-		return sw
-	return a[i+2+axis] // min_w
-}
-
-function align_x(a, i, axis, sx, sw) {
-	let align = a[i+ALIGN+axis]
-	if (align == ALIGN_END) {
-		let min_w = a[i+2+axis]
-		return sx + sw - min_w
-	} else if (align == ALIGN_CENTER) {
-		let min_w = a[i+2+axis]
-		return sx + round((sw - min_w) / 2)
-	} else {
-		return sx
-	}
-}
-
-// outer-box (ct_x, ct_w) -> inner-box (x, w).
-function inner_x(a, i, axis, ct_x) {
-	return ct_x + a[i+MX1+axis] + a[i+PX1+axis]
-}
-function inner_w(a, i, axis, ct_w) {
-	return ct_w - paddings(a, i, axis)
-}
-
-ui.align_x = align_x
-ui.align_w = align_w
-ui.inner_x = inner_x
-ui.inner_w = inner_w
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	if (!axis) {
@@ -2159,496 +3207,12 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 }
-
-function position_children_cross_axis(a, ct_i, axis, sx, sw) {
-
-	let i = a[ct_i-2] // next_i
-	while (a[i-1] != CMD_END) {
-
-		let cmd = a[i-1]
-		let position_f = position[cmd]
-		if (position_f) {
-			// position item's children recursively.
-			position_f(a, i, axis, sx, sw, ct_i)
-		}
-
-		i = get_next_ext_i(a, i)
-	}
-}
-
-function position_flex(a, i, axis, sx, sw) {
-
-	sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-	sw = inner_w(a, i, axis, align_w(a, i, axis, sw))
-
-	a[i+0+axis] = sx
-	a[i+2+axis] = sw
-
-	if (is_main_axis(a[i-1], axis)) {
-
-		let ct_i = i
-
-		let next_i   = a[i-2]
-		let gap      = a[i+FLEX_GAP]
-		let total_fr = a[i+FLEX_TOTAL_FR]
-
-		if (!total_fr)
-			total_fr = 1
-
-		// compute total gap.
-		let gap_w = 0
-		if (gap) {
-			let n = 0
-			let i = next_i
-			// TODO: make this agnostic of cmd type
-			while (a[i-1] != CMD_END && a[i-1] != CMD_POPUP) {
-				if (position[a[i-1]])
-					n++
-				i = get_next_ext_i(a, i)
-			}
-			gap_w = max(0, (n - 1) * gap)
-		}
-
-		let total_w = sw - gap_w
-
-		// compute total overflow width and total free width.
-		let total_overflow_w = 0
-		let total_free_w     = 0
-		i = next_i
-		while (a[i-1] != CMD_END) {
-
-			let cmd = a[i-1]
-			if (position[cmd]) {
-
-				let min_w = a[i+2+axis]
-				let fr    = a[i+FR]
-
-				// TODO: make this agnostic of cmd type
-				if (cmd == CMD_POPUP) {
-					min_w = 0
-					fr = 0
-				}
-
-				let flex_w = total_w * fr / total_fr
-				let overflow_w = max(0, min_w - flex_w)
-				let free_w = max(0, flex_w - min_w)
-				total_overflow_w += overflow_w
-				total_free_w     += free_w
-
-			}
-
-			i = get_next_ext_i(a, i)
-		}
-
-		// distribute the overflow to children which have free space to
-		// take it. each child shrinks to take in the percent of the overflow
-		// equal to the child's percent of free space.
-		i = next_i
-		let sw0 = sw
-		while (a[i-1] != CMD_END) {
-
-			let cmd = a[i-1]
-			let position_f = position[cmd]
-
-			if (position_f) {
-
-				let min_w = a[i+2+axis]
-				let fr    = a[i+FR]
-
-				// TODO: make this agnostic of cmd type
-				if (cmd == CMD_POPUP) {
-					min_w = 0
-					fr = 0
-				}
-
-				// compute item's stretched width.
-				let flex_w = total_w * fr / total_fr
-				let sw
-				if (min_w > flex_w) { // overflow
-					sw = min_w
-				} else {
-					let free_w = flex_w - min_w
-					let free_p = free_w / total_free_w
-					let shrink_w = total_overflow_w * free_p
-					if (shrink_w != shrink_w) // total_free_w == 0
-						shrink_w = 0
-					sw = floor(flex_w - shrink_w)
-				}
-
-				// TODO: check if this is the last element and if it is,
-				// set `sw = total_w - sx` so that it eats up all rounding errors.
-
-				// position item's children recursively.
-				position_f(a, i, axis, sx, sw, ct_i)
-
-				sw += gap
-				sx += sw
-
-			}
-
-			i = get_next_ext_i(a, i)
-		}
-
-	} else {
-
-		position_children_cross_axis(a, i, axis, sx, sw)
-
-	}
-
-}
-position[CMD_H] = position_flex
-position[CMD_V] = position_flex
-
-position[CMD_STACK] = function(a, i, axis, sx, sw) {
-	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
-	a[i+0+axis] = x
-	a[i+2+axis] = w
-	position_children_cross_axis(a, i, axis, x, w)
-}
-
-// NOTE: scrolling is done later in the translation phase.
-position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
-	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
-	a[i+0+axis] = x
-	a[i+2+axis] = w
-	let content_w = a[i+SB_CW+axis]
-	position_children_cross_axis(a, i, axis, x, max(content_w, w))
-}
-
-// NOTE: popup positioning is done later in the translation phase.
-// NOTE: sw is always 0 because popups have fr=0, so we don't use it.
-position[CMD_POPUP] = function(a, i, axis, sx, sw) {
-
-	// stretched popups stretch to the dimensions of their target.
-	let target_i = a[i+POPUP_TARGET_I]
-	let side     = a[i+POPUP_SIDE]
-	let align    = a[i+POPUP_ALIGN]
-	if (side && align == POPUP_ALIGN_STRETCH) {
-		if (target_i == POPUP_TARGET_SCREEN) {
-			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
-		} else {
-			// TODO: align border rects here!
-			let ct_w = a[target_i+2+axis] + paddings(a, target_i, axis)
-			a[i+2+axis] = max(a[i+2+axis], ct_w)
-		}
-	}
-
-	let w = inner_w(a, i, axis, a[i+2+axis])
-	a[i+2+axis] = w
-	position_children_cross_axis(a, i, axis, 0, w)
-}
-
-function position_all(axis) {
-	let ct_w = axis ? screen_h : screen_w
-	let i = 2
-	let cmd = a[i-1]
-	let min_w = a[i+2+axis]
-	let position_f = position[cmd]
-	position_f(a, i, axis, 0, max(min_w, ct_w))
-}
-
-// translation phase ---------------------------------------------------------
-
-// do scrolling and popup positioning and offset all boxes (top-down, recursive).
+is_flex_child[CMD_TEXT] = true
 
 translate[CMD_TEXT] = function(a, i, dx, dy) {
 	a[i+0] += dx
 	a[i+1] += dy
 	a[i+TEXT_X] += dx
-}
-
-function translate_children(a, i, dx, dy) {
-	let ct_i = i
-	i = a[i-2] // next_i
-	while (a[i-1] != CMD_END) {
-		let cmd = a[i-1]
-		let next_ext_i = get_next_ext_i(a, i)
-		let translate_f = translate[cmd]
-		if (translate_f)
-			translate_f(a, i, dx, dy, ct_i)
-		i = next_ext_i
-	}
-}
-
-function translate_ct(a, i, dx, dy) {
-	a[i+0] += dx
-	a[i+1] += dy
-	translate_children(a, i, dx, dy)
-}
-
-translate[CMD_H    ] = translate_ct
-translate[CMD_V    ] = translate_ct
-translate[CMD_STACK] = translate_ct
-
-translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
-
-	let x  = a[i+0] + dx
-	let y  = a[i+1] + dy
-	let w  = a[i+2]
-	let h  = a[i+3]
-	let cw = a[i+SB_CW+0]
-	let ch = a[i+SB_CW+1]
-	let sx = a[i+SB_SX+0]
-	let sy = a[i+SB_SX+1]
-
-	a[i+0] = x
-	a[i+1] = y
-
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-
-	let psx = sx / (cw - w)
-	let psy = sy / (ch - h)
-
-	let id = a[i+SB_ID]
-	if (id) {
-		for (let axis = 0; axis < 2; axis++) {
-
-			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-			if (!visible)
-				continue
-
-			// wheel scrolling
-			if (axis && ui.wheel_dy && ui.hit(id)) {
-				let sy0 = ui.state(id, 'scroll_y') ?? 0
-				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
-				ui.state(id).set('scroll_y', sy)
-				a[i+SB_SX+1] = sy
-			}
-
-			// drag-scrolling
-			let sbar_id = id+'.scrollbar'+axis
-			let cs = ui.captured(sbar_id)
-			if (cs) {
-				if (!axis) {
-					let psx0 = cs.get('ps0')
-					let dpsx = (ui.mx - ui.mx0) / (w - tw)
-					sx = clamp(round((psx0 + dpsx) * (cw - w)), 0, cw - w)
-					ui.state(id).set('scroll_x', sx)
-					a[i+SB_SX+0] = sx
-				} else {
-					let psy0 = cs.get('ps0')
-					let dpsy = (ui.my - ui.my0) / (h - th)
-					sy = clamp(round((psy0 + dpsy) * (ch - h)), 0, ch - h)
-					ui.state(id).set('scroll_y', sy)
-					a[i+SB_SX+1] = sy
-				}
-				break
-			} else {
-				if (!ui.hit(sbar_id))
-					continue
-				let cs = ui.capture(sbar_id)
-				if (!cs)
-					continue
-				cs.set('ps0', !axis ? psx : psy)
-			}
-		}
-	}
-
-	translate_children(a, i, dx - sx, dy - sy)
-
-}
-
-// can be used inside the translate phase of a widget to re-scroll
-// another widget that might have already been scrolled.
-ui.force_scroll = function(a, i, sx, sy) {
-
-	let w   = a[i+2]
-	let h   = a[i+3]
-	let cw  = a[i+SB_CW+0]
-	let ch  = a[i+SB_CW+1]
-	let sx0 = a[i+SB_SX+0]
-	let sy0 = a[i+SB_SX+1]
-
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-
-	a[i+SB_SX+0] = sx
-	a[i+SB_SX+1] = sy
-
-	translate_children(a, i, sx0-sx, sy0-sy)
-
-}
-
-{
-let tx1, ty1, tx2, ty2
-let screen_margin = 10
-
-// a popup's target rect is the target's border rect.
-function get_popup_target_rect(a, i) {
-
-	let ct_i = a[i+POPUP_TARGET_I]
-
-	if (ct_i == POPUP_TARGET_SCREEN) {
-
-		let d = screen_margin
-		tx1 = d
-		ty1 = d
-		tx2 = screen_w - d
-		ty2 = screen_h - d
-
-	} else {
-
-		tx1 = a[ct_i+0] - a[ct_i+PX1+0]
-		ty1 = a[ct_i+1] - a[ct_i+PX1+1]
-		tx2 = a[ct_i+2] + tx1 + a[ct_i+PX2+0]
-		ty2 = a[ct_i+3] + ty1 + a[ct_i+PX2+1]
-
-	}
-
-}
-
-let x, y
-
-function position_popup(w, h, side, align) {
-
-	let tw = tx2 - tx1
-	let th = ty2 - ty1
-
-	if (side == POPUP_SIDE_RIGHT) {
-		x = tx2 - 1
-		y = ty1
-	} else if (side == POPUP_SIDE_LEFT) {
-		x = tx1 - w + 1
-		y = ty1
-	} else if (side == POPUP_SIDE_TOP) {
-		x = tx1
-		y = ty1 - h + 1
-	} else if (side == POPUP_SIDE_BOTTOM) {
-		x = tx1
-		y = ty2 - 1
-	} else if (side == POPUP_SIDE_INNER_RIGHT) {
-		x = tx2 - w
-		y = ty1
-	} else if (side == POPUP_SIDE_INNER_LEFT) {
-		x = tx1
-		y = ty1
-	} else if (side == POPUP_SIDE_INNER_TOP) {
-		x = tx1
-		y = ty1
-	} else if (side == POPUP_SIDE_INNER_BOTTOM) {
-		x = tx1
-		y = ty2 - h
-	} else if (side == POPUP_SIDE_INNER_CENTER) {
-		x = tx1 + round((tw - w) / 2)
-		y = ty1 + round((th - h) / 2)
-	} else {
-		assert(false)
-	}
-
-	let sdx = side & POPUP_SIDE_LR
-	let sdy = side & POPUP_SIDE_TB
-
-	if (align == POPUP_ALIGN_CENTER && sdy)
-		x += round((tw - w) / 2)
-	else if (align == POPUP_ALIGN_CENTER && sdx)
-		y += round((th - h) / 2)
-	else if (align == POPUP_ALIGN_END && sdy)
-		x += tw - w
-	else if (align == POPUP_ALIGN_END && sdx)
-		y += th - h
-
-}
-
-translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
-
-	let bw = screen_w
-	let bh = screen_h
-
-	get_popup_target_rect(a, i)
-
-	let px    = paddings(a, i, 0)
-	let py    = paddings(a, i, 1)
-	let w     = a[i+2] + px
-	let h     = a[i+3] + py
-	let side  = a[i+POPUP_SIDE]
-	let align = a[i+POPUP_ALIGN]
-	let flags = a[i+POPUP_FLAGS]
-
-	position_popup(w, h, side, align)
-
-	if (flags & POPUP_FIT_CHANGE_SIDE) {
-
-		// if popup doesn't fit the screen, first try to change its side
-		// or alignment and relayout, and if that doesn't work, its offset.
-
-		let d = screen_margin
-		let out_x1 = x < d
-		let out_y1 = y < d
-		let out_x2 = x + w > (bw - d)
-		let out_y2 = y + h > (bh - d)
-
-		let side0 = side
-		if (side == POPUP_SIDE_BOTTOM && out_y2)
-			side = POPUP_SIDE_TOP
-		 else if (side == POPUP_SIDE_TOP && out_y1)
-			side = POPUP_SIDE_BOTTOM
-		 else if (side == POPUP_SIDE_RIGHT && out_x2)
-			side = POPUP_SIDE_LEFT
-		 else if (side == POPUP_SIDE_LEFT && out_x1)
-			side = POPUP_SIDE_RIGHT
-
-		if (side != side0) {
-			position_popup(w, h, side, align)
-			a[i+POPUP_SIDE_REAL] = side
-		}
-
-	}
-
-	// if nothing else works, adjust the offset to fit the screen.
-	if (flags & POPUP_FIT_CONSTRAIN) {
-		let d = screen_margin
-		let ox2 = max(0, x + w - (bw - d))
-		let ox1 = min(0, x - d)
-		let oy2 = max(0, y + h - (bh - d))
-		let oy1 = min(0, y - d)
-		x -= ox1 ? ox1 : ox2
-		y -= oy1 ? oy1 : oy2
-	}
-
-	x += a[i+MX1+0] + a[i+PX1+0]
-	y += a[i+MX1+1] + a[i+PX1+1]
-
-	a[i+0] = x
-	a[i+1] = y
-	a[i+2] = w - px
-	a[i+3] = h - py
-
-	translate_children(a, i, x, y)
-
-}
-
-let out = [0, 0, 0, 0]
-ui.popup_target_rect = function(a, i) {
-	get_popup_target_rect(a, i)
-	out[0] = tx1
-	out[1] = ty1
-	out[2] = tx2
-	out[3] = ty2
-	return out
-}
-
-}
-
-function translate_all() {
-	let i = 2
-	let cmd = a[i-1]
-	let translate_f = translate[cmd]
-	translate_f(a, i, 0, 0)
-}
-
-ui.translate = function(a, i) {
-
-}
-
-// drawing phase -------------------------------------------------------------
-
-draw[CMD_POPUP] = function(a, i) {
-	let popup_layer = a[i+POPUP_LAYER]
-	if (popup_layer != layer)
-		return true
 }
 
 function input_free(s, id) {
@@ -2792,314 +3356,6 @@ draw[CMD_TEXT] = function(a, i) {
 
 }
 
-let scrollbar_rect; {
-let r = [false, 0, 0, 0, 0]
-scrollbar_rect = function(a, i, axis, active) {
-	let x  = a[i+0]
-	let y  = a[i+1]
-	let w  = a[i+2]
-	let h  = a[i+3]
-	let cw = a[i+SB_CW+0]
-	let ch = a[i+SB_CW+1]
-	let sx = a[i+SB_SX+0]
-	let sy = a[i+SB_SX+1]
-	let overflow_x = a[i+SB_OVERFLOW+0]
-	let overflow_y = a[i+SB_OVERFLOW+1]
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-	let psx = sx / (cw - w)
-	let psy = sy / (ch - h)
-	let pw = w / cw
-	let ph = h / ch
-	let thickness = ui.scrollbar_thickness
-	let thickness_active = active ? ui.scrollbar_thickness_active : thickness
-	let visible, tx, ty, tw, th
-	let h_visible = overflow_x != SB_OVERFLOW_HIDE && pw < 1
-	let v_visible = overflow_y != SB_OVERFLOW_HIDE && ph < 1
-	let both_visible = h_visible && v_visible && 1 || 0
-	let bar_min_len = round(2 * ui.font_size_normal)
-	if (!axis) {
-		visible = h_visible
-		if (visible) {
-			let bw = w - both_visible * thickness
-			tw = max(min(bar_min_len, bw), pw * bw)
-			th = thickness_active
-			tx = psx * (bw - tw)
-			ty = h - th
-		}
-	} else {
-		visible = v_visible
-		if (visible) {
-			let bh = h - both_visible * thickness
-			th = max(min(bar_min_len, bh), ph * bh)
-			tw = thickness_active
-			ty = psy * (bh - th)
-			tx = w - tw
-		}
-	}
-	r[0] = visible
-	r[1] = x + tx
-	r[2] = y + ty
-	r[3] = tw
-	r[4] = th
-	return r
-}
-}
-
-draw[CMD_SCROLLBOX] = function(a, i) {
-
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-
-	cx.save()
-	cx.beginPath()
-	cx.rect(x, y, w, h)
-	cx.clip()
-}
-
-draw[CMD_END] = function(a, end_i) {
-
-	let i = a[end_i]
-	if (a[i-1] == CMD_SCROLLBOX) {
-
-		cx.restore()
-
-		let id = a[i+SB_ID]
-		for (let axis = 0; axis < 2; axis++) {
-
-			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-			if (!visible)
-				continue
-
-			let sbar_id = id+'.scrollbar'+axis
-			let cs = ui.captured(sbar_id)
-			let hit = ui.hit(sbar_id)
-
-			if (cs || hit)
-				[visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
-
-			cx.beginPath()
-			cx.rect(tx, ty, tw, th)
-			cx.fillStyle = ui.bg_color('scrollbar', cs && 'active' || hit && 'hover' || 'normal')[0]
-			cx.fill()
-
-		}
-	}
-
-}
-
-let border_paths; {
-
-function T  (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2, y1) }
-function R  (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2) }
-function B  (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1, y2) }
-function L  (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1) }
-function TB (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2, y1); cx.moveTo(x2, y2); cx.lineTo(x1, y2) }
-function RL (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2); cx.moveTo(x1, y2); cx.lineTo(x1, y1) }
-function TR (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2) }
-function RB (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1, y2) }
-function BL (cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1) }
-function LT (cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2, y1) }
-function TRB(cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y1); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1, y2) }
-function RBL(cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y1); cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1) }
-function BLT(cx, x1, y1, x2, y2, r) { cx.moveTo(x2, y2); cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2, y1) }
-function LTR(cx, x1, y1, x2, y2, r) { cx.moveTo(x1, y2); cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r); cx.lineTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r); cx.lineTo(x2, y2) }
-
-border_paths = [noop, T, R, TR, B, TB, RB, TRB, L, LT, RL, LTR, BL, BLT, RBL]
-}
-
-let c2d = CanvasRenderingContext2D.prototype
-if (!c2d.roundRect) { // Firefox doesn't have it
-	c2d.roundRect = function(x1, y1, w, h, r) {
-		let x2 = x1 + w
-		let y2 = y1 + h
-		cx.moveTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r)
-		cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r)
-		cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r)
-		cx.lineTo(x1, y1+r); if (r) cx.arcTo(x1, y1, x1+r, y1, r)
-		cx.closePath()
-	}
-}
-
-function bg_path(cx, x1, y1, x2, y2, sides, r) {
-	cx.beginPath()
-	if (sides == BORDER_SIDE_ALL)
-		if (!r)
-			cx.rect(x1, y1, x2-x1, y2-y1)
-		else
-			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
-	else {
-		let rlb = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_B) && r || 0
-		let rlt = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_T) && r || 0
-		let rrt = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_T) && r || 0
-		let rrb = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_B) && r || 0
-		cx.moveTo(x1, y2-rlb);
-		cx.lineTo(x1, y1+rlt); if (rlt) cx.arcTo(x1, y1, x1+rlt, y1, rlt);
-		cx.lineTo(x2-rrt, y1); if (rrt) cx.arcTo(x2, y1, x2, y1+rrt, rrt);
-		cx.lineTo(x2, y2-rrb); if (rrb) cx.arcTo(x2, y2, x2-rrb, y2, rrb);
-		cx.lineTo(x1+rlb, y2); if (rlb) cx.arcTo(x1, y2, x1, y2-rlb, rlb);
-	}
-}
-
-function border_path(cx, x1, y1, x2, y2, sides, r) {
-	cx.beginPath()
-	if (sides == BORDER_SIDE_ALL)
-		if (!r)
-			cx.rect(x1, y1, x2-x1, y2-y1)
-		else
-			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
-	else
-		border_paths[sides](cx, x1, y1, x2, y2, r)
-}
-
-let shadow_set
-draw[CMD_SHADOW] = function(a, i) {
-	cx.shadowOffsetX = a[i+0]
-	cx.shadowOffsetY = a[i+1]
-	cx.shadowBlur    = a[i+2]
-	// TODO: use a[i+3] spread
-	// TODO: use a[i+4] inset
-	cx.shadowColor   = a[i+5]
-	shadow_set = true
-}
-
-function reset_shadow() {
-	cx.shadowBlur    = 0
-	cx.shadowOffsetX = 0
-	cx.shadowOffsetY = 0
-	shadow_set = false
-}
-
-draw[CMD_BB] = function(a, i) {
-	let ct_i = a[i+1]
-	let px1 = a[ct_i+PX1+0]
-	let py1 = a[ct_i+PX1+1]
-	let px2 = a[ct_i+PX2+0]
-	let py2 = a[ct_i+PX2+1]
-	let x   = a[ct_i+0] - px1
-	let y   = a[ct_i+1] - py1
-	let w   = a[ct_i+2] + px1 + px2
-	let h   = a[ct_i+3] + py1 + py2
-	let bg_color           = a[i+2]
-	let bg_color_state     = a[i+3]
-	let border_sides       = a[i+4]
-	let border_color       = a[i+5]
-	let border_color_state = a[i+6]
-	let border_radius      = a[i+7]
-	if (bg_color != null) {
-		bg_color = ui.bg_color(bg_color, bg_color_state)
-		set_theme_dark_from(bg_color)
-		cx.fillStyle = bg_color[0]
-		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
-		cx.fill()
-	}
-	if (shadow_set)
-		reset_shadow()
-	if (border_sides && border_color != null) {
-		border_color = ui.border_color(border_color, border_color_state)
-		cx.strokeStyle = border_color[0]
-		cx.lineWidth = 1
-		cx.lineCap = 'square'
-		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
-		cx.stroke()
-	}
-}
-
-draw[CMD_COLOR] = function(a, i) {
-	color       = a[i+0]
-	color_state = a[i+1]
-}
-
-draw[CMD_FONT] = set_font
-draw[CMD_FONT_SIZE] = set_font_size
-draw[CMD_FONT_WEIGHT] = set_font_weight
-draw[CMD_LINE_GAP] = set_line_gap
-
-let theme_stack = []
-
-function draw_all() {
-	screen.style.background = ui.bg_color('bg')[0]
-	for (layer of a.layers) {
-		// ^^NOTE: we're setting the global variable called layer!
-		for (let i of layer) {
-			let next_ext_i = get_next_ext_i(a, i)
-			check_stacks()
-			reset_canvas()
-			while (i < next_ext_i) {
-
-				let cmd = a[i-1]
-				if (cmd < 0) // ct
-					theme_stack.push(theme)
-				else if (cmd == CMD_END)
-					theme = theme_stack.pop()
-
-				let draw_f = draw[cmd]
-				if (draw_f && draw_f(a, i)) {
-					i = get_next_ext_i(a, i)
-					if (cmd < 0)
-						theme = theme_stack.pop()
-				} else {
-					i = a[i-2] // next_i
-				}
-			}
-			check_stacks()
-			assert(!theme_stack.length)
-		}
-	}
-}
-
-// hit-testing phase ---------------------------------------------------------
-
-let hit_state_map_freelist = map_freelist()
-let hit_state_maps = map() // {id->map}
-
-ui._hit_state_maps = hit_state_maps
-
-ui.hit = function(id, k) {
-	if (!id) return
-	if (ui.captured_id) // unavailable while captured
-		return
-	let m = hit_state_maps.get(id)
-	return k ? m?.get(k) : m
-}
-
-ui.hover = function(id) {
-	if (!id) return
-	let m = hit_state_maps.get(id)
-	if (!m) {
-		m = hit_state_map_freelist.alloc()
-		hit_state_maps.set(id, m)
-	}
-	return m
-}
-
-ui.hovers = function(id, k) {
-	if (!id) return
-	let m = hit_state_maps.get(id)
-	return k ? m?.get(k) : m
-}
-
-function hit_rect(x, y, w, h) {
-	return (
-		(ui.mx >= x && ui.mx < x + w) &&
-		(ui.my >= y && ui.my < y + h)
-	)
-}
-
-function hit_box(a, i) {
-	let px1 = a[i+PX1+0]
-	let py1 = a[i+PX1+1]
-	let px2 = a[i+PX2+0]
-	let py2 = a[i+PX2+1]
-	let x = a[i+0] - px1
-	let y = a[i+1] - py1
-	let w = a[i+2] + px1 + px2
-	let h = a[i+3] + py1 + py2
-	return hit_rect(x, y, w, h)
-}
-
 hit[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
 		ui.hover(a[i+TEXT_ID])
@@ -3108,191 +3364,51 @@ hit[CMD_TEXT] = function(a, i) {
 	}
 }
 
-function hit_children(a, i) {
-
-	// hit direct children in reverse paint order.
-	let ct_i = i
-	let next_ext_i = get_next_ext_i(a, i)
-	let end_i = a[next_ext_i-3] // prev_i
-	i = a[end_i-3] // prev_i
-	let found
-	while (i > ct_i) {
-		if (a[i-1] == CMD_END)
-			i = a[i] // start_i
-		let hit_f = hit[a[i-1]]
-		if (hit_f && hit_f(a, i)) {
-			found = true
-			break
-		}
-		i = a[i-3] // prev_i
-	}
-
-	return found
-}
-
-hit[CMD_SCROLLBOX] = function(a, i) {
-	let id = a[i+SB_ID]
-
-	// fast-test the outer box since we're clipping the contents.
-	if (!hit_box(a, i))
-		return
-
-	ui.hover(id)
-
-	hit_template(a, i)
-
-	// test the scrollbars
-	for (let axis = 0; axis < 2; axis++) {
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
-		if (!visible)
-			continue
-		if (!hit_rect(tx, ty, tw, th))
-			continue
-		ui.hover(id+'.scrollbar'+axis)
-		return true
-	}
-
-	// test the children
-	hit_children(a, i)
-
-	return true
-}
-
-hit[CMD_POPUP] = function(a, i) {
-
-	let popup_layer = a[i+POPUP_LAYER]
-	if (popup_layer != layer)
-		return
-
-	return hit_children(a, i)
-}
-
-function hit_flex(a, i) {
-	if (hit_children(a, i))
-		return true
-	if (hit_box(a, i))
-		hit_template(a, i)
-}
-
-hit[CMD_H] = hit_flex
-hit[CMD_V] = hit_flex
-
-hit[CMD_STACK] = function(a, i) {
-	if (hit_children(a, i)) {
-		ui.hover(a[i+STACK_ID])
-		return true
-	}
-	if (hit_box(a, i)) {
-		ui.hover(a[i+STACK_ID])
-		hit_template(a, i)
-	}
-}
-
-hit[CMD_BB] = function(a, i) {
-	let ct_i     = a[i+1]
-	let bg_color = a[i+2]
-	if (bg_color != null && hit_box(a, ct_i)) {
-		ui.hover(a[i+BB_ID])
-		hit_template(a, i)
-		return true
-	}
-}
-
-function hit_all() {
-
-	ui.set_cursor()
-
-	hit_template_id = null
-	hit_template_i0 = null
-	hit_template_i1 = null
-
-	for (let m of hit_state_maps.values())
-		hit_state_map_freelist.free(m)
-	hit_state_maps.clear()
-
-	if (ui.mx == null)
-		return
-
-	// iterate layers in reverse order.
-	for (let j = a.layers.length-1; j >= 0; j--) {
-		layer = a.layers[j]
-		// iterate layer's cointainers in reverse order.
-		for (let k = layer.length-1; k >= 0; k--) {
-			reset_canvas()
-			let i = layer[k]
-			let hit_f = hit[a[i-1]]
-			if (hit_f(a, i)) {
-				j = -1
-				break
-			}
-		}
-	}
-	layer = null
-
-}
-
-// animation frame -----------------------------------------------------------
-
-let want_redraw = true
-
-ui.redraw = function() {
-	want_redraw = true
-}
-
-function redraw_all() {
-	while (want_redraw) {
-		want_redraw = false
-		hit_all()
-		measure_req_all()
-		a.length = 0
-		for (let layer of a.layers)
-			layer_clear(layer)
-		check_stacks()
-
-		let i = ui.stack()
-		begin_layer(layer_base, i)
-		ui.frame()
-		ui.end()
-		end_layer()
-		id_state_gc()
-
-		measure_all(0); position_all(0) // x-axis
-		measure_all(1); position_all(1) // y-axis
-		translate_all()
-
-		if (!want_redraw)
-			draw_all()
-		reset_canvas()
-		reset_mouse()
-		key_state_now.clear()
-		event_state.clear()
-		focusing_id = null
-	}
-}
-
-reset_canvas()
-
-// focusing ------------------------------------------------------------------
-
-let focusing_id
-
-ui.focus = function(id) {
-	ui.focused_id = id
-	focusing_id = id
-}
-
-ui.focused = function(id) {
-	return id && ui.focused_id == id
-}
-
-ui.focusing = function(id) {
-	return id && focusing_id == id
-}
-
 // frame widget --------------------------------------------------------------
 
-// TODO:
-// ui.widget('frame',
+const FRAME_ON_MEASURE = 0
+const FRAME_ON_FRAME   = 1
+const FRAME_REC_A      = 2
+
+ui.widget('frame', {
+
+	create: function(cmd, on_measure, on_frame) {
+
+		ui_cmd(cmd, on_measure, on_frame,
+			null, // rec_a
+		)
+
+	},
+
+	measure: function(a, i, axis) {
+
+		let on_measure = a[i+FRAME_ON_MEASURE]
+		if (on_measure)
+			on_measure(a, i, axis)
+
+	},
+
+	translate: function(a, i, dx, dy) {
+
+		let on_frame = a[i+FRAME_ON_FRAME]
+		ui.record()
+			on_frame()
+		let rec_a = end_record()
+		a[i+FRAME_REC_A] = rec_a
+
+		layout_record(rec_a)
+
+	},
+
+	draw: function(a, i) {
+
+		let rec_a = a[i+FRAME_REC_A]
+
+		draw_all(rec_a)
+
+	},
+
+})
 
 // template widget -----------------------------------------------------------
 
@@ -3906,7 +4022,7 @@ ui.widget('polyline', {
 	measure: function(a, i, axis) {
 		if (!axis) {
 			let pi1 = i+7
-			let pi2 = cmd_end_i(a, i)
+			let pi2 = cmd_arg_end_i(a, i)
 			let x1 =  1/0
 			let y1 =  1/0
 			let x2 = -1/0
@@ -3919,13 +4035,13 @@ ui.widget('polyline', {
 				x2 = max(x2, x)
 				y2 = max(y2, y)
 			}
-			add_ct_min_wh(a, 0, x2-x1, 0)
-			add_ct_min_wh(a, 1, y2-y1, 0)
+			add_ct_min_wh(a, 0, x2-x1)
+			add_ct_min_wh(a, 1, y2-y1)
 		}
 	},
 	draw: function(a, i) {
 		let pi1 = i+7
-		let pi2 = cmd_end_i(a, i)
+		let pi2 = cmd_arg_end_i(a, i)
 		let ct_i = a[i+1]
 		let x0 = a[ct_i+0]
 		let y0 = a[ct_i+1]
@@ -3957,7 +4073,7 @@ ui.widget('polyline', {
 		let y0 = a[ct_i+1]
 		let closed = a[i+2]
 		let pi1 = i+7
-		let pi2 = cmd_end_i(a, i)
+		let pi2 = cmd_arg_end_i(a, i)
 		set_points(cx, x0, y0, a, pi1, pi2, closed)
 		if (cx.isPointInPath(mx, my)) {
 			ui.hover(id)
@@ -4134,7 +4250,7 @@ ui.end_toolbox = function() {
 {
 // check if a point (x0, y0) is inside rect (x, y, w, h)
 // offseted by d1 internally and d2 externally.
-let hit = function(x0, y0, d1, d2, x, y, w, h) {
+function hit(x0, y0, d1, d2, x, y, w, h) {
 	x = x - d1
 	y = y - d1
 	w = w + d1 + d2
@@ -4916,8 +5032,8 @@ ui.widget('sat_lum_square', {
 
 		cx.putImageData(idata, x, y)
 
-		let hit_sat = ui.hit(id).get('sat')
-		let hit_lum = ui.hit(id).get('lum')
+		let hit_sat = ui.hit(id)?.get('sat')
+		let hit_lum = ui.hit(id)?.get('lum')
 		let sel_sat = ui.state(id, 'sat')
 		let sel_lum = ui.state(id, 'lum')
 
@@ -4938,13 +5054,13 @@ ui.widget('sat_lum_square', {
 
 		let hit = hit_rect(x, y, w, h)
 		if (hit) {
-			ui.hover(id)
+			let hs = ui.hover(id)
 
 			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
 			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
 		}
 
-		return !!hs
+		return hit
 	},
 
 })
@@ -4975,7 +5091,7 @@ ui.widget('hue_bar', {
 		}
 		let cs = ui.captured(id)
 		if (cs)
-			ui.state(id).set('hue', ui.cs(id, 'hue'))
+			ui.state(id).set('hue', cs.get('hue'))
 
 		if (ui.focused(id)) {
 			let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
@@ -5043,7 +5159,7 @@ ui.widget('hue_bar', {
 		let cs = ui.captured(id)
 		if (cs || hs) {
 			let hue = clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360)
-			(cs || hs).set('hue', hue)
+			;(cs || hs).set('hue', hue)
 		}
 		return hit
 	},
@@ -5058,13 +5174,12 @@ ui.box_ct_widget('aspect_box', {
 	},
 	measure: function(a, i, axis) {
 		ct_stack_push(a, i)
-		let fr = a[i+FR]
-		let w  = a[i+2+axis]
+		let w = a[i+2+axis]
 		if (axis) {
 			let aspect = a[i+S+0]
 			w = round(a[i+2] / aspect)
 		}
-		add_ct_min_wh(a, axis, w, fr)
+		add_ct_min_wh(a, axis, w)
 	},
 })
 
@@ -5243,6 +5358,8 @@ ui.widget('bg_dots', {
 }
 
 // init ----------------------------------------------------------------------
+
+reset_canvas()
 
 // prevent flicker
 theme = themes[ui.default_theme]
