@@ -591,6 +591,8 @@ let layer_base   = layer_make('base')
 let layer_popup  = layer_make('popup')
 let layer_handle = layer_make('handle')
 
+ui.layer_popup = layer_popup
+
 a.layers = [layer_base, layer_popup, layer_handle]
 
 let layer_stack = []
@@ -1221,14 +1223,13 @@ const ALIGN      = 13 // vert. align at ALIGN+1
 const NEXT_EXT_I = 15 // all container-boxes: next command after this one's END command.
 const S          = 16 // first index after the ui_cmd_box_ct header.
 
-ui.PX1 = PX1
-ui.PX2 = PX2
-ui.MX1 = MX1
-ui.MX2 = MX2
-ui.FR         = FR
-ui.ALIGN      = ALIGN
-ui.NEXT_EXT_I = NEXT_EXT_I
-ui.S          = S
+ui.PX1   = PX1
+ui.PX2   = PX2
+ui.MX1   = MX1
+ui.MX2   = MX2
+ui.FR    = FR
+ui.ALIGN = ALIGN
+ui.S     = S
 
 function paddings(a, i, axis) {
 	return (
@@ -2169,20 +2170,19 @@ function popup_parse_flags(s) {
 	)
 }
 
-const POPUP_ID        = S+0
-const POPUP_LAYER     = S+1
-const POPUP_TARGET_I  = S+2
-const POPUP_SIDE      = S+3
-const POPUP_ALIGN     = S+4
-const POPUP_FLAGS     = S+5
-const POPUP_SIDE_REAL = S+6
+const POPUP_ID        = FR // because fr it's not used
+const POPUP_SIDE      = ALIGN // because align is not used
+const POPUP_ALIGN     = ALIGN+1 // because valign is not used
+const POPUP_LAYER     = S+0
+const POPUP_TARGET_I  = S+1
+const POPUP_FLAGS     = S+2
+const POPUP_SIDE_REAL = S+3
 
 const POPUP_TARGET_SCREEN = -1
 
 const CMD_POPUP = cmd_ct('popup')
 ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 	layer1 = layer1 || layer
-	// TODO: fr, align, valign are not used. find a way to remove them.
 	begin_scope()
 	if (layer1 != layer) {
 		force_color(color, color_state)
@@ -2192,15 +2192,25 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		force_line_gap(line_gap)
 	}
 	side = popup_parse_side(side ?? 't')
-	let i = ui_cmd_box_ct(CMD_POPUP, 0, 's', 's', min_w, min_h,
-		id,
-		layer1,
-		repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i(),
-		side,
-		popup_parse_align(align ?? 'c'),
-		popup_parse_flags(flags ?? ''),
+	align = popup_parse_align(align ?? 'c')
+	target_i = repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i()
+	flags = popup_parse_flags(flags ?? '')
+	// TODO: find a way to use ui_cmd_box_ct() again...
+	let i = ui_cmd(CMD_POPUP,
+		0, // x
+		0, // y
+		min_w ?? 0,
+		min_h ?? 0,
+		px1, py1, px2, py2,
+		mx1, my1, mx2, my2,
+		id,    // where fr would be
+		side,  // where align would be
+		align, // where valign would be
+		0, // next_ext_i
+		layer1, target_i, flags,
 		side, // side_real
 	)
+	ct_stack.push(i)
 	begin_layer(layer1, i)
 	return i
 }
