@@ -1207,17 +1207,19 @@ ui.widget = function(cmd_name, t, is_ct) {
 
 // box widgets ---------------------------------------------------------------
 
+// a box has min_w, min_h, margin, padding, align, valign, and also `fr`
+// if it's in is_flex_child. a box can also be a container.
+// it's x,y,w,h are calculated by the layouting system using the above.
+
 const PX1        =  4
 const PX2        =  6
 const MX1        =  8
 const MX2        = 10
 
 const FR         = 12 // all `is_flex_child` widgets: fraction from main-axis size.
-const ALIGN      = 13 // all boxes: align v,h.
-const NEXT_EXT_I = 15 // all containers: next command after this one's END command.
+const ALIGN      = 13 // vert. align at ALIGN+1
+const NEXT_EXT_I = 15 // all container-boxes: next command after this one's END command.
 const S          = 16 // first index after the ui_cmd_box_ct header.
-
-const FLEX_GAP = S+0
 
 ui.PX1 = PX1
 ui.PX2 = PX2
@@ -1342,13 +1344,6 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 ui.cmd_box = ui_cmd_box
 
 // box measure phase
-
-function is_main_axis(cmd, axis) {
-	return (
-		(cmd == CMD_V ? 1 : 2) == axis ||
-		(cmd == CMD_H ? 0 : 2) == axis
-	)
-}
 
 function add_ct_min_wh(a, axis, w) {
 	let i = ct_stack.at(-1)
@@ -1620,6 +1615,8 @@ COMMANDS
 
 // flex ----------------------------------------------------------------------
 
+const FLEX_GAP = S+0
+
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 	begin_scope()
 	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
@@ -1639,6 +1636,13 @@ ui.hv = function(hv, ...args) {
 
 ui.end_h = function() { ui.end(CMD_H) }
 ui.end_v = function() { ui.end(CMD_V) }
+
+function is_main_axis(cmd, axis) {
+	return (
+		(cmd == CMD_V ? 1 : 2) == axis ||
+		(cmd == CMD_H ? 0 : 2) == axis
+	)
+}
 
 reindex[CMD_H] = box_ct_reindex
 reindex[CMD_V] = box_ct_reindex
