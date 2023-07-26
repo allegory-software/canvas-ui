@@ -11,6 +11,18 @@ LOADING
 
 	global flag:   dump the `ui` namespace into `window`.
 
+WIDGETS
+
+	h|v(fr, )
+
+	color(c, cs)
+	font(fs)
+	font_size(fs)
+	font_weight(fw)
+	line_gap(lg)
+	text()
+
+
 */
 
 (function () {
@@ -31,7 +43,7 @@ const {
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str,
 	obj, set, map, array,
-	assign,
+	assign, insert,
 	noop, return_true, do_after,
 	clock,
 	memoize,
@@ -42,8 +54,8 @@ const {
 	runevery,
 } = glue
 
-let map_freelist   = () => freelist(map, m => m.clear())
-let array_freelist = () => freelist(array, a => a.length = 0)
+let map_freelist   = () => freelist(map)
+let array_freelist = () => freelist(array)
 
 // When using capture_pointer(), setting the cursor for the element that
 // is hovered doesn't work anymore, so use this hack instead.
@@ -103,15 +115,16 @@ body {
 
 // colors --------------------------------------------------------------------
 
-ui.hsl = function(h, s, L, a) {
+function hsl(h, s, L, a) {
 	return `hsla(${dec(h)}, ${dec(s * 100)}%, ${dec(L * 100)}%, ${a ?? 1})`
 }
 
-ui.rgb = hsl_to_rgb_hex
-
-ui.hsl_adjust = function(c, h, s, L, a) {
-	return ui.hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * a)
+function hsl_adjust(c, h, s, L, a) {
+	return hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * a)
 }
+
+ui.hsl = hsl
+ui.hsl_adjust
 
 // themes --------------------------------------------------------------------
 
@@ -194,14 +207,14 @@ function def_color_func(k) {
 		state = state ?? 'normal'
 		let state_i = parse_state(state)
 		states[state_i][name] = isnum(h)
-			? [ui.hsl(h, s, L, a), h, s, L, a, is_dark]
+			? [hsl(h, s, L, a), h, s, L, a, is_dark]
 			: isarray(h) ? h : ui[k+'_color'](h, s ?? state, L ?? theme)
 	}
 	return def_color
 }
 
 let theme
-ui.get_theme = () => theme
+ui.get_theme = () => theme.name
 
 function lookup_color_func(k) {
 	return function(name, state, theme1) {
@@ -226,6 +239,7 @@ function set_theme_dark_from(bg_color) {
 
 ui.fg_style = def_color_func('fg')
 ui.fg_color = lookup_color_func('fg')
+let fg_color = ui.fg_color
 
 //           theme    name     state       h     s     L    a
 // ---------------------------------------------------------------------------
@@ -254,6 +268,8 @@ ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 
 ui.border_style = def_color_func('border')
 ui.border_color = lookup_color_func('border')
+let border_color = ui.border_color
+let ui_border_color = ui.border_color
 
 //               theme    name        state       h    s    L     a
 // ---------------------------------------------------------------------------
@@ -271,10 +287,13 @@ ui.border_style('dark' , 'intense' , 'hover'  ,   0,   0,   1, 0.40)
 
 ui.bg_style = def_color_func('bg')
 ui.bg_color = lookup_color_func('bg')
+let bg_color = ui.bg_color
+let ui_bg_color = ui.bg_color
 
-ui.bg_is_dark = function(bg_color) {
+function bg_is_dark(bg_color) {
 	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
 }
+ui.bg_is_dark = bg_is_dark
 
 //           theme    name      state       h     s     L     a
 // -------------------------------------------------------------
@@ -443,6 +462,10 @@ ui.ready = function() {
 
 // mouse state ---------------------------------------------------------------
 
+ui.mx = null
+ui.my = null
+ui.mx0 = null
+ui.my0 = null
 ui.pressed = false
 ui.click = false
 ui.clickup = false
@@ -518,7 +541,7 @@ ui.capture = function(id) {
 		return
 	if (!ui.pressed)
 		return
-	if (!ui.hovers(id))
+	if (!hovers(id))
 		return
 	ui.captured_id = id
 	capture_state.clear()
@@ -527,9 +550,10 @@ ui.capture = function(id) {
 	return capture_state
 }
 
-ui.captured = function(id) {
+function captured(id) {
 	return id && ui.captured_id == id && capture_state || null
 }
+ui.captured = captured
 
 // keyboard state ------------------------------------------------------------
 
@@ -576,35 +600,56 @@ ui.listen = function(ev) {
 
 // z-layers ------------------------------------------------------------------
 
-function layer_make(name) {
-	let layer = [] // [popup1_i,...]
-	layer.name = name
+let layer_freelist = array_freelist()
+let layer_map = obj() // {name->layer}
+let layer_arr = [] // [layer1,...]
+
+a.layers = []
+
+function ui_layer(name, index) {
+	let layer = layer_map[name]
+	if (!layer) {
+		layer = layer_freelist.alloc() // [popup1_i,...]
+		layer.name = assert(name)
+		insert(a.layers, index, layer)
+		layer_map[name] = layer
+		layer_arr.push(layer)
+		layer.i = layer_arr.length-1
+	}
 	return layer
 }
+ui.layer = ui_layer
 
-function layer_clear(layer) {
-	layer.length = 0
+function clean_layers() {
+	for (let layer of a.layers)
+		layer.length = 0
 }
 
-let layer_base   = layer_make('base')
-let layer_popup  = layer_make('popup')
-let layer_handle = layer_make('handle')
+ui_layer('base'   , 0)
+ui_layer('handle' , 1)
+ui_layer('window' , 2)
+ui_layer('tooltip', 3)
+ui_layer('open'   , 4)
 
-ui.layer_popup = layer_popup
+let layer_stack = [] // [layer1_i, ...]
+let layer_i // current layer = layer_arr[layer_i]
 
-a.layers = [layer_base, layer_popup, layer_handle]
-
-let layer_stack = []
-let layer
-
-function begin_layer(layer1, i) {
-	layer1.push(i)
-	layer_stack.push(layer)
-	layer = layer1
+function begin_layer(layer, i) {
+	layer.push(i)
+	layer_i = layer.i
+	layer_stack.push(layer_i)
 }
 
 function end_layer() {
-	layer = layer_stack.pop()
+	layer_i = layer_stack.pop()
+}
+
+function layer_stack_check() {
+	if (layer_stack.length) {
+		for (let layer_i of layer_stack)
+			debug('layer', layer_arr[layer_i].name, 'not closed')
+		assert(false)
+	}
 }
 
 // scopes --------------------------------------------------------------------
@@ -630,6 +675,7 @@ function end_scope() {
 		end_font_size(ended_scope)
 		end_font_weight(ended_scope)
 		end_line_gap(ended_scope)
+		ended_scope.clear()
 		scope_freelist.free(ended_scope)
 	}
 }
@@ -663,6 +709,10 @@ function scope_prev_var(ended_scope, k) {
 	let v0 = scope_get(k)
 	if (v === v0) return
 	return v0
+}
+
+function scope_stack_check() {
+	assert(!scope_stack.length, 'scope not closed')
 }
 
 ui.scope = begin_scope
@@ -702,17 +752,12 @@ function keepalive(id, update_f) {
 }
 ui.keepalive = keepalive
 
-let updated_set = set() // {id}
-
 function state_update(id, m) {
 	let update_f = m.get('update')
 	if (!update_f)
 		return
-	let updated = updated_set.has(id)
-	if (!updated) {
-		update_f(id, m)
-		updated_set.add(id)
-	}
+	update_f(id, m)
+	m.set('update', null)
 }
 
 ui.state = function(id, k) {
@@ -744,13 +789,13 @@ function id_state_gc() {
 		if (free)
 			free(m, id)
 		id_state_maps.delete(id)
+		m.clear()
 		id_state_map_freelist.free(m)
 	}
 	id_remove_set.clear()
 	let empty = id_remove_set
 	id_remove_set = id_current_set
 	id_current_set = empty
-	updated_set.clear()
 }
 
 ui.on_free = function(id, free1) {
@@ -821,18 +866,12 @@ ui.ct_i = function() {
 	return assert(ct_stack.at(-1), 'no container')
 }
 
-function check_stacks() {
+function ct_stack_check() {
 	if (ct_stack.length) {
 		for (let i of ct_stack)
 			debug(C(a, i), 'not closed')
 		assert(false)
 	}
-	if (layer_stack.length) {
-		for (let layer of layer_stack)
-			debug('layer', layer.name, 'not closed')
-		assert(false)
-	}
-	assert(!scope_stack.length, 'scope not closed')
 }
 
 // command array -------------------------------------------------------------
@@ -842,21 +881,38 @@ let cmd_name_map = map()
 
 function C(a, i) { return cmd_names[a[i-1]] }
 
-let max_cmd    = -2 // even numbers for non-containers
+let max_cmd    =  0 // even numbers for non-containers  (0 is reserved).
 let max_cmd_ct = -1 // odd numbers containers
+function unsparse(a, i) {
+	if (a[i] == undefined)
+		a[i] = null
+}
+function unsparse_all(i) {
+	unsparse(measure       , i)
+	unsparse(measure_end   , i)
+	unsparse(position      , i)
+	unsparse(translate     , i)
+	unsparse(draw          , i)
+	unsparse(draw_end      , i)
+	unsparse(hittest       , i)
+	unsparse(reindex       , i)
+	unsparse(is_flex_child , i)
+	unsparse(cmd_names     , i)
+}
 function cmd(name, is_ct) {
-	let code
+	assert(!cmd_name_map.has(name), 'duplicate command ', name)
+	let cmd
 	if (is_ct) {
 		max_cmd_ct += 2
-		code = max_cmd_ct
+		cmd = max_cmd_ct
 	} else {
 		max_cmd += 2
-		code = max_cmd
+		cmd = max_cmd
 	}
-	assert(!cmd_names[code], 'duplicate command code ', code, ' for ', name)
-	cmd_names[code] = name
-	cmd_name_map.set(name, code)
-	return code
+	unsparse_all(cmd-1)
+	cmd_names[cmd] = name
+	cmd_name_map.set(name, cmd)
+	return cmd
 }
 function cmd_ct(name) {
 	return cmd(name, true)
@@ -872,6 +928,9 @@ ui.cmd = ui_cmd
 
 // index after the last arg.
 let cmd_arg_end_i = (a, i) => a[i-2] - 3
+
+ui.nm = cmd_name_map
+ui.n = cmd_names
 
 // cmd buffers ---------------------------------------------------------------
 
@@ -912,7 +971,12 @@ ui.record_play = function(a1) {
 
 	a.push(...a1)
 
+	a1.length = 0
 	record_freelist.free(a1)
+}
+
+function record_stack_check() {
+	assert(!record_stack.length, 'records left unplayed')
 }
 
 // rendering phases ----------------------------------------------------------
@@ -923,8 +987,10 @@ let position      = []
 let translate     = []
 let draw          = []
 let draw_end      = []
-let hit           = []
+let hittest       = []
 let is_flex_child = []
+
+ui.is_flex_child = is_flex_child
 
 // measuring phase (per-axis) ------------------------------------------------
 
@@ -946,10 +1012,9 @@ function measure_record(a, axis) {
 }
 
 function measure_all(axis) {
-	check_stacks()
 	reset_canvas()
 	measure_record(a, axis)
-	check_stacks()
+	ct_stack_check()
 }
 
 // positioning phase (per-axis) ----------------------------------------------
@@ -994,12 +1059,21 @@ ui.translate = function(a, i) {
 let theme_stack = []
 
 function draw_all() {
-	screen.style.background = ui.bg_color('bg')[0]
-	for (layer of a.layers) {
-		// ^^NOTE: we're setting the global variable called layer!
+
+	// check that draw cmd array is stateless.
+	let i = 2
+	while (i < a.length) {
+		for (let j = i; j < a[i-2] - 3; j++)
+			if (!isnum(a[j]) && !isstr(a[j]) && a[j] != null && typeof a[j] != 'boolean')
+				pr(C(a, i), j-i, a[j])
+		i = a[i-2] // next_i
+	}
+
+	screen.style.background = bg_color('bg')[0]
+	for (let layer of a.layers) {
+		/*global*/ layer_i = layer.i
 		for (let i of layer) {
 			let next_ext_i = get_next_ext_i(a, i)
-			check_stacks()
 			reset_canvas()
 			while (i < next_ext_i) {
 
@@ -1018,9 +1092,9 @@ function draw_all() {
 					i = a[i-2] // next_i
 				}
 			}
-			check_stacks()
 			assert(!theme_stack.length)
 		}
+		layer_i = null
 	}
 }
 
@@ -1031,15 +1105,16 @@ let hit_state_maps = map() // {id->map}
 
 ui._hit_state_maps = hit_state_maps
 
-ui.hit = function(id, k) {
+function hit(id, k) {
 	if (!id) return
 	if (ui.captured_id) // unavailable while captured
 		return
 	let m = hit_state_maps.get(id)
 	return k ? m?.get(k) : m
 }
+ui.hit = hit
 
-ui.hover = function(id) {
+function hover(id) {
 	if (!id) return
 	let m = hit_state_maps.get(id)
 	if (!m) {
@@ -1048,12 +1123,14 @@ ui.hover = function(id) {
 	}
 	return m
 }
+ui.hover = hover
 
-ui.hovers = function(id, k) {
+function hovers(id, k) {
 	if (!id) return
 	let m = hit_state_maps.get(id)
 	return k ? m?.get(k) : m
 }
+ui.hovers = hovers
 
 function hit_all() {
 
@@ -1063,8 +1140,10 @@ function hit_all() {
 	hit_template_i0 = null
 	hit_template_i1 = null
 
-	for (let m of hit_state_maps.values())
+	for (let m of hit_state_maps.values()) {
+		m.clear()
 		hit_state_map_freelist.free(m)
+	}
 	hit_state_maps.clear()
 
 	if (ui.mx == null)
@@ -1072,19 +1151,20 @@ function hit_all() {
 
 	// iterate layers in reverse order.
 	for (let j = a.layers.length-1; j >= 0; j--) {
-		layer = a.layers[j]
+		let layer = a.layers[j]
+		/*global*/ layer_i = layer.i
 		// iterate layer's cointainers in reverse order.
 		for (let k = layer.length-1; k >= 0; k--) {
 			reset_canvas()
 			let i = layer[k]
-			let hit_f = hit[a[i-1]]
+			let hit_f = hittest[a[i-1]]
 			if (hit_f(a, i)) {
 				j = -1
 				break
 			}
 		}
 	}
-	layer = null
+	layer_i = null
 
 }
 
@@ -1120,7 +1200,7 @@ ui.redraw = function() {
 
 function layout_record(rec_a) {
 	let a0 = a
-	a = null
+	a = null // protect a
 	measure_record(rec_a); position_record(rec_a) // x-axis
 	measure_record(rec_a); position_record(rec_a) // y-axis
 	translate_record(a)
@@ -1136,20 +1216,22 @@ function redraw_all() {
 		measure_req_all()
 
 		a.length = 0
-		for (let layer of a.layers)
-			layer_clear(layer)
-		check_stacks()
+		clean_layers()
 
 		let i = ui.stack()
-		begin_layer(layer_base, i)
+		begin_layer(ui_layer('base'), i)
 		ui.main()
+		reset_paddings()
 		ui.end()
 		end_layer()
-		reset_paddings()
+		ct_stack_check()
+		layer_stack_check()
+		scope_stack_check()
 
 		measure_all(0); position_all(0) // x-axis
 		measure_all(1); position_all(1) // y-axis
 		translate_all()
+		record_stack_check()
 
 		id_state_gc()
 
@@ -1192,7 +1274,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	translate     [_cmd] = t.translate
 	draw          [_cmd] = t.draw
 	draw_end      [_cmd] = t.draw_end
-	hit           [_cmd] = t.hit
+	hittest       [_cmd] = t.hit
 	reindex       [_cmd] = reindex_f
 	is_flex_child [_cmd] = t.is_flex_child
 	let create = t.create
@@ -1463,7 +1545,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		let h = a[i+3]
 		let id = a[i+ID]
 		if (hit_rect(x, y, w, h)) {
-			ui.hover(id)
+			hover(id)
 			return true
 		}
 	}
@@ -1507,6 +1589,7 @@ function box_ct_reindex(a, i, offset) {
 }
 
 const CMD_END = cmd('end')
+
 ui.end = function(cmd) {
 	end_scope()
 	let i = assert(ct_stack.pop(), 'end command outside container')
@@ -1599,7 +1682,7 @@ function hit_children(a, i) {
 	while (i > ct_i) {
 		if (a[i-1] == CMD_END)
 			i = a[i] // start_i
-		let hit_f = hit[a[i-1]]
+		let hit_f = hittest[a[i-1]]
 		if (hit_f && hit_f(a, i)) {
 			found = true
 			break
@@ -1609,19 +1692,6 @@ function hit_children(a, i) {
 
 	return found
 }
-
-/* ---------------------------------------------------------------------------
-
-COMMANDS
-	color
-	font
-	font_size
-	font_weight
-	line_gap
-	text
-
-
-*/
 
 // flex ----------------------------------------------------------------------
 
@@ -1781,14 +1851,15 @@ function hit_flex(a, i) {
 	if (hit_box(a, i))
 		hit_template(a, i)
 }
-hit[CMD_H] = hit_flex
-hit[CMD_V] = hit_flex
+hittest[CMD_H] = hit_flex
+hittest[CMD_V] = hit_flex
 
 // stack ---------------------------------------------------------------------
 
 const STACK_ID = S+0
 
 const CMD_STACK = cmd_ct('stack')
+
 ui.stack = function(id, fr, align, valign, min_w, min_h) {
 	begin_scope()
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
@@ -1812,23 +1883,24 @@ ui.end_stack = function() { ui.end(CMD_STACK) }
 
 translate[CMD_STACK] = translate_ct
 
-hit[CMD_STACK] = function(a, i) {
+hittest[CMD_STACK] = function(a, i) {
 	if (hit_children(a, i)) {
-		ui.hover(a[i+STACK_ID])
+		hover(a[i+STACK_ID])
 		return true
 	}
 	if (hit_box(a, i)) {
-		ui.hover(a[i+STACK_ID])
+		hover(a[i+STACK_ID])
 		hit_template(a, i)
 	}
 }
 
 // scrollbox -----------------------------------------------------------------
 
-const SB_OVERFLOW =  S+0 // overflow x,y
-const SB_CW       =  S+2 // content w,h
-const SB_ID       =  S+4
-const SB_SX       =  S+5 // scroll x,y
+const SB_OVERFLOW = S+0 // overflow x,y
+const SB_CW       = S+2 // content w,h
+const SB_ID       = S+4
+const SB_SX       = S+5 // scroll x,y
+const SB_STATE    = S+7
 
 const SB_OVERFLOW_AUTO    = 0
 const SB_OVERFLOW_HIDE    = 1
@@ -1844,6 +1916,7 @@ function parse_sb_overflow(s) {
 }
 
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
+
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
 	keepalive(id)
@@ -1860,6 +1933,7 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 		id,
 		sx ?? 0, // scroll x
 		sy ?? 0, // scroll y
+		0, // state
 	)
 	if (ss && sx != null) ss.set('scroll_x', sx)
 	if (ss && sy != null) ss.set('scroll_y', sy)
@@ -1922,6 +1996,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 	let id = a[i+SB_ID]
 	if (id) {
+		let hit_state = 0
 		for (let axis = 0; axis < 2; axis++) {
 
 			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
@@ -1929,7 +2004,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 				continue
 
 			// wheel scrolling
-			if (axis && ui.wheel_dy && ui.hit(id)) {
+			if (axis && ui.wheel_dy && hit(id)) {
 				let sy0 = ui.state(id, 'scroll_y') ?? 0
 				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
 				ui.state(id).set('scroll_y', sy)
@@ -1938,7 +2013,8 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 			// drag-scrolling
 			let sbar_id = id+'.scrollbar'+axis
-			let cs = ui.captured(sbar_id)
+			let cs = captured(sbar_id)
+			let hs
 			if (cs) {
 				if (!axis) {
 					let psx0 = cs.get('ps0')
@@ -1953,16 +2029,19 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 					ui.state(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
-				break
 			} else {
-				if (!ui.hit(sbar_id))
+				hs = hit(sbar_id)
+				if (!hs)
 					continue
 				let cs = ui.capture(sbar_id)
-				if (!cs)
-					continue
-				cs.set('ps0', !axis ? psx : psy)
+				if (cs)
+					cs.set('ps0', !axis ? psx : psy)
 			}
+
+			// bits 0..1 = horiz state; bits 2..3 = vert. state.
+			hit_state |= 4 * axis * (cs ? 2 : hs ? 1 : 0)
 		}
+		a[i+SB_STATE] = hit_state
 	}
 
 	translate_children(a, i, dx - sx, dy - sy)
@@ -2061,36 +2140,34 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 
 	cx.restore()
 
-	let id = a[i+SB_ID]
 	for (let axis = 0; axis < 2; axis++) {
 
 		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
 		if (!visible)
 			continue
 
-		let sbar_id = id+'.scrollbar'+axis
-		let cs = ui.captured(sbar_id)
-		let hit = ui.hit(sbar_id)
+		let state = (a[i+SB_STATE] >> (2 * axis)) & 3
+		state = state == 2 && 'active' || state && 'hover' || null
 
-		if (cs || hit)
+		if (state)
 			[visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
 
 		cx.beginPath()
 		cx.rect(tx, ty, tw, th)
-		cx.fillStyle = ui.bg_color('scrollbar', cs && 'active' || hit && 'hover' || 'normal')[0]
+		cx.fillStyle = bg_color('scrollbar', state)[0]
 		cx.fill()
 
 	}
 }
 
-hit[CMD_SCROLLBOX] = function(a, i) {
+hittest[CMD_SCROLLBOX] = function(a, i) {
 	let id = a[i+SB_ID]
 
 	// fast-test the outer box since we're clipping the contents.
 	if (!hit_box(a, i))
 		return
 
-	ui.hover(id)
+	hover(id)
 
 	hit_template(a, i)
 
@@ -2101,7 +2178,7 @@ hit[CMD_SCROLLBOX] = function(a, i) {
 			continue
 		if (!hit_rect(tx, ty, tw, th))
 			continue
-		ui.hover(id+'.scrollbar'+axis)
+		hover(id+'.scrollbar'+axis)
 		return true
 	}
 
@@ -2182,7 +2259,7 @@ function popup_parse_flags(s) {
 const POPUP_ID        = FR      // because fr is not used
 const POPUP_SIDE      = ALIGN   // because align is not used
 const POPUP_ALIGN     = ALIGN+1 // because valign is not used
-const POPUP_LAYER     = S+0
+const POPUP_LAYER_I   = S+0
 const POPUP_TARGET_I  = S+1
 const POPUP_FLAGS     = S+2
 const POPUP_SIDE_REAL = S+3
@@ -2190,10 +2267,11 @@ const POPUP_SIDE_REAL = S+3
 const POPUP_TARGET_SCREEN = -1
 
 const CMD_POPUP = cmd_ct('popup')
-ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
-	layer1 = layer1 || layer
+
+ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) {
+	let layer = layer_name ? ui_layer(layer_name) : layer_arr[layer_i]
 	begin_scope()
-	if (layer1 != layer) {
+	if (layer.i != layer_i) {
 		force_color(color, color_state)
 		force_font(font)
 		force_font_size(font_size)
@@ -2212,13 +2290,13 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		null, // valign -> align
 		min_w, min_h,
 		// S+0
-		layer1, target_i, flags,
+		layer_i, target_i, flags,
 		side, // side_real
 	)
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	begin_layer(layer1, i)
+	begin_layer(layer, i)
 	return i
 }
 
@@ -2421,15 +2499,15 @@ ui.popup_target_rect = function(a, i) {
 }
 
 draw[CMD_POPUP] = function(a, i) {
-	let popup_layer = a[i+POPUP_LAYER]
-	if (popup_layer != layer)
+	let popup_layer_i = a[i+POPUP_LAYER_I]
+	if (popup_layer_i != layer_i)
 		return true
 }
 
-hit[CMD_POPUP] = function(a, i) {
+hittest[CMD_POPUP] = function(a, i) {
 
-	let popup_layer = a[i+POPUP_LAYER]
-	if (popup_layer != layer)
+	let popup_layer_i = a[i+POPUP_LAYER_I]
+	if (popup_layer_i != layer_i)
 		return
 
 	return hit_children(a, i)
@@ -2478,145 +2556,147 @@ function tooltip_path(cx, x1, y1, x2, y2, side, tx, ty, b1x, b1y, b2x, b2y, r, d
 	cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r)
 }
 
-ui.widget('bb_tooltip', {
-	create: function(cmd, id, bg_color, bg_color_state, border_color, border_color_state, border_radius) {
-		let ct_i = ui.ct_i()
-		assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
-		return ui_cmd(cmd, id, ct_i, bg_color, bg_color_state, border_color, border_color_state, border_radius ?? 0)
-	},
-	reindex: function(a, i, offset) {
-		a[i+0] += offset
-	},
-	draw: function(a, i) {
-		let ct_i = a[i+1]
+const CMD_BB_TOOLTIP = cmd('bb_tooltip')
 
-		let px1 = a[ct_i+PX1+0]
-		let py1 = a[ct_i+PX1+1]
-		let px2 = a[ct_i+PX2+0]
-		let py2 = a[ct_i+PX2+1]
-		let x   = a[ct_i+0] - px1
-		let y   = a[ct_i+1] - py1
-		let w   = a[ct_i+2] + px1 + px2
-		let h   = a[ct_i+3] + py1 + py2
+ui.bb_tooltip = function(id, bg_color, bg_color_state, border_color, border_color_state, border_radius) {
+	let ct_i = ui.ct_i()
+	assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
+	return ui_cmd(CMD_BB_TOOLTIP, id, ct_i, bg_color, bg_color_state, border_color, border_color_state, border_radius ?? 0)
+}
 
-		let bg_color           = a[i+2]
-		let bg_color_state     = a[i+3]
-		let border_color       = a[i+4]
-		let border_color_state = a[i+5]
-		let r                  = a[i+6] // border radius
+reindex[CMD_BB_TOOLTIP] = function(a, i, offset) {
+	a[i+0] += offset
+}
 
-		let side  = a[ct_i+POPUP_SIDE_REAL]
-		let align = a[ct_i+POPUP_ALIGN]
+draw[CMD_BB_TOOLTIP] = function(a, i) {
+	let ct_i = a[i+1]
 
-		let T = POPUP_SIDE_TOP
-		let B = POPUP_SIDE_BOTTOM
-		let L = POPUP_SIDE_LEFT
-		let R = POPUP_SIDE_RIGHT
-		let S = POPUP_ALIGN_START
-		let E = POPUP_ALIGN_END
+	let px1 = a[ct_i+PX1+0]
+	let py1 = a[ct_i+PX1+1]
+	let px2 = a[ct_i+PX2+0]
+	let py2 = a[ct_i+PX2+1]
+	let x   = a[ct_i+0] - px1
+	let y   = a[ct_i+1] - py1
+	let w   = a[ct_i+2] + px1 + px2
+	let h   = a[ct_i+3] + py1 + py2
 
-		let m = ui.sp2() // margin away from the target's corners.
-		let d = ui.sp2() // tooltip's tip base width.
+	let bg_color           = a[i+2]
+	let bg_color_state     = a[i+3]
+	let border_color       = a[i+4]
+	let border_color_state = a[i+5]
+	let r                  = a[i+6] // border radius
 
-		// find tooltip tip's tip point.
-		let [tx1, ty1, tx2, ty2] = ui.popup_target_rect(a, ct_i)
-		let tx, ty
-		if (side == T && align == S) {
-			tx = tx1 + m
-			ty = ty1
-		} else if (side == L && align == S) {
-			tx = tx1
-			ty = ty1 + m
-		} else if (side == T && align == E) {
-			tx = tx2 - m
-			ty = ty1
-		} else if (side == R && align == S) {
-			tx = tx2
-			ty = ty1 + m
-		} else if (side == B && align == S) {
-			tx = tx1 + m
-			ty = ty2
-		} else if (side == L && align == E) {
-			tx = tx1
-			ty = ty2 - m
-		} else if (side == B && align == E) {
-			tx = tx2 - m
-			ty = ty2
-		} else if (side == R && align == E) {
-			tx = tx2
-			ty = ty2 - m
-		} else if (align == POPUP_ALIGN_CENTER) {
-			if (side & POPUP_SIDE_TB) {
-				tx = tx1 + (tx2 - tx1) / 2
-				ty = side == T ? ty1 : ty2
-			} else {
-				ty = ty1 + (ty2 - ty1) / 2
-				tx = side == L ? tx1 : tx2
-			}
-		}
+	let side  = a[ct_i+POPUP_SIDE_REAL]
+	let align = a[ct_i+POPUP_ALIGN]
 
-		// find tooltip tip's base points.
-		let bx, by // tip's center point between its two base points.
-		let b1x, b1y
-		let b2x, b2y
-		let x1 = x
-		let y1 = y
-		let x2 = x1 + w
-		let y2 = y1 + h
-		if (side & POPUP_SIDE_LR) {
-			bx = side == L ? x2 : x1
-			by = clamp(ty, y1+r + d/2, y2-r - d/2)
-			b1x = bx
-			b2x = bx
-			b1y = by - d/2
-			b2y = by + d/2
+	let T = POPUP_SIDE_TOP
+	let B = POPUP_SIDE_BOTTOM
+	let L = POPUP_SIDE_LEFT
+	let R = POPUP_SIDE_RIGHT
+	let S = POPUP_ALIGN_START
+	let E = POPUP_ALIGN_END
+
+	let m = ui.sp2() // margin away from the target's corners.
+	let d = ui.sp2() // tooltip's tip base width.
+
+	// find tooltip tip's tip point.
+	let [tx1, ty1, tx2, ty2] = ui.popup_target_rect(a, ct_i)
+	let tx, ty
+	if (side == T && align == S) {
+		tx = tx1 + m
+		ty = ty1
+	} else if (side == L && align == S) {
+		tx = tx1
+		ty = ty1 + m
+	} else if (side == T && align == E) {
+		tx = tx2 - m
+		ty = ty1
+	} else if (side == R && align == S) {
+		tx = tx2
+		ty = ty1 + m
+	} else if (side == B && align == S) {
+		tx = tx1 + m
+		ty = ty2
+	} else if (side == L && align == E) {
+		tx = tx1
+		ty = ty2 - m
+	} else if (side == B && align == E) {
+		tx = tx2 - m
+		ty = ty2
+	} else if (side == R && align == E) {
+		tx = tx2
+		ty = ty2 - m
+	} else if (align == POPUP_ALIGN_CENTER) {
+		if (side & POPUP_SIDE_TB) {
+			tx = tx1 + (tx2 - tx1) / 2
+			ty = side == T ? ty1 : ty2
 		} else {
-			by = side == T ? y2 : y1
-			bx = clamp(tx, x1+r + d/2, x2-r - d/2)
-			b1y = by
-			b2y = by
-			b1x = bx - d/2
-			b2x = bx + d/2
+			ty = ty1 + (ty2 - ty1) / 2
+			tx = side == L ? tx1 : tx2
 		}
+	}
 
-		// align tooltip tip's tip point to its base' center point.
-		if (side & POPUP_SIDE_LR) {
-			ty = clamp(by, ty1+d, ty2-d)
-		} else {
-			tx = clamp(bx, tx1+d, tx2-d)
-		}
+	// find tooltip tip's base points.
+	let bx, by // tip's center point between its two base points.
+	let b1x, b1y
+	let b2x, b2y
+	let x1 = x
+	let y1 = y
+	let x2 = x1 + w
+	let y2 = y1 + h
+	if (side & POPUP_SIDE_LR) {
+		bx = side == L ? x2 : x1
+		by = clamp(ty, y1+r + d/2, y2-r - d/2)
+		b1x = bx
+		b2x = bx
+		b1y = by - d/2
+		b2y = by + d/2
+	} else {
+		by = side == T ? y2 : y1
+		bx = clamp(tx, x1+r + d/2, x2-r - d/2)
+		b1y = by
+		b2y = by
+		b1x = bx - d/2
+		b2x = bx + d/2
+	}
 
-		// in case `m` was too big...
-		tx = clamp(tx, tx1, tx2)
-		ty = clamp(ty, ty1, ty2)
+	// align tooltip tip's tip point to its base' center point.
+	if (side & POPUP_SIDE_LR) {
+		ty = clamp(by, ty1+d, ty2-d)
+	} else {
+		tx = clamp(bx, tx1+d, tx2-d)
+	}
 
-		if (bg_color != null) {
-			bg_color = ui.bg_color(bg_color, bg_color_state)
-			set_theme_dark_from(bg_color)
-			cx.fillStyle = bg_color[0]
-			tooltip_path(cx, x, y, x + w, y + h,
-				side, tx, ty, b1x, b1y, b2x, b2y, r, d)
-			cx.fill()
-		}
-		if (shadow_set)
-			reset_shadow()
-		if (border_color != null) {
-			border_color = ui.border_color(border_color, border_color_state)
-			cx.strokeStyle = border_color[0]
-			cx.lineWidth = 1
-			cx.lineCap = 'square'
-			tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
-				side, tx, ty, b1x, b1y, b2x, b2y, r, d)
-			cx.stroke()
-		}
+	// in case `m` was too big...
+	tx = clamp(tx, tx1, tx2)
+	ty = clamp(ty, ty1, ty2)
 
-	},
-})
+	if (bg_color != null) {
+		bg_color = ui_bg_color(bg_color, bg_color_state)
+		set_theme_dark_from(bg_color)
+		cx.fillStyle = bg_color[0]
+		tooltip_path(cx, x, y, x + w, y + h,
+			side, tx, ty, b1x, b1y, b2x, b2y, r, d)
+		cx.fill()
+	}
+	if (shadow_set)
+		reset_shadow()
+	if (border_color != null) {
+		border_color = ui_border_color(border_color, border_color_state)
+		cx.strokeStyle = border_color[0]
+		cx.lineWidth = 1
+		cx.lineCap = 'square'
+		tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
+			side, tx, ty, b1x, b1y, b2x, b2y, r, d)
+		cx.stroke()
+	}
+
+}
 
 // box shadow ----------------------------------------------------------------
 
 ui.shadow_style = function(theme, name, x, y, blur, spread, inset, h, s, L, a) {
-	themes[theme].shadow[name] = [x, y, blur, spread, inset, ui.hsl(h, s, L, a), h, s, L, a]
+	themes[theme].shadow[name] = [x, y, blur, spread, inset, hsl(h, s, L, a), h, s, L, a]
 }
 
 //               theme    name        x   y  bl sp  inset  h  s  L  a
@@ -2638,6 +2718,7 @@ ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, false, 0, 0, 0, 0x88 / 0xff)
 ui.shadow_style('dark', 'picker'  ,  0,  2, 15, 1, false, 0, 0, 0, .8)
 
 const CMD_SHADOW = cmd('shadow')
+
 ui.shadow = function(x, y, blur, spread, inset, color) {
 	if (isstr(x))
 		x = assert(theme.shadow[x])
@@ -2701,6 +2782,7 @@ const BB_ID            = 0
 const BB_CT_I          = 1
 
 const CMD_BB = cmd('bb') // border-background
+
 ui.bb = function(id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius) {
 	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, bg_color_state, parse_border_sides(sides), border_color, border_color_state, border_radius)
 }
@@ -2790,7 +2872,7 @@ draw[CMD_BB] = function(a, i) {
 	let border_color_state = a[i+6]
 	let border_radius      = a[i+7]
 	if (bg_color != null) {
-		bg_color = ui.bg_color(bg_color, bg_color_state)
+		bg_color = ui_bg_color(bg_color, bg_color_state)
 		set_theme_dark_from(bg_color)
 		cx.fillStyle = bg_color[0]
 		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
@@ -2799,7 +2881,7 @@ draw[CMD_BB] = function(a, i) {
 	if (shadow_set)
 		reset_shadow()
 	if (border_sides && border_color != null) {
-		border_color = ui.border_color(border_color, border_color_state)
+		border_color = ui_border_color(border_color, border_color_state)
 		cx.strokeStyle = border_color[0]
 		cx.lineWidth = 1
 		cx.lineCap = 'square'
@@ -2808,11 +2890,11 @@ draw[CMD_BB] = function(a, i) {
 	}
 }
 
-hit[CMD_BB] = function(a, i) {
+hittest[CMD_BB] = function(a, i) {
 	let ct_i     = a[i+1]
 	let bg_color = a[i+2]
 	if (bg_color != null && hit_box(a, ct_i)) {
-		ui.hover(a[i+BB_ID])
+		hover(a[i+BB_ID])
 		hit_template(a, i)
 		return true
 	}
@@ -2821,6 +2903,7 @@ hit[CMD_BB] = function(a, i) {
 // text state ----------------------------------------------------------------
 
 const CMD_COLOR = cmd('color')
+
 function force_color(s, state) {
 	scope_set('color', s)
 	scope_set('color_state', state)
@@ -2842,6 +2925,7 @@ function end_color(ended_scope) {
 }
 
 const CMD_FONT = cmd('font')
+
 function force_font(s) {
 	scope_set('font', s)
 	ui_cmd(CMD_FONT, s)
@@ -2865,6 +2949,7 @@ let large   = () => ui.font_size_normal * 1.125    // 16/14
 let xlarge  = () => ui.font_size_normal * 1.5
 
 const CMD_FONT_SIZE = cmd('font_size')
+
 function force_font_size(s) {
 	scope_set('font_size', s)
 	ui_cmd(CMD_FONT_SIZE, s)
@@ -2883,6 +2968,7 @@ ui.font_size = function(s) {
 ui.fs = ui.font_size
 
 const CMD_FONT_WEIGHT = cmd('font_weight')
+
 function force_font_weight(s) {
 	scope_set('font_weight', s)
 	ui_cmd(CMD_FONT_WEIGHT, s)
@@ -2903,6 +2989,7 @@ ui.bold = function() {
 }
 
 const CMD_LINE_GAP = cmd('line_gap')
+
 function force_line_gap(s) {
 	scope_set('line_gap', s)
 	ui_cmd(CMD_LINE_GAP, s)
@@ -2963,12 +3050,15 @@ const TEXT_ID       = S+3
 const TEXT_S        = S+4
 const TEXT_FLAGS    = S+5
 
+// TEXT_FLAGS
 const TEXT_WRAP      = 3 // bits 0 and 1
 const TEXT_WRAP_LINE = 1 // bit 1
 const TEXT_WRAP_WORD = 2 // bit 2
 const TEXT_EDITABLE  = 4 // bit 3
+const TEXT_FOCUSED   = 8 // bit 4
 
 const CMD_TEXT = cmd('text')
+
 ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
 	// NOTE: min_w and min_h are measured, not given.
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
@@ -2992,7 +3082,7 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 		max_min_w ?? -1, // -1=inf
 		id,
 		s,
-		wrap | (editable ? TEXT_EDITABLE : 0),
+		wrap | (editable ? TEXT_EDITABLE : 0) | (ui.focused(id) ? TEXT_FOCUSED : 0), // flags
 	)
 	if (editable)
 		input_create(id, input_type)
@@ -3147,10 +3237,11 @@ let word_wrapper_freelist = freelist(function() {
 	}
 
 	return ww
-}, ww => ww.clear())
+})
 
 function free_word_wrapper(s) {
 	let ww = s.get('ww')
+	ww.clear()
 	word_wrapper_freelist.free(ww)
 }
 
@@ -3322,8 +3413,9 @@ draw[CMD_TEXT] = function(a, i) {
 	let flags    = a[i+TEXT_FLAGS]
 	let wrap     = flags & TEXT_WRAP
 	let editable = flags & TEXT_EDITABLE
+	let focused  = flags & TEXT_FOCUSED
 
-	let col = ui.fg_color(color, color_state)[0]
+	let col = fg_color(color, color_state)[0]
 
 	if (editable) {
 		let input = ui.state(id, 'input')
@@ -3337,9 +3429,9 @@ draw[CMD_TEXT] = function(a, i) {
 		input.style.top    = (y  / dpr)+'px'
 		input.style.width  = (sw / dpr)+'px'
 
-		input.style.opacity = ui.focused(id) ? 1 : 0
+		input.style.opacity = focused ? 1 : 0
 
-		if (ui.focused(id))
+		if (focused)
 			return
 	}
 
@@ -3403,9 +3495,9 @@ draw[CMD_TEXT] = function(a, i) {
 
 }
 
-hit[CMD_TEXT] = function(a, i) {
+hittest[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
-		ui.hover(a[i+TEXT_ID])
+		hover(a[i+TEXT_ID])
 		hit_template(a, i)
 		return true
 	}
@@ -3417,45 +3509,43 @@ const FRAME_ON_MEASURE = 0
 const FRAME_ON_FRAME   = 1
 const FRAME_REC_A      = 2
 
-ui.widget('frame', {
+const CMD_FRAME = cmd('frame')
 
-	create: function(cmd, on_measure, on_frame) {
+ui.frame = function(on_measure, on_frame) {
 
-		ui_cmd(cmd, on_measure, on_frame,
-			null, // rec_a
-		)
+	ui_cmd(CMD_FRAME, on_measure, on_frame,
+		null, // rec_a
+	)
 
-	},
+}
 
-	measure: function(a, i, axis) {
+measure[CMD_FRAME] = function(a, i, axis) {
 
-		let on_measure = a[i+FRAME_ON_MEASURE]
-		if (on_measure)
-			on_measure(a, i, axis)
+	let on_measure = a[i+FRAME_ON_MEASURE]
+	if (on_measure)
+		on_measure(a, i, axis)
 
-	},
+}
 
-	translate: function(a, i, dx, dy) {
+translate[CMD_FRAME] = function(a, i, dx, dy) {
 
-		let on_frame = a[i+FRAME_ON_FRAME]
-		ui.record()
-			on_frame()
-		let rec_a = end_record()
-		a[i+FRAME_REC_A] = rec_a
+	let on_frame = a[i+FRAME_ON_FRAME]
+	ui.record()
+		on_frame()
+	let rec_a = end_record()
+	a[i+FRAME_REC_A] = rec_a
 
-		layout_record(rec_a)
+	layout_record(rec_a)
 
-	},
+}
 
-	draw: function(a, i) {
+draw[CMD_FRAME] = function(a, i) {
 
-		let rec_a = a[i+FRAME_REC_A]
+	let rec_a = a[i+FRAME_REC_A]
 
-		draw_all(rec_a)
+	draw_all(rec_a)
 
-	},
-
-})
+}
 
 // template widget -----------------------------------------------------------
 
@@ -3534,7 +3624,7 @@ function template_find_node(a, i, t, t_i) {
 function hit_template(a, i) {
 	let id = hit_template_id
 	if (id && i >= hit_template_i0 && i < hit_template_i1) {
-		let hs = ui.hit(id)
+		let hs = hit(id)
 		if (!hs)
 			return
 		let root_t = hs.get('root')
@@ -3560,7 +3650,7 @@ function template_add(t) {
 }
 
 function template_drag_point(id, ch_t, ct_i, ha, va) {
-	ui.popup('', layer_popup, ct_i, ha, va)
+	ui.popup('', 'handle', ct_i, ha, va)
 		ui.drag_point(id+'.'+ha+va, 0, 0, 'red')
 	ui.end_popup()
 }
@@ -3601,7 +3691,7 @@ ui.box_widget('template_overlay', {
 			hit_template_id = id
 			hit_template_i0 = i0
 			hit_template_i1 = i1
-			ui.hover(id).set('root', t)
+			hover(id).set('root', t)
 		}
 	},
 	draw: function(a, i) {
@@ -3634,7 +3724,7 @@ ui.box_widget('template_overlay', {
 function draw_node(id, t_t, t, depth) {
 	ui.p(depth * 20, ui.sp05(), 0)
 	ui.stack(t)
-		let hs = ui.hit(t)
+		let hs = hit(t)
 		if (hs && ui.click)
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
@@ -3755,7 +3845,7 @@ ui.widget('drag_point', {
 		let y  = a[i+1]
 		let id = a[i+ID]
 		if (hit_rect(x-r, y-r, 2*r, 2*r)) {
-			ui.hover(id)
+			hover(id)
 			return true
 		}
 	},
@@ -3765,7 +3855,7 @@ ui.widget('drag_point', {
 // button --------------------------------------------------------------------
 
 ui.button = function(id, s, style, align, valign) {
-	let hs = ui.hit(id)
+	let hs = hit(id)
 	let state = hs ? ui.pressed ? 'active' : 'hover' : 'normal'
 	style = style ?? 'button'
 	ui.p(ui.sp2(), ui.sp())
@@ -3830,7 +3920,7 @@ function split(hv, id, size, unit, fixed_side,
 	let [state, dx, dy] = ui.drag(id)
 	keepalive(id)
 	let s = ui.state(id)
-	let cs = ui.captured(id)
+	let cs = captured(id)
 	let max_size = (cs?.get(W) ?? s.get(W) ?? 1/0) - splitter_w
 	assert(!unit || unit == 'px' || unit == '%')
 	let fixed = unit == 'px'
@@ -3888,19 +3978,19 @@ ui.splitter = function() {
 	let id = scope_get('split_id')
 	let collapsed = scope_get('split_collapsed')
 	let fr2 = scope_get('split_fr2')
-	let b = ui.border_color('intense', ui.hit(id) ? 'hover' : 'normal')
+	let st = hit(id) ? 'hover' : null
 
 	if (hv == 'h') {
 		ui.stack('', 0, 'l', 's', 1, 0)
-			ui.popup('', layer_popup, null, 'it', '[]')
+			ui.popup('', null, null, 'it', '[]')
 				ui.ml(-hit_distance / 2)
 				ui.stack(id, 0, 'l', 's', hit_distance)
 					ui.stack('', 1, 'c', 's')
-						ui.bb('', null, null, 'l', b)
+						ui.bb('', null, null, 'l', 'intense', st)
 					ui.end_stack()
 					if (collapsed) {
 						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
-							ui.bb('', null, null, 'lr', b)
+							ui.bb('', null, null, 'lr', 'intense', st)
 						ui.end_stack()
 					}
 				ui.end_stack()
@@ -3908,15 +3998,15 @@ ui.splitter = function() {
 		ui.end_stack()
 	} else {
 		ui.stack('', 0, 's', 't', 0, 1)
-			ui.popup('', layer_popup, null, 'it', '[]')
+			ui.popup('', null, null, 'it', '[]')
 				ui.mt(-hit_distance / 2)
 				ui.stack(id, 0, 's', 't', 0, hit_distance)
 					ui.stack('', 1, 's', 'c')
-						ui.bb('', null, null, 't', b)
+						ui.bb('', null, null, 't', 'intense', st)
 					ui.end_stack()
 					if (collapsed) {
 						ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
-							ui.bb('', null, null, 'tb', b)
+							ui.bb('', null, null, 'tb', 'intense', st)
 						ui.end_stack()
 					}
 				ui.end_stack()
@@ -3956,13 +4046,13 @@ ui.input = function(id, s, fr, min_w, min_h) {
 
 ui.label = function(for_id, s, fr, align, valign) {
 	let id = for_id+'.label'
-	ui.color('text', (ui.hit(id) || ui.hit(for_id)) ? 'hover' : null)
+	ui.color('text', (hit(id) || hit(for_id)) ? 'hover' : null)
 	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
 ui.radio_label = function(for_id, for_group_id, s, fr, align, valign) {
 	let id = for_id+'.label'
-	ui.color('text', (ui.hit(id) || ui.hit(for_id)) ? 'hover' : null)
+	ui.color('text', (hit(id) || hit(for_id)) ? 'hover' : null)
 	ui.text(id, s, fr, align ?? 'l', valign ?? 'c')
 }
 
@@ -3986,7 +4076,7 @@ function list_update(id, m) {
 	let i = 0
 	for (let item of items) {
 		let item_id = id+'.'+i
-		if (ui.hit(item_id) && ui.click) {
+		if (hit(item_id) && ui.click) {
 			ui.focus(id)
 			fi = i
 			fi_changed = 'click'
@@ -4020,7 +4110,7 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 			 			: 'item-focused item-selected'
 			 		: null
 			 )
-			ui.color('text', ui.hit(item_id) ? 'hover' : null)
+			ui.color('text', hit(item_id) ? 'hover' : null)
 			ui.text('', item, item_fr,
 				item_align  ?? hv == 'v' ? 'l' : 'c',
 				item_valign ?? hv == 'v' ? 'c' : 'c',
@@ -4099,13 +4189,13 @@ ui.widget('polyline', {
 		let stroke_color_state = a[i+6]
 		if (fill_color) {
 			set_points(cx, x0, y0, a, pi1, pi2, closed)
-			fill_color = ui.bg_color(fill_color, fill_color_state)
+			fill_color = ui_bg_color(fill_color, fill_color_state)
 			cx.fillStyle = fill_color[0]
 			cx.fill()
 		}
 		if (stroke_color) {
 			set_points(cx, x0, y0, a, pi1, pi2, closed)
-			stroke_color = ui.fg_color(stroke_color, stroke_color_state)
+			stroke_color = fg_color(stroke_color, stroke_color_state)
 			cx.strokeStyle = stroke_color[0]
 			cx.lineWidth = 1
 			cx.stroke()
@@ -4123,7 +4213,7 @@ ui.widget('polyline', {
 		let pi2 = cmd_arg_end_i(a, i)
 		set_points(cx, x0, y0, a, pi1, pi2, closed)
 		if (cx.isPointInPath(mx, my)) {
-			ui.hover(id)
+			hover(id)
 			return true
 		}
 	},
@@ -4140,7 +4230,7 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 	sel_i = ui.valid_list_index(sel_i, items)
 	ui.state(id).set('i', sel_i)
 
-	let click = ui.hit(id) && ui.click
+	let click = hit(id) && ui.click
 	let toggle = click
 		|| (ui.focused(id) && ui.keydown('enter'))
 		|| (ui.focused(id+'.list') && ui.keydown('enter'))
@@ -4148,7 +4238,7 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 
 	if (toggle) {
 		open = !open
-	} else if (open && ui.click && !ui.hit(id) && !(ui.hit(id+'.list') || ui.captured(id+'.list'))) {
+	} else if (open && ui.click && !hit(id) && !(hit(id+'.list') || captured(id+'.list'))) {
 		open = false
 	}
 
@@ -4179,7 +4269,7 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 		ui.text('', '', 0, 'l', 'c')
 
 		if (open)
-			ui.popup(id+'.popup', layer_popup, null, 'il', 's', 0, 0, 'constrain change_side')
+			ui.popup(id+'.popup', 'open', null, 'il', 's', 0, 0, 'constrain change_side')
 
 			if (open)
 				ui.shadow('picker')
@@ -4223,14 +4313,14 @@ ui.drag = function(id, move, dx0, dy0) {
 	let move_y = !move || move == 'y' || move == 'xy'
 	let dx = dx0 ?? 0
 	let dy = dy0 ?? 0
-	let cs = ui.captured(id)
+	let cs = captured(id)
 	let state
 	if (cs) {
 		if (move_x) { dx = cs.get('drag_x0') + (ui.mx - ui.mx0) }
 		if (move_y) { dy = cs.get('drag_y0') + (ui.my - ui.my0) }
 		state = ui.clickup ? 'drop' : 'dragging'
 		cs.set('drag_state', state)
-	} else if (ui.hit(id)) {
+	} else if (hit(id)) {
 		if (ui.click) {
 			let cs = ui.capture(id)
 			if (cs) {
@@ -4269,8 +4359,19 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 		s.set('my2', my2)
 	}
 
+	keepalive('toolbox')
+	let ts = ui.state('toolboxes')
+	let layers = ts.get('layers')
+	if (!layers) {
+		layers = []
+		ts.set('layers', layers)
+	}
+
+	// let z_index = s.get('z_index')
+	// let layer = layer_above('toolbox', z_index)
+
 	ui.m(mx1, my1, mx2, my2)
-	ui.popup(id+'.popup', layer_popup, target_i ?? 'screen', 'it', align, min_w, min_h, 'constrain')
+	ui.popup(id+'.popup', 'window', target_i ?? 'screen', 'it', align, min_w, min_h, 'constrain')
 		ui.p(1)
 		ui.bb('', 'bg1', null, 1, 'intense', null, ui.sp075())
 		ui.stack()
@@ -4363,7 +4464,7 @@ ui.widget('resizer', {
 
 		let side = hit_sides(ui.mx, ui.my, 5, 5, x, y, w, h)
 		if (side) {
-			let hs = ui.hover(id)
+			let hs = hover(id)
 			hs.set('side', side)
 			hs.set('measured_x', x)
 			hs.set('measured_y', y)
@@ -4372,8 +4473,8 @@ ui.widget('resizer', {
 		}
 
 		let [dstate, dx, dy] = ui.drag(id)
-		let hs = ui.hovers(id)
-		let cs = ui.captured(id)
+		let hs = hovers(id)
+		let cs = captured(id)
 		if (dstate == 'hover') {
 			let side = hs.get('side')
 			ui.set_cursor(cursors[side])
@@ -4422,7 +4523,7 @@ let TOGGLE_ID = S-1
 let toggle = {}
 
 function toggle_toggle(id) {
-	let clicked = (ui.hit(id) || ui.hit(id+'.label')) && ui.click
+	let clicked = (hit(id) || hit(id+'.label')) && ui.click
 	let on
 	if (clicked) {
 		on = !ui.state(id, 'on')
@@ -4450,7 +4551,7 @@ toggle.draw = function(a, i) {
 	let h = a[i+3]
 	let id = a[i+TOGGLE_ID]
 
-	let hit = ui.hit(id) || ui.hit(id+'.label')
+	let hs = hit(id) || hit(id+'.label')
 	let on = ui.state(id, 'on')
 
 	// button
@@ -4458,9 +4559,9 @@ toggle.draw = function(a, i) {
 	cx.beginPath()
 	cx.roundRect(x, y, w, h, 1000)
 	let state =
-		(on  ? STATE_ITEM_SELECTED : 0) |
-		(hit ? STATE_HOVER         : 0)
-	cx.fillStyle = ui.bg_color('toggle', state)[0]
+		(on ? STATE_ITEM_SELECTED : 0) |
+		(hs ? STATE_HOVER         : 0)
+	cx.fillStyle = ui_bg_color('toggle', state)[0]
 	cx.fill()
 
 	// thumb
@@ -4471,7 +4572,7 @@ toggle.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = ui.bg_color('toggle-thumb', hit ? 'hover' : null)[0]
+	cx.fillStyle = ui_bg_color('toggle-thumb', hs ? 'hover' : null)[0]
 	cx.fill()
 
 }
@@ -4497,14 +4598,14 @@ checkbox.draw = function(a, i) {
 	let h = a[i+3]
 	let id = a[i+TOGGLE_ID]
 
-	let hit = ui.hit(id) || ui.hit(id+'.label')
+	let hs = hit(id) || hit(id+'.label')
 	let on = ui.state(id, 'on')
 
 	let state =
-		(on  ? STATE_ITEM_SELECTED : 0) |
-		(hit ? STATE_HOVER         : 0)
-	let bg = ui.bg_color('toggle', state)
-	let fg = ui.fg_color('text', hit ? 'hover' : null, ui.bg_is_dark(bg) ? 'dark' : 'light')
+		(on ? STATE_ITEM_SELECTED : 0) |
+		(hs ? STATE_HOVER         : 0)
+	let bg = bg_color('toggle', state)
+	let fg = fg_color('text', hs ? 'hover' : null, bg_is_dark(bg) ? 'dark' : 'light')
 
 	// check box
 
@@ -4543,12 +4644,12 @@ let radio = assign({}, checkbox)
 
 let RADIO_GROUP_ID = S+0
 
-//|| ui.hit(id+'.label')
+//|| hit(id+'.label')
 radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
 	keepalive(id)
 	keepalive(group_id)
-	let clicked = (ui.hit(group_id) || ui.hit(group_id+'.label')) && ui.click
-	let clicked_id = clicked && ui.hit(group_id, 'id')
+	let clicked = (hit(group_id) || hit(group_id+'.label')) && ui.click
+	let clicked_id = clicked && hit(group_id, 'id')
 	let on = clicked ? clicked_id == id && !ui.state(id, 'on') : null
 	if (clicked) {
 		ui.state(id).set('on', false)
@@ -4570,7 +4671,7 @@ radio.draw = function(a, i) {
 	let h = a[i+3]
 	let id = a[i+TOGGLE_ID]
 
-	let hit = ui.hit(id) || ui.hit(id+'.label')
+	let hs = hit(id) || hit(id+'.label')
 	let on = ui.state(id, 'on')
 
 	let cx1 = x + w / 2
@@ -4580,7 +4681,7 @@ radio.draw = function(a, i) {
 
 	cx.beginPath()
 	cx.arc(cx1, cy1, h * .5, 0, 2 * PI)
-	cx.fillStyle = ui.bg_color('toggle', hit ? 'hover' : null)[0]
+	cx.fillStyle = bg_color('toggle', hs ? 'hover' : null)[0]
 	cx.fill()
 
 	// bullet
@@ -4589,7 +4690,7 @@ radio.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI) // TODO: animate radius
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = ui.bg_color('toggle-thumb', hit ? 'hover' : null)[0]
+	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)[0]
 	cx.fill()
 
 }
@@ -4602,7 +4703,7 @@ radio.hit = function(a, i) {
 	let id = a[i+TOGGLE_ID]
 	let group_id = a[i+RADIO_GROUP_ID]
 	if (hit_rect(x, y, w, h)) {
-		ui.hover(group_id).set('id', id)
+		hover(group_id).set('id', id)
 		return true
 	}
 }
@@ -4743,8 +4844,8 @@ ui.box_widget('slider', {
 		let min_h = min_h0 ?? ui.em((markers ? 2.8 : 1.2))
 		ui.clear_box_args()
 
-		let hit = ui.hit(id)
-		let click = hit && ui.click
+		let hs = hit(id)
+		let click = hs && ui.click
 
 		if (click) {
 			ui.focus(id)
@@ -4782,10 +4883,10 @@ ui.box_widget('slider', {
 
 		ui.end_stack()
 
-		if (!markers && (hit || ui.captured(id))) {
+		if (!markers && (hs || captured(id))) {
 			ui.mb(10)
 			ui.p(ui.sp2(), ui.sp())
-			ui.popup(id+'.popup', layer_popup, thumb_i, 't', 'c', 0, 0, 'change_side constrain')
+			ui.popup(id+'.popup', 'tooltip', thumb_i, 't', 'c', 0, 0, 'change_side constrain')
 				ui.bb_tooltip('', 'info', null, 'light', null, ui.sp05())
 				ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
 			ui.end_popup()
@@ -4802,7 +4903,7 @@ ui.box_widget('slider', {
 
 		let p = ui.state(id, 'p') ?? .5
 
-		if (ui.captured(id)) {
+		if (captured(id)) {
 			let thumb_r = ui.em(ui.slider_thumb_r_em)
 			let margin_x = thumb_r
 			let x = a[i+0] + margin_x
@@ -4849,7 +4950,7 @@ ui.box_widget('slider', {
 		let p       = a[i+SLIDER_P]
 		let markers = a[i+SLIDER_MARKERS]
 
-		let hit = ui.hit(id)
+		let hs = hit(id)
 		let focused = ui.focused(id)
 
 		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
@@ -4866,32 +4967,32 @@ ui.box_widget('slider', {
 
 		// draw shaft
 		bg_path(cx, x - r, y, x + w + r, y + 2*r, BORDER_SIDE_ALL, 1000)
-		let shaft_color = ui.bg_color('bg2', hit ? 'hover' : null)
+		let shaft_color = bg_color('bg2', hs ? 'hover' : null)
 		cx.fillStyle = shaft_color[0]
 		cx.fill()
 
 		bg_path(cx, x - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
-		let fill_color = ui.bg_color('link', hit ? 'hover' : null)
+		let fill_color = bg_color('link', hs ? 'hover' : null)
 		cx.fillStyle = fill_color[0]
 		cx.fill()
 
 		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
-		let border_color = ui.border_color('light', null)
+		let border_color = ui_border_color('light', null)
 		cx.strokeStyle = border_color[0]
 		cx.lineWidth = 1
 		cx.stroke()
 
 		// draw focus ring under thumb
 		if (focused) {
-			let color = ui.bg_color('item', 'item-focused item-selected focused')
-			cx.fillStyle = ui.hsl_adjust(color, 1, 1, 1, .5)
+			let color = bg_color('item', 'item-focused item-selected focused')
+			cx.fillStyle = hsl_adjust(color, 1, 1, 1, .5)
 			cx.beginPath()
 			cx.arc(thumb_cx, thumb_cy, thumb_r * 2, 0, 2 * PI)
 			cx.fill()
 		}
 
 		// draw thumb
-		fill_color = ui.fg_color('link', hit ? 'hover' : null)
+		fill_color = fg_color('link', hs ? 'hover' : null)
 		cx.fillStyle = fill_color[0]
 		ui.set_shadow('button')
 		cx.beginPath()
@@ -4911,7 +5012,7 @@ ui.box_widget('slider', {
 				max_n, from, to, scale_base, scales, decimals)
 
 			cx.textAlign = 'center'
-			let color = ui.fg_color('label')
+			let color = fg_color('label')
 			cx.lineWidth = 1
 			let m = measure_text(cx, cx.font, ' ')
 			let asc = m.fontBoundingBoxAscent
@@ -4927,7 +5028,7 @@ ui.box_widget('slider', {
 				// shadow markers that are too close to the current value.
 				let alpha = clamp(abs(vx - x) / ui.em(3) - .7, 0, 1)
 
-				let c = ui.hsl_adjust(color, 1, 1, 1, alpha)
+				let c = hsl_adjust(color, 1, 1, 1, alpha)
 				cx.fillStyle  = c
 				cx.strokeStyle = c
 
@@ -4943,8 +5044,8 @@ ui.box_widget('slider', {
 			// show a marker for the current value
 			{
 				let x = vx
-				cx.fillStyle = ui.fg_color('text')[0]
-				cx.strokeStyle = ui.fg_color('text')[0]
+				cx.fillStyle   = fg_color('text')[0]
+				cx.strokeStyle = fg_color('text')[0]
 
 				cx.beginPath()
 				cx.moveTo(x, round(y - ui.em(1.0)) + .5)
@@ -4991,7 +5092,7 @@ function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	let x = round(x0 + lerp(sat, 0, 1, 0, w-1)) + .5
 	let y = round(y0 + lerp(lum, 1, 0, 0, h-1)) + .5
 	let d = 10.5
-	cx.strokeStyle = ui.hsl(360-hue, sat, lum > .5 ? 0 : 1, alpha)
+	cx.strokeStyle = hsl(360-hue, sat, lum > .5 ? 0 : 1, alpha)
 	cx.lineWidth = 1
 	cx.beginPath()
 	cx.moveTo(x, y); cx.lineTo(x+d, y)
@@ -5014,13 +5115,13 @@ ui.widget('sat_lum_square', {
 		ui.state_init(id, 'sat', sat)
 		ui.state_init(id, 'lum', lum)
 
-		let cs = ui.captured(id)
+		let cs = captured(id)
 		if (cs) {
 			ui.state(id).set('sat', cs.get('sat'))
 			ui.state(id).set('lum', cs.get('lum'))
 		}
 
-		if (ui.hit(id) && ui.click) {
+		if (hit(id) && ui.click) {
 			ui.focus(id)
 			ui.capture(id)
 		}
@@ -5078,8 +5179,8 @@ ui.widget('sat_lum_square', {
 
 		cx.putImageData(idata, x, y)
 
-		let hit_sat = ui.hit(id)?.get('sat')
-		let hit_lum = ui.hit(id)?.get('lum')
+		let hit_sat = hit(id)?.get('sat')
+		let hit_lum = hit(id)?.get('lum')
 		let sel_sat = ui.state(id, 'sat')
 		let sel_lum = ui.state(id, 'lum')
 
@@ -5100,7 +5201,7 @@ ui.widget('sat_lum_square', {
 
 		let hit = hit_rect(x, y, w, h)
 		if (hit) {
-			let hs = ui.hover(id)
+			let hs = hover(id)
 
 			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
 			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
@@ -5115,7 +5216,7 @@ ui.widget('sat_lum_square', {
 
 function draw_hue_line(x, y, h, w, hue, alpha) {
 	if (hue == null) return
-	cx.strokeStyle = ui.hsl(0, 0, 0, alpha)
+	cx.strokeStyle = hsl(0, 0, 0, alpha)
 	cx.lineWidth = 1
 	cx.beginPath()
 	let hue_y = round(lerp(hue, 0, 360, 0, h-1))
@@ -5131,11 +5232,11 @@ ui.widget('hue_bar', {
 		keepalive(id)
 		ui.state_init(id, 'hue', hue)
 
-		if (ui.hit(id) && ui.click) {
+		if (hit(id) && ui.click) {
 			ui.focus(id)
 			ui.capture(id)
 		}
-		let cs = ui.captured(id)
+		let cs = captured(id)
 		if (cs)
 			ui.state(id).set('hue', cs.get('hue'))
 
@@ -5183,7 +5284,7 @@ ui.widget('hue_bar', {
 		cx.putImageData(idata, x, y)
 
 		let sel_hue = ui.state(id, 'hue')
-		let hit_hue = ui.hit(id, 'hue')
+		let hit_hue = hit(id, 'hue')
 
 		draw_hue_line(x, y, h, w, hit_hue, 0.3)
 		draw_hue_line(x, y, h, w, sel_hue, 1.0)
@@ -5200,14 +5301,14 @@ ui.widget('hue_bar', {
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
-		let hit = hit_rect(x, y, w, h)
-		let hs = hit && ui.hover(id)
-		let cs = ui.captured(id)
+		let ht = hit_rect(x, y, w, h)
+		let hs = ht && hover(id)
+		let cs = captured(id)
 		if (cs || hs) {
 			let hue = clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360)
 			;(cs || hs).set('hue', hue)
 		}
-		return hit
+		return ht
 	},
 
 })
@@ -5251,7 +5352,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
-				ui.bb('', [ui.hsl(hue, sat, lum)])
+				ui.bb('', [hsl(hue, sat, lum)])
 			ui.end_aspect_box()
 			ui.record_play(sl_square)
 			ui.record_play(hue_bar)
@@ -5266,7 +5367,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 		ui.end_h()
 		ui.h(0, 0, 's')
 			ui.label(id+'.input_rgb', 'HEX', .5)
-			s = ui.rgb(hue, sat, lum)
+			s = hsl_to_rgb_hex(hue, sat, lum)
 			ui.input(id+'.input_rgb', s, 1)
 		ui.end_h()
 	ui.end_v()
@@ -5350,7 +5451,7 @@ ui.widget('bg_dots', {
 
 		for (let t of dots) {
 			if (t != dots.mouse_dot) {
-				cx.fillStyle = ui.fg_color('label')[0]
+				cx.fillStyle = fg_color('label')[0]
 				cx.beginPath()
 				cx.arc(t.x, t.y, 2, 0, Math.PI*2, true)
 				cx.closePath()
@@ -5365,7 +5466,7 @@ ui.widget('bg_dots', {
 				let dp = point_distance(t1, t2) / max_distance
 				if (dp < 1) {
 					let alpha = 1 - dp
-					cx.strokeStyle = ui.hsl_adjust(ui.fg_color('label'), 1, 1, 1, alpha)
+					cx.strokeStyle = hsl_adjust(fg_color('label'), 1, 1, 1, alpha)
 					cx.lineWidth = 0.8
 					cx.beginPath()
 					cx.moveTo(t1.x, t1.y)
@@ -5409,6 +5510,6 @@ reset_canvas()
 
 // prevent flicker
 theme = themes[ui.default_theme]
-screen.style.background = ui.bg_color('bg')[0]
+screen.style.background = bg_color('bg')[0]
 
 }()) // module function

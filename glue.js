@@ -88,8 +88,6 @@ EXTENDING BUILT-IN OBJECTS
 STRINGS
 
 	subst(s, '{0} {1}', a0, a1, ...)
-	s.upper(s)
-	s.lower(s)
 	display_name(s)
 	lower_ai_ci(s)
 	find_ai_ci(s, s1)
@@ -104,17 +102,17 @@ ARRAYS
 	array(...) -> a                        new Array(...)
 	empty_array -> []                      global empty array, read-only!
 	range(i, j, step, f) -> a
-	array_set(a1) -> s
-	extend(a1) -> a
-	insert(i, v) -> a
-	remove(i) -> v
-	remove_value(v) -> i
-	remove_values(cond) -> a
+	array_set(a, a1) -> s
+	extend(a, a1) -> a
+	insert(a, i, v) -> a
+	remove(a, i) -> v
+	remove_value(a, v) -> i
+	remove_values(a, cond) -> a
 	array_move(a, i1, n, insert_i)
-	array_equals(b, [i1], [i2]) -> t|f
-	binsearch(v, cmp, i1, i2)
-	uniq_sorted() -> a
-	remove_duplicates() -> a
+	array_equals(a1, a2, [i1], [i2]) -> t|f
+	binsearch(a, v, cmp, i1, i2)
+	uniq_sorted(a) -> a
+	remove_duplicates(a) -> a
 
 HASH MAPS
 
@@ -148,7 +146,7 @@ TYPED ARRAYS
 
 DATA STRUCTURES
 
-	freelist(create_f, clear_f) -> fl
+	freelist(create_f) -> fl
 	fl.alloc() -> e
 	fl.free(e)
 
@@ -1028,13 +1026,12 @@ let dyn_u32arr = dyn_arr_func(u32arr)
 
 // data structures -----------------------------------------------------------
 
-function freelist(create, clear) {
+function freelist(create) {
 	let fl = []
 	fl.alloc = function() {
 		return this.pop() || create()
 	}
 	fl.free = function(e) {
-		clear(e)
 		this.push(e)
 	}
 	return fl

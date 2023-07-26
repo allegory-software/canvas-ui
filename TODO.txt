@@ -1,4 +1,11 @@
 
+BUGS
+------------------------------------------------------------------------------
+- set_cursor() must be set in draw? hittest? where?
+- grid drawing is stateful (awaiting impl. of secondary cmd streams)
+- toolbox move by all sides, with all alignment combinations
+- toolbox dynamic z-index
+
 THINK
 
 - solve the IMGUI achilles heel:
@@ -9,8 +16,6 @@ THINK
 			- forced re-layouting without redrawing
 			- update callback when reading state(id)
 
-- toolbox z-index
-- toolbox move by all sides, with all alignment combinations
 - bb on text
 - bb on scrollbox?
 - negative margins?
@@ -24,9 +29,12 @@ THINK
 GOALS
 
 - drag & drop UI designer
-- reusable UI modules with controlled variations
-- IMGUI with popups and layouting
-- remote screen sharing with input routing
+	- templates with conditionals, repeats and sub-templates
+		- template-based widgets
+* IMGUI with popups and layouting
+- remote screen sharing
+	- with input routing
+	- with client-side themes
 
 IMGUI
 
@@ -48,7 +56,7 @@ IMGUI
 	* margin
 	* text min-w/h
 	* popup layouting
-	- word-wrapping
+	* word-wrapping
 	- grid fr stretch
 	- grid min-w/h grow
 	- grid align
@@ -62,7 +70,8 @@ IMGUI
 	* capture state
 	- drag & drop
 - keyboard
-	- focused widget
+	* focused state
+	- tab focusing
 	- event bubbling
 - text selection
 	- drag-select with mouse
@@ -73,10 +82,10 @@ IMGUI
 
 CHALLENGES
 
-- input on a canvas
+* input on a canvas
 - textarea on a canvas
 - webgl2 canvas on a 2d canvas
-- word wrapping (our layout algo supports word-wrapping for horizontal text)
+* word wrapping (our layout algo supports word-wrapping for horizontal text)
 - rich text on a canvas (inline box model)
 
 PROS vs WEB
@@ -96,7 +105,7 @@ CONS vs WEB
 	* scrollbox
 	- text selection
 	- clipboard ops
-	- word-wrapping
+	* word-wrapping
 	- inline layouting with:
 		- u, b, i, strike, sub, sup, h1..6, p, br, hr, float
 - no fancy typography:
