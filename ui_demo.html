@@ -369,20 +369,24 @@ ui.end_h()
 `
 
 demos.popup = `
-ui.m(20)
-ui.v(1, 10, 'c', 'c')
+ui.m(10)
+ui.v(1, 30, 'c', 'c')
 	let i = 1
 	for (let inner of ['', 'i']) {
-		ui.h(1, 0, 'c', 'c', 200, 100)
-			ui.bb('', null, null, 1, 'light')
+		ui.h(1, 0, 'c', 'c', 400, 180)
 			for (let align of ['c', '[', ']']) {
-				ui.m(20, 20)
+				ui.m(60, 30)
 				ui.stack()
 					ui.bb('', null, null, 1, 'light')
 					for (let side of ['t', 'r', 'b', 'l', 'c']) {
 						if (side != 'c' || inner) {
-							ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
+							ui.m(10)
+							ui.popup('popup'+i++, null, null, inner+side, align, 30, 30)
 								ui.bb('', null, null, 1, 'intense')
+								ui.m(5)
+								ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
+									ui.bb('', null, null, 1, 'intense')
+								ui.end_popup()
 							ui.end_popup()
 						}
 					}

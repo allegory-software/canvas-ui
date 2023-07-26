@@ -36,7 +36,6 @@ const {
 	clock,
 	memoize,
 	freelist,
-	hash32,
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
 	PI,
@@ -843,9 +842,17 @@ let cmd_name_map = map()
 
 function C(a, i) { return cmd_names[a[i-1]] }
 
+let max_cmd    = -2 // even numbers for non-containers
+let max_cmd_ct = -1 // odd numbers containers
 function cmd(name, is_ct) {
-	let code = hash32(name)
-	code = (is_ct ? -1 : 1) * abs(code) // test for container: `cmd < 0`
+	let code
+	if (is_ct) {
+		max_cmd_ct += 2
+		code = max_cmd_ct
+	} else {
+		max_cmd += 2
+		code = max_cmd
+	}
 	assert(!cmd_names[code], 'duplicate command code ', code, ' for ', name)
 	cmd_names[code] = name
 	cmd_name_map.set(name, code)
@@ -910,14 +917,14 @@ ui.record_play = function(a1) {
 
 // rendering phases ----------------------------------------------------------
 
-let measure       = {}
-let measure_end   = {}
-let position      = {}
-let translate     = {}
-let draw          = {}
-let draw_end      = {}
-let hit           = {}
-let is_flex_child = {}
+let measure       = []
+let measure_end   = []
+let position      = []
+let translate     = []
+let draw          = []
+let draw_end      = []
+let hit           = []
+let is_flex_child = []
 
 // measuring phase (per-axis) ------------------------------------------------
 
@@ -997,7 +1004,7 @@ function draw_all() {
 			while (i < next_ext_i) {
 
 				let cmd = a[i-1]
-				if (cmd < 0) // ct
+				if (cmd & 1) // container
 					theme_stack.push(theme)
 				else if (cmd == CMD_END)
 					theme = theme_stack.pop()
@@ -1005,7 +1012,7 @@ function draw_all() {
 				let draw_f = draw[cmd]
 				if (draw_f && draw_f(a, i)) {
 					i = get_next_ext_i(a, i)
-					if (cmd < 0)
+					if (cmd & 1) // container
 						theme = theme_stack.pop()
 				} else {
 					i = a[i-2] // next_i
@@ -1244,6 +1251,7 @@ const ALIGN_END     = 2
 const ALIGN_CENTER  = 3
 
 function parse_align(s) {
+	if (isnum(s)) return s
 	if (s == 's') return ALIGN_STRETCH
 	if (s == 'c') return ALIGN_CENTER
 	if (s == 'l') return ALIGN_START
@@ -1258,6 +1266,7 @@ function parse_align(s) {
 }
 
 function parse_valign(s) {
+	if (isnum(s)) return s
 	if (s == 's') return ALIGN_STRETCH
 	if (s == 'c') return ALIGN_CENTER
 	if (s == 't') return ALIGN_START
@@ -1471,7 +1480,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 
 function get_next_ext_i(a, i) {
 	let cmd = a[i-1]
-	if (cmd < 0) // container
+	if (cmd & 1) // container
 		return a[i+NEXT_EXT_I]
 	return a[i-2] // next_i
 }
@@ -2170,8 +2179,8 @@ function popup_parse_flags(s) {
 	)
 }
 
-const POPUP_ID        = FR // because fr it's not used
-const POPUP_SIDE      = ALIGN // because align is not used
+const POPUP_ID        = FR      // because fr is not used
+const POPUP_SIDE      = ALIGN   // because align is not used
 const POPUP_ALIGN     = ALIGN+1 // because valign is not used
 const POPUP_LAYER     = S+0
 const POPUP_TARGET_I  = S+1
@@ -2191,26 +2200,24 @@ ui.popup = function(id, layer1, target_i, side, align, min_w, min_h, flags) {
 		force_font_weight(font_weight)
 		force_line_gap(line_gap)
 	}
-	side = popup_parse_side(side ?? 't')
-	align = popup_parse_align(align ?? 'c')
 	target_i = repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i()
-	flags = popup_parse_flags(flags ?? '')
-	// TODO: find a way to use ui_cmd_box_ct() again...
-	let i = ui_cmd(CMD_POPUP,
-		0, // x
-		0, // y
-		min_w ?? 0,
-		min_h ?? 0,
-		px1, py1, px2, py2,
-		mx1, my1, mx2, my2,
-		id,    // where fr would be
-		side,  // where align would be
-		align, // where valign would be
-		0, // next_ext_i
+	side  = popup_parse_side  (side  ?? 't')
+	align = popup_parse_align (align ?? 'c')
+	flags = popup_parse_flags (flags ?? '')
+
+	// TODO: find a way to use ui_cmd_box_ct() again here...
+	let i = ui_cmd_box_ct(CMD_POPUP,
+		null, // fr -> id
+		null, // align -> side
+		null, // valign -> align
+		min_w, min_h,
+		// S+0
 		layer1, target_i, flags,
 		side, // side_real
 	)
-	ct_stack.push(i)
+	a[i+POPUP_ID   ] = id
+	a[i+POPUP_SIDE ] = side
+	a[i+POPUP_ALIGN] = align
 	begin_layer(layer1, i)
 	return i
 }
@@ -3548,7 +3555,7 @@ function template_add(t) {
 	if (t.e)
 		for (let ch_t of t.e)
 			template_add(ch_t, 0)
-	if (cmd < 0)
+	if (cmd & 1) // container
 		ui.end()
 }
 
