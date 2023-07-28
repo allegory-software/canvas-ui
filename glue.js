@@ -355,7 +355,7 @@ function strict_sign(x) {
 }
 
 function lerp(x, x0, x1, y0, y1) {
-	return y0 + (x-x0) * ((y1-y0) / (x1 - x0))
+	return y0 + (x-x0) * ((y1-y0) / ((x1 - x0) ? (x1 - x0) : x1))
 }
 
 // % that works with negative numbers.
@@ -504,6 +504,19 @@ function override_property_setter(cls, prop, set) {
 		return set.call(this, inherited, v)
 	}
 	d0.set = wrapper
+	Object.defineProperty(proto, prop, d0)
+}
+
+// override a property getter in a prototype *or instance*.
+function override_property_getter(cls, prop, get) {
+	let proto = cls.prototype || cls
+	let d0 = getPropertyDescriptor(proto, prop)
+	assert(d0, cls.type || cls.name, '.', prop, ' does not exist')
+	let inherited = d0.get || noop
+	function wrapper(v) {
+		return get.call(this, inherited, v)
+	}
+	d0.get = wrapper
 	Object.defineProperty(proto, prop, d0)
 }
 
@@ -888,7 +901,7 @@ class dyn_arr_class {
 				let data_len = data.length * this.inv_nc
 				assert(data_len == floor(data_len), 'source array length not multiple of ', this.nc)
 				this.array = data
-				this.array.length = data_len
+				this.array.len = data_len
 			}
 		}
 
@@ -901,7 +914,7 @@ class dyn_arr_class {
 				cap = nextpow2(cap)
 			let array = new this.arr_type(cap * this.nc)
 			array.nc = this.nc
-			array.length = this.length
+			array.len = this.length
 			if (preserve_contents !== false && this.array)
 				array.set(this.array)
 			this.array = array
@@ -969,7 +982,7 @@ class dyn_arr_class {
 		len = max(0, len)
 		let arr = this.grow(len).array
 		if (arr)
-			arr.length = len
+			arr.len = len
 		if (this.invalid) {
 			this.invalid_offset1 = min(this.invalid_offset1, len)
 			this.invalid_offset2 = min(this.invalid_offset2, len)
@@ -1002,7 +1015,7 @@ property(dyn_arr_class, 'capacity',
 )
 
 property(dyn_arr_class, 'length',
-	function() { return this.array ? this.array.length : 0 },
+	function() { return this.array ? this.array.len : 0 },
 	function(len) { this.setlen(len) }
 )
 
@@ -2285,6 +2298,7 @@ g.method                       = method
 g.override                     = override
 g.alias                        = alias
 g.override_property_setter     = override_property_setter
+g.override_property_getter     = override_property_getter
 g.subst                        = subst
 g.display_name                 = display_name
 g.lower_ai_ci                  = lower_ai_ci

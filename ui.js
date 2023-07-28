@@ -45,7 +45,7 @@ const {
 	obj, set, map, array,
 	assign, insert,
 	noop, return_true, do_after,
-	clock,
+	clock, runafter,
 	memoize,
 	freelist,
 	hsl_to_rgb_out,
@@ -178,6 +178,7 @@ let parse_state_combis = memoize(function(s) {
 	return b
 })
 function parse_state(s) {
+	if (!s) return 0
 	if (isnum(s)) return s
 	if (s == 'normal') return 0
 	if (s == 'hover' ) return STATE_HOVER
@@ -204,42 +205,66 @@ function def_color_func(k) {
 			}
 			return
 		}
-		state = state ?? 'normal'
 		let state_i = parse_state(state)
 		states[state_i][name] = isnum(h)
 			? [hsl(h, s, L, a), h, s, L, a, is_dark]
-			: isarray(h) ? h : ui[k+'_color'](h, s ?? state, L ?? theme)
+			: isarray(h) ? h : ui[k+'_color_hsl'](h, s ?? state_i, L ?? theme)
 	}
 	return def_color
 }
 
 let theme
 ui.get_theme = () => theme.name
+ui.dark = () => theme.is_dark
 
-function lookup_color_func(k) {
+function lookup_color_hsl_func(k) {
 	return function(name, state, theme1) {
-		if (isarray(name)) // custom color
-			return name
-		state = state ?? 'normal'
 		let state_i = parse_state(state)
 		theme1 = theme1 ? themes[theme1] : theme
 		let c = theme1[k][state_i][name] ?? theme[k][0][name]
-		if (!c) assert(false, 'no ', k, ' for (', name, ', ', state, ', ', theme1.name, ')')
+		if (!c)
+			assert(false, 'no ', k, ' for (', name, ', ',
+				repl(state, 0, 'normal'), ', ', theme1.name, ')')
 		return c
 	}
 }
 
-function set_theme_dark_from(bg_color) {
-	let dark = bg_color[5] ?? bg_color[3] < .5
-	ui.dark = dark
+let CC_COLON = ':'.charCodeAt(0)
+let CC_STAR  = '*'.charCodeAt(0)
+
+function lookup_color_func(hsl_color) {
+	return function(name, state, theme) {
+		if (name.charCodeAt(0) == CC_COLON) { // custom color
+			assert(!state)
+			return name.slice(1)
+		}
+		return hsl_color(name, state, theme)[0]
+	}
+}
+
+function set_bg_color(color, state) {
+	let dark
+	assert(isstr(color))
+	let c = color.charCodeAt(0)
+	if (c == CC_COLON || c == CC_STAR) { // custom color: '*...' or ':...'
+		dark = c == CC_STAR
+		color = color.slice(1)
+	} else {
+		let c = bg_color_hsl(color, state)
+		dark = c[5] ?? c[3] < .5
+		color = c[0]
+	}
 	theme = dark ? themes.dark : themes.light
+	cx.fillStyle = color
 }
 
 // text colors ---------------------------------------------------------------
 
 ui.fg_style = def_color_func('fg')
-ui.fg_color = lookup_color_func('fg')
-let fg_color = ui.fg_color
+let fg_color_hsl = lookup_color_hsl_func('fg')
+let fg_color = lookup_color_func(fg_color_hsl)
+ui.fg_color_hsl = fg_color_hsl
+ui.fg_color = fg_color
 
 //           theme    name     state       h     s     L    a
 // ---------------------------------------------------------------------------
@@ -267,9 +292,11 @@ ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 // border colors -------------------------------------------------------------
 
 ui.border_style = def_color_func('border')
-ui.border_color = lookup_color_func('border')
-let border_color = ui.border_color
-let ui_border_color = ui.border_color
+let border_color_hsl = lookup_color_hsl_func('border')
+let border_color = lookup_color_func(border_color_hsl)
+let ui_border_color = border_color
+ui.border_color_hsl = ui.border_color_hsl
+ui.border_color = ui.border_color
 
 //               theme    name        state       h    s    L     a
 // ---------------------------------------------------------------------------
@@ -286,9 +313,11 @@ ui.border_style('dark' , 'intense' , 'hover'  ,   0,   0,   1, 0.40)
 // background colors ---------------------------------------------------------
 
 ui.bg_style = def_color_func('bg')
-ui.bg_color = lookup_color_func('bg')
-let bg_color = ui.bg_color
-let ui_bg_color = ui.bg_color
+let bg_color_hsl = lookup_color_hsl_func('bg')
+let bg_color = lookup_color_func(bg_color_hsl)
+let ui_bg_color = bg_color
+ui.bg_color = bg_color
+ui.bg_color_hsl = bg_color_hsl
 
 function bg_is_dark(bg_color) {
 	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
@@ -336,8 +365,8 @@ ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 // TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
 for (let theme of ['light', 'dark']) {
 	for (let state of ['normal', 'hover', 'active']) {
-		ui.bg_style(theme, 'text', state, ui.fg_color('text', state, theme))
-		ui.bg_style(theme, 'link', state, ui.fg_color('link', state, theme))
+		ui.bg_style(theme, 'text', state, ui.fg_color_hsl('text', state, theme))
+		ui.bg_style(theme, 'link', state, ui.fg_color_hsl('link', state, theme))
 	}
 }
 
@@ -433,18 +462,12 @@ ui.resize = resize_canvas
 window.addEventListener('resize', resize_canvas)
 
 let raf_id
-ui.max_frame_duration = 0
-ui.last_frame_duration = 0
 function raf_animate() {
 	raf_id = null
 	let t0 = clock()
 	cx.clearRect(0, 0, canvas.width, canvas.height)
 	redraw_all()
-	ui.last_frame_duration = clock() - t0
-	if (ui.max_frame_duration)
-		ui.max_frame_duration = max(ui.last_frame_duration, ui.max_frame_duration)
-	else
-		ui.max_frame_duration = 0.000001
+	frame_graph_push('frame_duration', 1000 * (clock() - t0))
 }
 let ready
 function animate() {
@@ -703,7 +726,7 @@ function scope_set(k, v) {
 	scope.set(k, v)
 }
 
-function scope_prev_var(ended_scope, k) {
+function scope_prev_diff_var(ended_scope, k) {
 	let v = ended_scope.get(k)
 	if (v === undefined) return
 	let v0 = scope_get(k)
@@ -824,12 +847,13 @@ ui.font_size_normal = 14
 function reset_canvas() {
 	theme = themes[ui.default_theme]
 	color = 'text'
-	color_state = 'normal'
+	color_state = 0
 	font = ui.default_font
 	font_size = ui.font_size_normal
 	font_weight = 'normal'
 	line_gap = 0.5
 	scope_set('color', color)
+	scope_set('color_state', color_state)
 	scope_set('theme', theme)
 	scope_set('font', font)
 	scope_set('font_size', font_size)
@@ -989,6 +1013,10 @@ let draw          = []
 let draw_end      = []
 let hittest       = []
 let is_flex_child = []
+let pack          = []
+let pack_end      = []
+let unpack        = []
+let unpack_end    = []
 
 ui.is_flex_child = is_flex_child
 
@@ -1060,16 +1088,10 @@ let theme_stack = []
 
 function draw_all() {
 
-	// check that draw cmd array is stateless.
-	let i = 2
-	while (i < a.length) {
-		for (let j = i; j < a[i-2] - 3; j++)
-			if (!isnum(a[j]) && !isstr(a[j]) && a[j] != null && typeof a[j] != 'boolean')
-				pr(C(a, i), j-i, a[j])
-		i = a[i-2] // next_i
-	}
+	//check_types_all(a)
+	pack_all()
 
-	screen.style.background = bg_color('bg')[0]
+	screen.style.background = bg_color('bg')
 	for (let layer of a.layers) {
 		/*global*/ layer_i = layer.i
 		for (let i of layer) {
@@ -1167,6 +1189,137 @@ function hit_all() {
 	layer_i = null
 
 }
+
+// packing / unpacking phases ------------------------------------------------
+
+// check that cmd is entirely typed.
+function check_types(a, i) {
+	for (let j = i; j < a[i-2] - 3; j++)
+		if (!isnum(a[j]) && !isstr(a[j]))
+			pr(C(a, i), j-i, a[j])
+}
+
+function check_types_all(a) {
+	let i = 2
+	while (i < a.length) {
+		check_types(a, i)
+		i = a[i-2] // next_i
+	}
+}
+
+let pack_all; {
+let ab  = new ArrayBuffer(512*1024)
+let b   = new Int16Array(ab)
+let asb = new ArrayBuffer(512*1024)
+let sb  = new Uint8Array(asb)
+let sdb = new DataView(asb)
+let j = 0
+let sj = 0
+
+ui.frame_compressed_size
+
+let tenc = new TextEncoder()
+let tenc_abuf = new ArrayBuffer(2*64*1024)
+let tenc_buf  = new Uint8Array(tenc_abuf)
+
+function copy(d, i, s, n) {
+	for (let j = 0; j < n; j++)
+		d[i+j] = s[j]
+}
+
+function pack_cmd(a, i) {
+	let i1 = i-1
+	let i2 = a[i-2] - 3
+	let n = i2 - i1
+	b[j++] = n
+	for (let k = 0; k < n; k++) {
+		let v = a[i1+k]
+		if (isstr(v)) {
+			if (1) {
+				let {read, written} = tenc.encodeInto(v, tenc_buf)
+				let n = written
+				assert(read == v.length, 'string too long')
+				b[j++] = sj
+				sdb.setUint16(sj, n, true); sj += 2
+				copy(sb, sj, tenc_buf, n)
+				sj += n
+			}
+		} else {
+			if (!isnum(v))
+				pr(a)
+			assert(isnum(v), typeof v, ' on: ', i, ' ', C(a, i), '+', k-1, ' ', v)
+			assert(floor(v) == v     , ' on: ', i, ' ', C(a, i), '+', k-1, ' ', v)
+			b[j++] = v
+		}
+	}
+}
+
+let pack_api = {}
+
+ui.compress = async function(s) {
+	let cs = new CompressionStream('gzip')
+	let writer = cs.writable.getWriter()
+	let b = tenc.encode(s)
+	writer.write(b)
+	writer.close()
+	return await new Response(cs.readable).arrayBuffer()
+}
+
+function pack_record(a) {
+
+	let i = 2
+	while (i < a.length) {
+		let pack_f = pack[a[i-1]]
+		if (pack_f && pack_f(a, i, pack_api)) {}
+		else
+			pack_cmd(a, i)
+		i = a[i-2] // next_i
+	}
+
+	if (ui.DEBUG) {
+		let sn = 0
+		let sl = 0
+		let nn = 0
+		let on = 0
+		for (let s of a) {
+			if (isstr(s)) { sn++; sl += s.length; continue; }
+			if (isnum(s)) { nn++; continue; }
+			on++
+		}
+		frame_graph_push('string_count' , sn)
+		frame_graph_push('string_length', sl)
+		frame_graph_push('number_count' , nn)
+		frame_graph_push('other_count'  , on)
+	}
+
+	runafter(0, async function() {
+		let b  = new Int16Array(ab , 0, j ) // garbage!
+		let sb = new Uint8Array(asb, 0, sj) // garbage!
+
+		let cs = new CompressionStream('gzip')
+		let writer = cs.writable.getWriter()
+		writer.write(b)
+		writer.write(sb)
+		writer.close()
+		let cb = await new Response(cs.readable).arrayBuffer()
+
+		frame_graph_push('frame_bandwidth'  , (60 * cb.byteLength * 8) / (1024 * 1024)) // Mbps @ 60fps
+		frame_graph_push('frame_compression', (cb.byteLength / (b.byteLength + sb.byteLength)) * 100)
+	})
+
+}
+
+pack_all = function() {
+	j = 2
+	sj = 0
+	pack_record(a)
+}
+}
+
+// p2p connection ------------------------------------------------------------
+
+
+
 
 // measuring requests --------------------------------------------------------
 
@@ -1425,7 +1578,7 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		min_h ?? 0,
 		px1, py1, px2, py2,
 		mx1, my1, mx2, my2,
-		max(0, fr ?? 1),
+		round(max(0, fr ?? 1) * 1024),
 		parse_align  (align  ?? 's'),
 		parse_valign (valign ?? 's'),
 		...args
@@ -1630,6 +1783,24 @@ draw[CMD_END] = function(a, end_i) {
 		draw_end_f(a, i)
 }
 
+pack[CMD_END] = function(a, end_i, pack_api) {
+	let i = a[end_i]
+	let pack_end_f = pack_end[a[i-1]]
+	if (pack_end_f) {
+		pack_end_f(a, i, pack_api)
+		return true
+	}
+}
+
+unpack[CMD_END] = function(b, end_j, a, i) {
+	let j = b[end_j]
+	let unpack_end_f = unpack_end[b[j-1]]
+	if (unpack_end_f)
+		unpack_end_f(b, j, a, i)
+	else
+		unpack_cmd(b, end_j, a, i)
+}
+
 // position phase utils
 
 function position_children_stacked(a, ct_i, axis, sx, sw) {
@@ -1753,7 +1924,7 @@ function position_flex(a, i, axis, sx, sw) {
 		i = next_i
 		while (a[i-1] != CMD_END) {
 			if (is_flex_child[a[i-1]]) {
-				total_fr += a[i+FR]
+				total_fr += a[i+FR] / 1024
 				n++
 			}
 			i = get_next_ext_i(a, i)
@@ -1773,7 +1944,7 @@ function position_flex(a, i, axis, sx, sw) {
 			if (is_flex_child[a[i-1]]) {
 
 				let min_w = a[i+2+axis]
-				let fr    = a[i+FR]
+				let fr    = a[i+FR] / 1024
 
 				let flex_w = total_w * fr / total_fr
 				let overflow_w = max(0, min_w - flex_w)
@@ -1795,7 +1966,7 @@ function position_flex(a, i, axis, sx, sw) {
 			if (is_flex_child[a[i-1]]) {
 
 				let min_w = a[i+2+axis]
-				let fr    = a[i+FR]
+				let fr    = a[i+FR] / 1024
 
 				// compute item's stretched width.
 				let flex_w = total_w * fr / total_fr
@@ -1863,7 +2034,7 @@ const CMD_STACK = cmd_ct('stack')
 ui.stack = function(id, fr, align, valign, min_w, min_h) {
 	begin_scope()
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
-		id)
+		id || '')
 }
 
 reindex[CMD_STACK] = box_ct_reindex
@@ -1919,24 +2090,27 @@ const CMD_SCROLLBOX = cmd_ct('scrollbox')
 
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
-	keepalive(id)
-	let ss = ui.state(id)
-	sx = sx ?? ss?.get('scroll_x') ?? 0
-	sy = sy ?? ss?.get('scroll_y') ?? 0
+	let ss
+	if (id) {
+		keepalive(id)
+		ss = ui.state(id)
+		sx = sx ?? ss.get('scroll_x')
+		sy = sy ?? ss.get('scroll_y')
+	}
 
 	begin_scope()
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
 		parse_sb_overflow(overflow_x),
 		parse_sb_overflow(overflow_y),
-		min_w ?? 0, // swapped with content w on `end`
-		min_h ?? 0, // swapped with content h on `end`
+		round(min_w ?? 0), // swapped with content w on `end`
+		round(min_h ?? 0), // swapped with content h on `end`
 		id,
 		sx ?? 0, // scroll x
 		sy ?? 0, // scroll y
 		0, // state
 	)
-	if (ss && sx != null) ss.set('scroll_x', sx)
-	if (ss && sy != null) ss.set('scroll_y', sy)
+	if (ss && sx != 0) ss.set('scroll_x', sx)
+	if (ss && sy != 0) ss.set('scroll_y', sy)
 
 	return i
 }
@@ -2154,7 +2328,7 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 
 		cx.beginPath()
 		cx.rect(tx, ty, tw, th)
-		cx.fillStyle = bg_color('scrollbar', state)[0]
+		cx.fillStyle = bg_color('scrollbar', state)
 		cx.fill()
 
 	}
@@ -2561,12 +2735,17 @@ const CMD_BB_TOOLTIP = cmd('bb_tooltip')
 ui.bb_tooltip = function(id, bg_color, bg_color_state, border_color, border_color_state, border_radius) {
 	let ct_i = ui.ct_i()
 	assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
-	return ui_cmd(CMD_BB_TOOLTIP, id, ct_i, bg_color, bg_color_state, border_color, border_color_state, border_radius ?? 0)
+	return ui_cmd(CMD_BB_TOOLTIP, id, ct_i, bg_color ?? 0, parse_state(bg_color_state),
+		border_color ?? 0, parse_state(border_color_state),
+		round((border_radius ?? 0) * 128),
+	)
 }
 
 reindex[CMD_BB_TOOLTIP] = function(a, i, offset) {
 	a[i+0] += offset
 }
+
+cx.fillStyle = bg_color
 
 draw[CMD_BB_TOOLTIP] = function(a, i) {
 	let ct_i = a[i+1]
@@ -2584,7 +2763,7 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	let bg_color_state     = a[i+3]
 	let border_color       = a[i+4]
 	let border_color_state = a[i+5]
-	let r                  = a[i+6] // border radius
+	let r                  = a[i+6] / 128 // border radius
 
 	let side  = a[ct_i+POPUP_SIDE_REAL]
 	let align = a[ct_i+POPUP_ALIGN]
@@ -2671,19 +2850,16 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	tx = clamp(tx, tx1, tx2)
 	ty = clamp(ty, ty1, ty2)
 
-	if (bg_color != null) {
-		bg_color = ui_bg_color(bg_color, bg_color_state)
-		set_theme_dark_from(bg_color)
-		cx.fillStyle = bg_color[0]
+	if (bg_color) {
+		set_bg_color(bg_color, bg_color_state)
 		tooltip_path(cx, x, y, x + w, y + h,
 			side, tx, ty, b1x, b1y, b2x, b2y, r, d)
 		cx.fill()
 	}
 	if (shadow_set)
 		reset_shadow()
-	if (border_color != null) {
-		border_color = ui_border_color(border_color, border_color_state)
-		cx.strokeStyle = border_color[0]
+	if (border_color) {
+		cx.strokeStyle = ui_border_color(border_color, border_color_state)
 		cx.lineWidth = 1
 		cx.lineCap = 'square'
 		tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
@@ -2724,7 +2900,7 @@ ui.shadow = function(x, y, blur, spread, inset, color) {
 		x = assert(theme.shadow[x])
 	if (isarray(x))
 		[x, y, blur, spread, inset, color] = x
-	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset, color)
+	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset ? 1 : 0, color)
 }
 
 // TODO: use spread & inset
@@ -2784,7 +2960,10 @@ const BB_CT_I          = 1
 const CMD_BB = cmd('bb') // border-background
 
 ui.bb = function(id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius) {
-	ui_cmd(CMD_BB, id, ui.ct_i(), bg_color, bg_color_state, parse_border_sides(sides), border_color, border_color_state, border_radius)
+	ui_cmd(CMD_BB, id ?? 0, ui.ct_i(), bg_color ?? 0, parse_state(bg_color_state),
+		parse_border_sides(sides), border_color ?? 0, parse_state(border_color_state),
+		round((border_radius ?? 0) * 128),
+	)
 }
 
 reindex[CMD_BB] = function(a, i, offset) {
@@ -2870,19 +3049,16 @@ draw[CMD_BB] = function(a, i) {
 	let border_sides       = a[i+4]
 	let border_color       = a[i+5]
 	let border_color_state = a[i+6]
-	let border_radius      = a[i+7]
-	if (bg_color != null) {
-		bg_color = ui_bg_color(bg_color, bg_color_state)
-		set_theme_dark_from(bg_color)
-		cx.fillStyle = bg_color[0]
-		bg_path(cx, x, y, x + w, y + h, border_sides, (border_radius ?? 0))
+	let border_radius      = a[i+7] / 128
+	if (bg_color) {
+		set_bg_color(bg_color, bg_color_state)
+		bg_path(cx, x, y, x + w, y + h, border_sides, border_radius)
 		cx.fill()
 	}
 	if (shadow_set)
 		reset_shadow()
-	if (border_sides && border_color != null) {
-		border_color = ui_border_color(border_color, border_color_state)
-		cx.strokeStyle = border_color[0]
+	if (border_sides && border_color) {
+		cx.strokeStyle = ui_border_color(border_color, border_color_state)
 		cx.lineWidth = 1
 		cx.lineCap = 'square'
 		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
@@ -2893,7 +3069,7 @@ draw[CMD_BB] = function(a, i) {
 hittest[CMD_BB] = function(a, i) {
 	let ct_i     = a[i+1]
 	let bg_color = a[i+2]
-	if (bg_color != null && hit_box(a, ct_i)) {
+	if (bg_color && hit_box(a, ct_i)) {
 		hover(a[i+BB_ID])
 		hit_template(a, i)
 		return true
@@ -2905,23 +3081,27 @@ hittest[CMD_BB] = function(a, i) {
 const CMD_COLOR = cmd('color')
 
 function force_color(s, state) {
-	scope_set('color', s)
-	scope_set('color_state', state)
+	if (color != s)
+		scope_set('color', s)
+	if (color_state != state)
+		scope_set('color_state', state)
 	ui_cmd(CMD_COLOR, s, state)
 	color = s
 	color_state = state
 }
 ui.color = function(s, state) {
+	state = state ?? 0
 	if (color == s && color_state == state) return
 	force_color(s, state)
 }
+function map_map(m, f) { let a = []; if (m) for (let [k,v] of m) a.push(f(k,v)); return a; }
 function end_color(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'color')
-	if (s === undefined) return
-	let state = scope_prev_var(ended_scope, 'color_state')
+	let s     = scope_prev_diff_var(ended_scope, 'color')
+	let state = scope_prev_diff_var(ended_scope, 'color_state')
+	if (s === undefined && state === undefined) return
+	if (s !== undefined) color = s; else s = color
+	if (state !== undefined) color_state = state; else state = color_state
 	ui_cmd(CMD_COLOR, s, state)
-	color = s
-	color_state = state
 }
 
 const CMD_FONT = cmd('font')
@@ -2932,7 +3112,7 @@ function force_font(s) {
 	font = s
 }
 function end_font(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'font')
+	let s = scope_prev_diff_var(ended_scope, 'font')
 	if (s === undefined) return
 	ui_cmd(CMD_FONT, s)
 	font = s
@@ -2956,7 +3136,7 @@ function force_font_size(s) {
 	font_size = s
 }
 function end_font_size(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'font_size')
+	let s = scope_prev_diff_var(ended_scope, 'font_size')
 	if (s === undefined) return
 	ui_cmd(CMD_FONT_SIZE, s)
 	font_size = s
@@ -2975,7 +3155,7 @@ function force_font_weight(s) {
 	font_weight = s
 }
 function end_font_weight(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'font_weight')
+	let s = scope_prev_diff_var(ended_scope, 'font_weight')
 	if (s === undefined) return
 	ui_cmd(CMD_FONT_WEIGHT, s)
 	font_weight = s
@@ -2992,11 +3172,11 @@ const CMD_LINE_GAP = cmd('line_gap')
 
 function force_line_gap(s) {
 	scope_set('line_gap', s)
-	ui_cmd(CMD_LINE_GAP, s)
+	ui_cmd(CMD_LINE_GAP, round(s * 1024))
 	line_gap = s
 }
 function end_line_gap(ended_scope) {
-	let s = scope_prev_var(ended_scope, 'line_gap')
+	let s = scope_prev_diff_var(ended_scope, 'line_gap')
 	if (s === undefined) return
 	ui_cmd(CMD_LINE_GAP, s)
 	line_gap = s
@@ -3023,7 +3203,7 @@ function set_font_weight(a, i) {
 }
 
 function set_line_gap(a, i) {
-	line_gap = a[i]
+	line_gap = a[i] / 1024
 }
 
 measure[CMD_FONT] = set_font
@@ -3415,7 +3595,7 @@ draw[CMD_TEXT] = function(a, i) {
 	let editable = flags & TEXT_EDITABLE
 	let focused  = flags & TEXT_FOCUSED
 
-	let col = fg_color(color, color_state)[0]
+	let col = fg_color(color, color_state)
 
 	if (editable) {
 		let input = ui.state(id, 'input')
@@ -3514,7 +3694,7 @@ const CMD_FRAME = cmd('frame')
 ui.frame = function(on_measure, on_frame) {
 
 	ui_cmd(CMD_FRAME, on_measure, on_frame,
-		null, // rec_a
+		0, // rec_a
 	)
 
 }
@@ -3856,7 +4036,7 @@ ui.widget('drag_point', {
 
 ui.button = function(id, s, style, align, valign) {
 	let hs = hit(id)
-	let state = hs ? ui.pressed ? 'active' : 'hover' : 'normal'
+	let state = hs ? ui.pressed ? 'active' : 'hover' : null
 	style = style ?? 'button'
 	ui.p(ui.sp2(), ui.sp())
 	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
@@ -4038,7 +4218,7 @@ ui.end_vsplit = function() { end_split('v') }
 
 ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', fr, 's', 's')
-		ui.bb('', 'input', null, 1, 'intense', ui.focused(id) ? 'hover' : 'normal')
+		ui.bb('', 'input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(12), min_h, null, true)
 	ui.end_stack()
@@ -4146,15 +4326,17 @@ ui.widget('polyline', {
 	create: function(cmd,
 			id, points, closed,
 			fill_color, fill_color_state,
-			stroke_color, stroke_color_state
+			stroke_color, stroke_color_state,
 	) {
 		if (isstr(points))
 			points = points.split(/\s+/).map(num)
 		assert(points.length % 2 == 0, 'invalid point array')
 		if (!points.length)
 			return
-		return ui_cmd(cmd, id, ui.ct_i(), closed, fill_color, fill_color_state,
-			stroke_color, stroke_color_state, ...points)
+		return ui_cmd(cmd, id, ui.ct_i(), (closed ?? 0) ? 1 : 0,
+			fill_color   ?? 0, parse_state(fill_color_state  ),
+			stroke_color ?? 0, parse_state(stroke_color_state)
+			, ...points)
 	},
 	measure: function(a, i, axis) {
 		if (!axis) {
@@ -4189,14 +4371,12 @@ ui.widget('polyline', {
 		let stroke_color_state = a[i+6]
 		if (fill_color) {
 			set_points(cx, x0, y0, a, pi1, pi2, closed)
-			fill_color = ui_bg_color(fill_color, fill_color_state)
-			cx.fillStyle = fill_color[0]
+			cx.fillStyle = bg_color(fill_color, fill_color_state)
 			cx.fill()
 		}
 		if (stroke_color) {
 			set_points(cx, x0, y0, a, pi1, pi2, closed)
-			stroke_color = fg_color(stroke_color, stroke_color_state)
-			cx.strokeStyle = stroke_color[0]
+			cx.strokeStyle = fg_color(stroke_color, stroke_color_state)
 			cx.lineWidth = 1
 			cx.stroke()
 		}
@@ -4561,7 +4741,7 @@ toggle.draw = function(a, i) {
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
-	cx.fillStyle = ui_bg_color('toggle', state)[0]
+	cx.fillStyle = ui_bg_color('toggle', state)
 	cx.fill()
 
 	// thumb
@@ -4572,7 +4752,7 @@ toggle.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * .35, 0, 2 * PI)
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = ui_bg_color('toggle-thumb', hs ? 'hover' : null)[0]
+	cx.fillStyle = ui_bg_color('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
 
 }
@@ -4604,14 +4784,15 @@ checkbox.draw = function(a, i) {
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
 		(hs ? STATE_HOVER         : 0)
-	let bg = bg_color('toggle', state)
+	let bg = bg_color_hsl('toggle', state)
 	let fg = fg_color('text', hs ? 'hover' : null, bg_is_dark(bg) ? 'dark' : 'light')
+	bg = bg[0]
 
 	// check box
 
 	cx.beginPath()
 	cx.roundRect(x, y, w, h, 2)
-	cx.fillStyle = bg[0]
+	cx.fillStyle = bg
 	cx.fill()
 
 	// check mark
@@ -4625,7 +4806,7 @@ checkbox.draw = function(a, i) {
 	cx.moveTo(4, 11)
 	cx.lineTo(8, 15)
 	cx.lineTo(16, 6)
-	cx.strokeStyle = fg[0]
+	cx.strokeStyle = fg
 	cx.lineWidth = 1.5
 	cx.lineCap = 'round'
 	cx.lineJoin = 'round'
@@ -4681,7 +4862,7 @@ radio.draw = function(a, i) {
 
 	cx.beginPath()
 	cx.arc(cx1, cy1, h * .5, 0, 2 * PI)
-	cx.fillStyle = bg_color('toggle', hs ? 'hover' : null)[0]
+	cx.fillStyle = bg_color('toggle', hs ? 'hover' : null)
 	cx.fill()
 
 	// bullet
@@ -4690,7 +4871,7 @@ radio.draw = function(a, i) {
 	cx.arc(cx1, cy1, h * (on ? .15 : 0), 0, 2 * PI) // TODO: animate radius
 	cx.closePath()
 	ui.set_shadow('button')
-	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)[0]
+	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
 
 }
@@ -4835,7 +5016,7 @@ ui.box_widget('slider', {
 
 		keepalive(id)
 
-		markers = markers ?? true
+		markers = (markers ?? 1) ? 1 : 0
 
 		let fr = fr0 ?? 1
 		let align = align0 ?? 's'
@@ -4873,8 +5054,8 @@ ui.box_widget('slider', {
 				decimals ?? 2,
 				0, // p
 				markers,
-				scale_base,
-				scales,
+				scale_base ?? 10,
+				scales ?? 0,
 				0, // thumb_i
 			)
 
@@ -4917,7 +5098,7 @@ ui.box_widget('slider', {
 		let v = lerp(p, 0, 1, from, to)
 		ui.state(id).set('v', v)
 
-		a[i+SLIDER_P] = p
+		a[i+SLIDER_P] = round(p * 32767)
 
 		// find thumb's center point and position the thumb anchor stack.
 		let x = a[i+0]
@@ -4947,7 +5128,7 @@ ui.box_widget('slider', {
 		let h = a[i+3]
 
 		let id      = a[i+SLIDER_ID]
-		let p       = a[i+SLIDER_P]
+		let p       = a[i+SLIDER_P] / 32767
 		let markers = a[i+SLIDER_MARKERS]
 
 		let hs = hit(id)
@@ -4967,33 +5148,29 @@ ui.box_widget('slider', {
 
 		// draw shaft
 		bg_path(cx, x - r, y, x + w + r, y + 2*r, BORDER_SIDE_ALL, 1000)
-		let shaft_color = bg_color('bg2', hs ? 'hover' : null)
-		cx.fillStyle = shaft_color[0]
+		cx.fillStyle = bg_color('bg2', hs ? 'hover' : null)
 		cx.fill()
 
 		bg_path(cx, x - r, y, thumb_cx, y + 2*r, BORDER_SIDE_ALL, 1000)
-		let fill_color = bg_color('link', hs ? 'hover' : null)
-		cx.fillStyle = fill_color[0]
+		cx.fillStyle = bg_color('link', hs ? 'hover' : null)
 		cx.fill()
 
 		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
-		let border_color = ui_border_color('light', null)
-		cx.strokeStyle = border_color[0]
+		cx.strokeStyle = border_color('light', null)
 		cx.lineWidth = 1
 		cx.stroke()
 
 		// draw focus ring under thumb
 		if (focused) {
-			let color = bg_color('item', 'item-focused item-selected focused')
-			cx.fillStyle = hsl_adjust(color, 1, 1, 1, .5)
+			let hsl_color = bg_color_hsl('item', 'item-focused item-selected focused')
+			cx.fillStyle = hsl_adjust(hsl_color, 1, 1, 1, .5)
 			cx.beginPath()
 			cx.arc(thumb_cx, thumb_cy, thumb_r * 2, 0, 2 * PI)
 			cx.fill()
 		}
 
 		// draw thumb
-		fill_color = fg_color('link', hs ? 'hover' : null)
-		cx.fillStyle = fill_color[0]
+		cx.fillStyle = fg_color('link', hs ? 'hover' : null)
 		ui.set_shadow('button')
 		cx.beginPath()
 		cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
@@ -5011,8 +5188,8 @@ ui.box_widget('slider', {
 			let [step, min, max] = compute_step_and_range(
 				max_n, from, to, scale_base, scales, decimals)
 
+			let hsl_color = fg_color_hsl('label')
 			cx.textAlign = 'center'
-			let color = fg_color('label')
 			cx.lineWidth = 1
 			let m = measure_text(cx, cx.font, ' ')
 			let asc = m.fontBoundingBoxAscent
@@ -5028,7 +5205,7 @@ ui.box_widget('slider', {
 				// shadow markers that are too close to the current value.
 				let alpha = clamp(abs(vx - x) / ui.em(3) - .7, 0, 1)
 
-				let c = hsl_adjust(color, 1, 1, 1, alpha)
+				let c = hsl_adjust(hsl_color, 1, 1, 1, alpha)
 				cx.fillStyle  = c
 				cx.strokeStyle = c
 
@@ -5044,8 +5221,8 @@ ui.box_widget('slider', {
 			// show a marker for the current value
 			{
 				let x = vx
-				cx.fillStyle   = fg_color('text')[0]
-				cx.strokeStyle = fg_color('text')[0]
+				cx.fillStyle   = fg_color('text')
+				cx.strokeStyle = fg_color('text')
 
 				cx.beginPath()
 				cx.moveTo(x, round(y - ui.em(1.0)) + .5)
@@ -5317,7 +5494,8 @@ ui.widget('hue_bar', {
 
 ui.box_ct_widget('aspect_box', {
 	create: function(cmd, aspect, fr, align, valign, min_w, min_h) {
-		return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, aspect ?? 1)
+		return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
+			aspect ?? 1)
 	},
 	measure: function(a, i, axis) {
 		ct_stack_push(a, i)
@@ -5352,7 +5530,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
-				ui.bb('', [hsl(hue, sat, lum)])
+				ui.bb('', hsl(hue, sat, lum))
 			ui.end_aspect_box()
 			ui.record_play(sl_square)
 			ui.record_play(hue_bar)
@@ -5398,14 +5576,14 @@ ui.widget('bg_dots', {
 	create: function(cmd, id, speed) {
 		assert(id, 'id required')
 		let ct_i = ui.ct_i()
-		return ui_cmd(cmd, id, ct_i, speed ?? 1)
+		return ui_cmd(cmd, id, ct_i, round((speed ?? 1) * 1024))
 	},
 
 	draw: function(a, i) {
 
 		let id    = a[i+0]
 		let ct_i  = a[i+1]
-		let speed = a[i+2]
+		let speed = a[i+2] / 1024
 
 		let x = a[ct_i+0]
 		let y = a[ct_i+1]
@@ -5451,7 +5629,7 @@ ui.widget('bg_dots', {
 
 		for (let t of dots) {
 			if (t != dots.mouse_dot) {
-				cx.fillStyle = fg_color('label')[0]
+				cx.fillStyle = fg_color('label')
 				cx.beginPath()
 				cx.arc(t.x, t.y, 2, 0, Math.PI*2, true)
 				cx.closePath()
@@ -5466,7 +5644,7 @@ ui.widget('bg_dots', {
 				let dp = point_distance(t1, t2) / max_distance
 				if (dp < 1) {
 					let alpha = 1 - dp
-					cx.strokeStyle = hsl_adjust(fg_color('label'), 1, 1, 1, alpha)
+					cx.strokeStyle = hsl_adjust(fg_color_hsl('label'), 1, 1, 1, alpha)
 					cx.lineWidth = 0.8
 					cx.beginPath()
 					cx.moveTo(t1.x, t1.y)
@@ -5504,12 +5682,111 @@ ui.widget('bg_dots', {
 })
 }
 
+// frame graphs --------------------------------------------------------------
+
+ui.frame_graphs = {}
+function frame_graph(name, unit, decimals, min, max, duration) {
+	let n = 60 * (duration ?? 10)
+	let g = {n: n, unit: unit, min: min, max: max, decimals: decimals}
+	let va = []
+	let i = 0
+	for (let i = 0; i < n; i++)
+		va[i] = min
+	g.push = function(v) {
+		va[i] = v
+		i = (i + 1) % n
+	}
+	g.at = function(j) {
+		return va[(i+j) % n]
+	}
+	g.i = () => i
+	ui.frame_graphs[name] = g
+}
+function frame_graph_push(name, v) {
+	ui.frame_graphs[name].push(v)
+}
+ui.frame_graph_push = frame_graph_push
+
+frame_graph('frame_duration'   , 'ms'  , 0, 0,  1/60 * 1000)
+frame_graph('frame_bandwidth'  , 'Mbps', 1, 0,     5) // 5Mbps = 720p @ 60fps
+frame_graph('frame_compression', '%'   , 0, 0,   100)
+frame_graph('string_count'     , ''    , 0, 0, 20000)
+frame_graph('string_length'    , ''    , 0, 0, 20000)
+frame_graph('number_count'     , ''    , 0, 0, 20000)
+frame_graph('other_count'      , ''    , 0, 0, 10000)
+
+ui.box_widget('frame_graph', {
+	create: function(cmd, name, fr, align, valign, min_w, min_h) {
+		ui_cmd_box(cmd, fr, align, valign, min_w, min_h, name)
+		ui.animate()
+	},
+	draw: function(a, i) {
+		let x0 = a[i+0]
+		let y0 = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+		let name = a[i+S-1]
+		let g = ui.frame_graphs[name]
+		if (!g) return
+
+		cx.save()
+		cx.beginPath()
+		cx.rect(x0, y0, w, h)
+		cx.clip()
+
+		cx.beginPath()
+		let step = round((g.n / w) * 2)
+		let i0 = step - g.i() % step
+		let min =  1/0
+		let max = -1/0
+		let sum = 0
+		let n = 0
+		for (let i = 0; i < g.n; i += step) {
+			let v = g.at(i0+i)
+			min = Math.min(min, v)
+			max = Math.max(max, v)
+			sum += v
+			n++
+			let x = x0 + lerp(i0+i, 0, g.n, 0, w + step)
+			let y = y0 + lerp(v, g.min, g.max, h, 0)
+			if (!i)
+				cx.moveTo(x, y)
+			else
+				cx.lineTo(x, y)
+		}
+		cx.strokeStyle = fg_color('link')
+		cx.stroke()
+
+		let avg = sum / n
+
+		cx.fillStyle = fg_color('label')
+		let y1 = y0 + ui.em()
+		let x1 = x0 + ui.sp()
+		cx.font = font_weight + ' ' + (font_size * .75) + 'px ' + font
+		cx.textAlign = 'left'
+		let y = y1
+		let x = x1
+		cx.fillText('min', x, y); y += ui.em()
+		cx.fillText('max', x, y); y += ui.em()
+		cx.fillText('avg', x, y)
+		y = y1
+		x = x1 + ui.em(6)
+		let d = g.decimals
+		cx.textAlign = 'right'
+		cx.fillText(dec(min, d)+g.unit, x, y); y += ui.em()
+		cx.fillText(dec(max, d)+g.unit, x, y); y += ui.em()
+		cx.fillText(dec(avg, d)+g.unit, x, y)
+
+		cx.restore()
+	},
+})
+
 // init ----------------------------------------------------------------------
 
 reset_canvas()
 
 // prevent flicker
 theme = themes[ui.default_theme]
-screen.style.background = bg_color('bg')[0]
+screen.style.background = bg_color('bg')
 
 }()) // module function
