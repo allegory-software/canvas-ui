@@ -1834,7 +1834,8 @@ function custom_event_up (...args) { return _event(true , ...args) }
 
 These do the same job as window.on(event, f) / window.fire(event, ...)
 except they are faster because they make less garbage (or none if JS is
-smart enough to keep the varargs on the stack or sink them).
+smart enough to keep the varargs on the stack or sink them). Plus you can
+listen for inter-window events fired with broadcast().
 
 */
 
