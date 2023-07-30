@@ -1,199 +1,296 @@
 /*
 
-protocol:
-
-1. conn  = RTCPeerConnection()
-2. offer = conn.createOffer()
-3. conn.setLocalDescription(offer)
-4. on conn.onicecandidate(ev)
-		send json(ev.candidate) to peer through external means
-5.
+	RTC wrapper
 
 */
 
 (function () {
 "use strict"
 let G = window
+let rtc = {}
+G.rtc = rtc
 
 let {
-	debug, pr, clock, json, json_arg,
+	min, max,
+	set,
+	debug, pr, clock, json, json_arg, noop,
+	runafter, runevery,
+	announce,
 } = glue
 
-let sendProgress    = {}
-let receiveProgress = {}
+rtc.DEBUG = 0
+rtc.servers = null
 
-let bytesToSend = 0
-let totalTimeUsedInSend = 0
-let numberOfSendCalls = 0
-let maxTimeUsedInSend = 0
-let sendStartTime = 0
-let currentThroughput = 0
+function rtc_debug(...args) {
+	if (!rtc.DEBUG) return
+	debug(this.id, this.type, ':', ...args)
+}
 
-let servers = null
+rtc.offer = function(e) {
 
-async function rtc_conn(on_error) {
+	e.type = 'offer'
+	e.debug = rtc_debug
+	e.open = false
+	e.ready = false
+	e.max_message_size = null
 
-	let e = {
-
-	let conn = new RTCPeerConnection(servers)
-
-	async function on_icecandidate(pc, other_pc, event) {
-		let candidate = event.candidate
-		if (candidate === null) // ignore null candidates
+	e.connect = async function() {
+		if (e.open)
 			return
-		try {
-			await other_pc.addIceCandidate(candidate)
-			pr('AddIceCandidate successful: ', candidate)
-		} catch (e) {
-			console.error('failed to add ICE candidate: ', e)
-			on_error(e)
+		e.open = true
+
+		e.con = new RTCPeerConnection(rtc.servers)
+
+		e.chan = e.con.createDataChannel('chan', {ordered: true})
+		e.chan.binaryType = 'arraybuffer'
+
+		e.con.onicecandidate = function(ev) {
+			if (!ev.candidate) return
+			e.signal_con.signal(e.id, 'candidate', ev.candidate)
+		}
+
+		e.chan.onopen = function() {
+			e.debug('chan open')
+			e.max_message_size = e.con.sctp.maxMessageSize
+			e.ready = true
+			announce('rtc', e, 'ready')
+		}
+
+		e.chan.onclose = function() {
+			e.debug('chan closed')
+			e.chan = null
+			e.close()
+		}
+
+		e.chan.onmessage = function(ev) {
+			e.recv(ev.data)
+		}
+
+		let offer = await e.con.createOffer()
+		await e.con.setLocalDescription(offer)
+
+		e.signal_con.signal(e.id, 'offer', offer)
+
+		announce('rtc', e, 'open')
+	}
+
+	e.close = function() {
+		if (!e.open)
+			return
+		e.open = false
+		e.ready = false
+		e.max_message_size = null
+
+		if (e.chan) {
+			e.chan.close()
+			e.chan = null
+		}
+		if (e.con) {
+			e.con.close()
+			e.con = null
+		}
+
+		e.signal_con.signal(e.id, 'close')
+		announce('rtc', e, 'close')
+	}
+
+	e.signal_con.on_signal = function(k, v) {
+		if (!e.open)
+			return
+		if (k == 'candidate') {
+			e.debug('<- candidate', v)
+			e.con.addIceCandidate(v)
+		} else if (k == 'answer') {
+			e.debug('<- answer', v)
+			e.con.setRemoteDescription(v)
 		}
 	}
 
-	e.candidates = []
-
-	loc_conn.onicecandidate = function(ev) {
-		if (!ev.candidate) return
-		e.candidates.push(json(ev.candidate))
+	e.send = function(s) {
+		if (!e.ready)
+			return
+		let wait_bytes = e.chan.bufferedAmount
+		if (wait_bytes > 64 * 1024)
+			return
+		e.chan.send(s)
 	}
-
-	let offer = await loc_conn.createOffer()
-
-	loc_conn.setLocalDescription(offer) // triggers ^icecandidate
-
-	rem_conn.addEventListener('icecandidate', ev => on_icecandidate(rem_conn, loc_conn, ev))
-
-	let max_msg_size
-	let low_mark, high_mark
-
-	function send_more() {
-
-		let timeoutHandle = null
-
-		// stop scheduled timer if any (part of the workaround introduced below)
-		if (timeoutHandle !== null) {
-			clearTimeout(timeoutHandle)
-			timeoutHandle = null
-		}
-
-		let bufferedAmount = send_chan.bufferedAmount
-		while (sendProgress.value < sendProgress.max) {
-			pr('Sending data...')
-			let timeBefore = clock()
-			send_chan.send(dataString)
-			let timeUsed = clock() - timeBefore
-			if (timeUsed > maxTimeUsedInSend) {
-				maxTimeUsedInSend = timeUsed
-				totalTimeUsedInSend += timeUsed
-			}
-			numberOfSendCalls += 1
-			bufferedAmount += chunkSize
-			sendProgress.value += chunkSize
-
-			// Pause sending if we reach the high water mark
-			if (bufferedAmount >= high_mark) {
-				// This is a workaround due to the bug that all browsers are incorrectly calculating the
-				// amount of buffered data. Therefore, the 'bufferedamountlow' event would not fire.
-				if (send_chan.bufferedAmount < low_mark) {
-					timeoutHandle = setTimeout(() => send_mode(), 0)
-				}
-				pr(`Paused sending, buffered amount: ${bufferedAmount} (announced: ${send_chan.bufferedAmount})`)
-				break
-			}
-		}
-
-		if (sendProgress.value === sendProgress.max) {
-			pr('Data transfer completed successfully!')
-		}
-	}
-
-	let send_chan = loc_conn.createDataChannel('send_chan', {ordered: true})
-
-	send_chan.addEventListener('open', function() {
-		pr('send channel is open')
-		max_msg_size = loc_conn.sctp.maxMessageSize
-		low_mark  = 64 * 1024
-		high_mark = low_mark * 8
-		send_chan.bufferedAmountLowThreshold = low_mark
-		send_chan.addEventListener('bufferedamountlow', function(e) {
-			pr('BufferedAmountLow event:', e)
-			send_more()
-		})
-		pr('Start sending data.')
-		sendProgress.max = bytesToSend
-		receiveProgress.max = sendProgress.max
-		sendProgress.value = 0
-		receiveProgress.value = 0
-		sendStartTime = clock()
-		maxTimeUsedInSend = 0
-		totalTimeUsedInSend = 0
-		numberOfSendCalls = 0
-		send_more()
-	})
-
-	send_chan.addEventListener('close', function() {
-		pr('Send channel is closed')
-		loc_conn.close()
-		loc_conn = null
-		pr('Closed local peer connection')
-		pr('Average time spent in send_more() (s): ' + totalTimeUsedInSend / numberOfSendCalls)
-		pr('Max time spent in send_more() (s): ' + maxTimeUsedInSend)
-		let spentTime = clock() - sendStartTime
-		pr('Total time spent: ' + spentTime)
-		pr('MBytes/Sec: ' + bytesToSend / spentTime)
-	})
-
-	pr('Created send data channel: ', send_chan)
-
-	pr('Created local peer connection object loc_conn: ', loc_conn)
-
-	rem_conn.addEventListener('datachannel', function(event) {
-		pr('Receive Channel Callback')
-		recv_chan = event.channel
-		recv_chan.binaryType = 'arraybuffer'
-		recv_chan.addEventListener('close', function() {
-			pr('Receive channel is closed')
-			rem_conn.close()
-			rem_conn = null
-			pr('Closed remote peer connection')
-		})
-		recv_chan.addEventListener('message', function(event) {
-			receiveProgress.value += event.data.length
-			currentThroughput = receiveProgress.value / (clock() - sendStartTime)
-			pr('Current Throughput is:', currentThroughput, 'bytes/sec')
-
-			// Workaround for a bug in Chrome which prevents the closing event from being raised by the
-			// remote side. Also a workaround for Firefox which does not send all pending data when closing
-			// the channel.
-			if (receiveProgress.value === receiveProgress.max) {
-				send_chan.close()
-				recv_chan.close()
-			}
-		})
-	})
-
-	e.offer = json(offer)
-
-	offer = json_arg(offer)
-	pr('Offer from loc_conn:\n', offer.sdp)
-
-	rem_conn.setRemoteDescription(offer)
-
-		try {
-			let remoteAnswer = await rem_conn.createAnswer()
-			rem_conn.setLocalDescription(remoteAnswer)
-			pr('Answer from rem_conn:\n', remoteAnswer.sdp)
-			loc_conn.setRemoteDescription(remoteAnswer)
-		} catch (e) {
-			console.error('Error when creating remote answer: ', e)
-		}
-	} catch (e) {
-		console.error('Failed to create session description: ', e)
-	}
-
-	pr('Peer connection setup complete.')
 
 	return e
+}
+
+rtc.answer = function(e) {
+
+	e.type = 'answer'
+	e.debug = rtc_debug
+	e.open = false
+	e.ready = false
+
+	e.connect = function() {
+		if (e.open)
+			return
+		e.open = true
+
+		e.con = new RTCPeerConnection(rtc.servers)
+
+		e.con.ondatachannel = function(ev) {
+
+			e.debug('remote chan open')
+
+			e.chan = ev.channel
+			e.chan.binaryType = 'arraybuffer'
+
+			e.chan.onclose = function() {
+				e.debug('remote chan closed')
+				e.chan = null
+				e.close()
+			}
+
+			e.chan.onmessage = function(ev) {
+				e.recv(ev.data)
+			}
+
+			e.ready = true
+			announce('rtc', e, 'ready')
+		}
+
+		e.signal_con.signal(e.id, 'ready')
+
+		announce('rtc', e, 'open')
+	}
+
+	e.close = function() {
+		if (!e.open)
+			return
+		e.open = false
+		e.ready = false
+
+		if (e.chan) {
+			e.chan.close()
+			e.chan = null
+		}
+		if (e.con) {
+			e.con.close()
+			e.con = null
+		}
+
+		e.signal_con.signal(e.id, 'close')
+		announce('rtc', e, 'close')
+	}
+
+	e.signal_con.on_signal = function(k, v) {
+		if (!e.open)
+			return
+		if (k == 'candidate') {
+			e.debug('<- candidate', v)
+			e.con.addIceCandidate(v)
+		} else if (k == 'offer') {
+			e.debug('<- offer', v)
+			e.con.setRemoteDescription(v)
+			runafter(0, async function() {
+				let answer = await e.con.createAnswer()
+				await e.con.setLocalDescription(answer)
+				e.signal_con.signal(e.id, 'answer', answer)
+			})
+		}
+	}
+
+	return e
+}
+
+function create_signal_server() {
+
+	let e = {}
+
+	e.offers    = {} // {id->offer}
+	e.ready_con = {} // {id->con}
+	e.offer_con = {} // {id->con}
+
+	let {offers, ready_con, offer_con} = e
+
+	e.connect = function(c) {
+
+		c = c ?? {}
+
+		c.on_signal = null
+		c.candidates = set()
+
+		c.signal_candidates = function(id) {
+			let c2 = c == offer_con[id] ? ready_con[id] : offer_con[id]
+			if (!c2)
+				return
+			for (let candidate of c.candidates) {
+				c2.on_signal('candidate', candidate)
+				c.candidates.delete(candidate)
+			}
+		}
+
+		c.signal = function(id, k, v) {
+			if (k == 'offer') {
+				let offer = v
+				offers[id] = offer
+				offer_con[id] = c
+				let rc = ready_con[id]
+				let oc = offer_con[id]
+				if (rc) {
+					rc.on_signal('offer', offer)
+					oc.signal_candidates(id)
+				}
+			} else if (k == 'ready') {
+				ready_con[id] = c
+				let offer = offers[id]
+				let oc = offer_con[id]
+				if (offer) {
+					c.on_signal('offer', offer)
+					oc.signal_candidates(id)
+				}
+			} else if (k == 'answer') {
+				let answer = v
+				let oc = offer_con[id]
+				let rc = ready_con[id]
+				if (oc) {
+					oc.on_signal('answer', answer)
+					rc.signal_candidates(id)
+				}
+			} else if (k == 'candidate') {
+				let candidate = v
+				c.candidates.add(candidate)
+				c.signal_candidates(id)
+			} else if (k == 'close') {
+				delete offers[id]
+				delete ready_con[id]
+				delete offer_con[id]
+			}
+		}
+
+		return c
+
+	}
+
+	return e
+
+}
+
+rtc.signal_server = create_signal_server()
+
+if (0) {
+
+	runafter(0, async function() {
+
+		let signal_con = rtc.signal_server.connect()
+		let con = await rtc.offer({signal_con: signal_con, id: 'demo'})
+
+		runevery(1, function() {
+			con.send('Hello!')
+		})
+
+	})
+
+	runafter(0, async function() {
+
+		let signal_con = rtc.signal_server.connect()
+		let con = await rtc.answer({signal_con: signal_con, id: 'demo', recv: pr})
+
+	})
 }
 
 }()) // module function

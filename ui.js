@@ -32,7 +32,7 @@ const G = window
 let ui = document.currentScript.hasAttribute('global') ? window : {}
 G.ui = ui
 
-ui.VERSION = '0.1'
+ui.VERSION = 1
 
 // utilities ------------------------------------------------------------------
 
@@ -41,11 +41,11 @@ const {
 	isarray, isstr, isnum,
 	assert, warn, pr, debug, trace,
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
-	dec, num, str,
+	dec, num, str, json, json_arg,
 	obj, set, map, array,
 	assign, insert,
 	noop, return_true, do_after,
-	clock, runafter,
+	runafter,
 	memoize,
 	freelist,
 	hsl_to_rgb_out,
@@ -54,8 +54,11 @@ const {
 	runevery,
 } = glue
 
+let clock_ms = () => performance.now()
+
 let map_freelist   = () => freelist(map)
 let array_freelist = () => freelist(array)
+let obj_freelist   = () => freelist(obj)
 
 // When using capture_pointer(), setting the cursor for the element that
 // is hovered doesn't work anymore, so use this hack instead.
@@ -437,9 +440,6 @@ document.body.appendChild(screen)
 let cx = canvas.getContext('2d')
 ui.cx = cx
 
-let a = []
-ui.a = a
-
 let screen_w, screen_h, dpr
 
 function resize_canvas() {
@@ -464,10 +464,11 @@ window.addEventListener('resize', resize_canvas)
 let raf_id
 function raf_animate() {
 	raf_id = null
-	let t0 = clock()
+	let t0 = clock_ms()
 	cx.clearRect(0, 0, canvas.width, canvas.height)
 	redraw_all()
-	frame_graph_push('frame_duration', 1000 * (clock() - t0))
+	let t1 = clock_ms()
+	frame_graph_push('frame_time', t1 - t0)
 }
 let ready
 function animate() {
@@ -623,29 +624,31 @@ ui.listen = function(ev) {
 
 // z-layers ------------------------------------------------------------------
 
-let layer_freelist = array_freelist()
+let layer_freelist = obj_freelist()
 let layer_map = obj() // {name->layer}
 let layer_arr = [] // [layer1,...]
 
-a.layers = []
+let layers = []
 
 function ui_layer(name, index) {
 	let layer = layer_map[name]
 	if (!layer) {
 		layer = layer_freelist.alloc() // [popup1_i,...]
 		layer.name = assert(name)
-		insert(a.layers, index, layer)
+		insert(layers, index, layer)
 		layer_map[name] = layer
 		layer_arr.push(layer)
 		layer.i = layer_arr.length-1
+		if (!layer.a)
+			layer.a = []
 	}
 	return layer
 }
 ui.layer = ui_layer
 
-function clean_layers() {
-	for (let layer of a.layers)
-		layer.length = 0
+function clear_layers() {
+	for (let layer of layers)
+		layer.a.length = 0
 }
 
 ui_layer('base'   , 0)
@@ -658,7 +661,7 @@ let layer_stack = [] // [layer1_i, ...]
 let layer_i // current layer = layer_arr[layer_i]
 
 function begin_layer(layer, i) {
-	layer.push(i)
+	layer.a.push(i)
 	layer_i = layer.i
 	layer_stack.push(layer_i)
 }
@@ -900,6 +903,17 @@ function ct_stack_check() {
 
 // command array -------------------------------------------------------------
 
+// format of a:
+//
+//  next_i, cmd, arg1..n, prev_i, next_i, cmd, arg1..n, ...
+//    |            ^        |                    ^
+//    |            |        |                    |
+//    |            +--------+                    |
+//    +------------------------------------------+
+//
+let a = []
+ui.a = a
+
 let cmd_names = []
 let cmd_name_map = map()
 
@@ -978,7 +992,7 @@ let reindex = []
 
 ui.record_play = function(a1) {
 
-	// fix all indices in a1 to fit into their new place in a.
+	// fix all indexes in a1 to fit into their new place in a.
 	let offset = a.length
 	let i = 2
 	let n = a1.length
@@ -1014,9 +1028,7 @@ let draw_end      = []
 let hittest       = []
 let is_flex_child = []
 let pack          = []
-let pack_end      = []
 let unpack        = []
-let unpack_end    = []
 
 ui.is_flex_child = is_flex_child
 
@@ -1086,15 +1098,11 @@ ui.translate = function(a, i) {
 
 let theme_stack = []
 
-function draw_all() {
-
-	//check_types_all(a)
-	pack_all()
-
+function draw_frame(a, layers) {
 	screen.style.background = bg_color('bg')
-	for (let layer of a.layers) {
+	for (let layer of layers) {
 		/*global*/ layer_i = layer.i
-		for (let i of layer) {
+		for (let i of layer.a) {
 			let next_ext_i = get_next_ext_i(a, i)
 			reset_canvas()
 			while (i < next_ext_i) {
@@ -1118,6 +1126,11 @@ function draw_all() {
 		}
 		layer_i = null
 	}
+}
+
+function draw_all() {
+	draw_frame(a, layers)
+	pack_frame()
 }
 
 // hit-testing phase ---------------------------------------------------------
@@ -1172,13 +1185,13 @@ function hit_all() {
 		return
 
 	// iterate layers in reverse order.
-	for (let j = a.layers.length-1; j >= 0; j--) {
-		let layer = a.layers[j]
+	for (let j = layers.length-1; j >= 0; j--) {
+		let layer = layers[j]
 		/*global*/ layer_i = layer.i
 		// iterate layer's cointainers in reverse order.
-		for (let k = layer.length-1; k >= 0; k--) {
+		for (let k = layer.a.length-1; k >= 0; k--) {
 			reset_canvas()
-			let i = layer[k]
+			let i = layer.a[k]
 			let hit_f = hittest[a[i-1]]
 			if (hit_f(a, i)) {
 				j = -1
@@ -1190,7 +1203,32 @@ function hit_all() {
 
 }
 
-// packing / unpacking phases ------------------------------------------------
+/* frame packing -------------------------------------------------------------
+
+frame format:
+	1. header
+	2. commands
+	3. strings
+header:
+	int16  version
+	int16  frame length: ho-word
+	int16  frame length: hi-word
+	int16  strings offset in in16s: lo-word
+	int16  strings offset in in16s: hi-word
+	int16  screen_w
+	int16  screen_h
+	int16  mx
+	int16  my
+commands: multiple of (until strings offset):
+	int16    cmd
+	int16    argc
+	int16[]  args
+strings: multiple of (until len):
+	int16    index
+	int16    len
+	int8[]   text in ut8
+
+*/
 
 // check that cmd is entirely typed.
 function check_types(a, i) {
@@ -1207,16 +1245,15 @@ function check_types_all(a) {
 	}
 }
 
-let pack_all; {
+let pack_frame
+{
 let ab  = new ArrayBuffer(512*1024)
 let b   = new Int16Array(ab)
 let asb = new ArrayBuffer(512*1024)
 let sb  = new Uint8Array(asb)
-let sdb = new DataView(asb)
-let j = 0
-let sj = 0
-
-ui.frame_compressed_size
+let dsb = new DataView(asb)
+let j  // current index in b
+let sj // current index in sb
 
 let tenc = new TextEncoder()
 let tenc_abuf = new ArrayBuffer(2*64*1024)
@@ -1228,51 +1265,49 @@ function copy(d, i, s, n) {
 }
 
 function pack_cmd(a, i) {
-	let i1 = i-1
-	let i2 = a[i-2] - 3
-	let n = i2 - i1
-	b[j++] = n
-	for (let k = 0; k < n; k++) {
-		let v = a[i1+k]
+	let i0 = i // index at arg1
+	let i1 = a[i-2] - 3 // index after last arg
+	let argc = i1 - i0
+	b[j++] = a[i-1] // cmd
+	b[j++] = argc
+	let j0 = j // index at arg1
+	for (let k = 0; k < argc; k++) {
+		let i = i0 + k
+		let j = j0 + k
+		let v = a[i]
 		if (isstr(v)) {
 			if (1) {
 				let {read, written} = tenc.encodeInto(v, tenc_buf)
 				let n = written
 				assert(read == v.length, 'string too long')
-				b[j++] = sj
-				sdb.setUint16(sj, n, true); sj += 2
+				b[j] = sj
+				dsb.setUint16(sj, i, true); sj += 2
+				dsb.setUint16(sj, n, true); sj += 2
 				copy(sb, sj, tenc_buf, n)
 				sj += n
 			}
+		} else if (isnum(v)) {
+			assert(isnum(v)     , ' on: ', i, ' ', C(a, i), '+', k-1, ' ', typeof v, ': ', v)
+			assert(floor(v) == v, ' on: ', i, ' ', C(a, i), '+', k-1, ' ', v)
+			b[j] = v
 		} else {
-			if (!isnum(v))
-				pr(a)
-			assert(isnum(v), typeof v, ' on: ', i, ' ', C(a, i), '+', k-1, ' ', v)
-			assert(floor(v) == v     , ' on: ', i, ' ', C(a, i), '+', k-1, ' ', v)
-			b[j++] = v
+			pr(typeof v, a)
 		}
 	}
+	j += argc
+	return j0
 }
 
 let pack_api = {}
-
-ui.compress = async function(s) {
-	let cs = new CompressionStream('gzip')
-	let writer = cs.writable.getWriter()
-	let b = tenc.encode(s)
-	writer.write(b)
-	writer.close()
-	return await new Response(cs.readable).arrayBuffer()
-}
 
 function pack_record(a) {
 
 	let i = 2
 	while (i < a.length) {
+		let j = pack_cmd(a, i)
 		let pack_f = pack[a[i-1]]
-		if (pack_f && pack_f(a, i, pack_api)) {}
-		else
-			pack_cmd(a, i)
+		if (pack_f)
+			pack_f(a, i, b, j)
 		i = a[i-2] // next_i
 	}
 
@@ -1292,28 +1327,225 @@ function pack_record(a) {
 		frame_graph_push('other_count'  , on)
 	}
 
-	runafter(0, async function() {
-		let b  = new Int16Array(ab , 0, j ) // garbage!
-		let sb = new Uint8Array(asb, 0, sj) // garbage!
-
-		let cs = new CompressionStream('gzip')
-		let writer = cs.writable.getWriter()
-		writer.write(b)
-		writer.write(sb)
-		writer.close()
-		let cb = await new Response(cs.readable).arrayBuffer()
-
-		frame_graph_push('frame_bandwidth'  , (60 * cb.byteLength * 8) / (1024 * 1024)) // Mbps @ 60fps
-		frame_graph_push('frame_compression', (cb.byteLength / (b.byteLength + sb.byteLength)) * 100)
-	})
-
 }
 
-pack_all = function() {
-	j = 2
+async function pack_frame_binary() {
+
+	let t0 = clock_ms()
+
+	j = 0
 	sj = 0
+
+	// write header
+	b[j++] = ui.VERSION
+	j += 2 // len lo+hi
+	j += 2 // strings offset lo+hi
+	b[j++] = screen_w
+	b[j++] = screen_h
+	b[j++] = ui.mx
+	b[j++] = ui.my
+
 	pack_record(a)
+
+	// write total length
+	let len = j * 2 + sj
+	b[1] = len & 0xffff
+	b[2] = len >> 16
+
+	// write strings offset
+	b[3] = j & 0xffff
+	b[4] = j >> 16
+
+	// compress frame
+	let ib = new Int16Array(ab , 0, j) // garbage!
+	let sb = new Uint8Array(asb, 0, sj) // garbage!
+	let cs = new CompressionStream('gzip')
+	let writer = cs.writable.getWriter()
+	writer.write(ib)
+	writer.write(sb)
+	writer.close()
+	let cb = await new Response(cs.readable).arrayBuffer()
+
+	let t1 = clock_ms()
+
+	frame_graph_push('frame_bandwidth'  , (60 * cb.byteLength * 8) / (1024 * 1024)) // Mbps @ 60fps
+	frame_graph_push('frame_compression', (cb.byteLength / (ib.byteLength + sb.byteLength)) * 100)
+	frame_graph_push('frame_pack_time'  , t1 - t0)
+
+	return cb
 }
+
+// alternative packing to json
+async function pack_frame_json() {
+
+	let t0 = clock_ms()
+
+	let s = json({
+		v: ui.VERSION,
+		w: screen_w,
+		h: screen_h,
+		mx: ui.mx,
+		my: ui.my,
+		a: a,
+		layers: layers,
+	})
+	let b = tenc.encode(s)
+
+	let cs = new CompressionStream('gzip')
+	let writer = cs.writable.getWriter()
+	writer.write(b)
+	writer.close()
+	let cb = await new Response(cs.readable).arrayBuffer()
+
+	let t1 = clock_ms()
+
+	frame_graph_push('frame_bandwidth'  , (60 * cb.byteLength * 8) / (1024 * 1024)) // Mbps @ 60fps
+	frame_graph_push('frame_compression', (cb.byteLength / b.byteLength) * 100)
+	frame_graph_push('frame_pack_time'  , t1 - t0)
+
+	return cb
+}
+
+pack_frame = pack_frame_json
+}
+
+async function send_frame(cb) {
+
+	// announce('packed_frame', cb)
+	//try {
+	await unpack_frame(cb)
+	//} catch (e) {
+	//	//throw new Error(e)
+	//	console.error(e, e.stack)
+	//}
+
+}
+
+// frame unpacking -----------------------------------------------------------
+
+let unpack_frame
+{
+let a, i
+let ab, b, dsb
+let j, sj
+let len
+
+let unpack_api = {}
+
+function unpack_cmd() {
+
+	// src: cmd, argc, arg1..n, argc, cmd...
+	// dst: next_i, cmd, arg1..n, prev_i, next_i, cmd, arg1...
+
+	let NEXT_I = i
+
+	a[i++] = 0 // next_i
+	a[i++] = b[j++] // cmd
+
+	let arg1_i = i
+
+	let argc = b[j++]
+	for (let k = 0; k < argc; k++)
+		a[i+k] = b[j+k]
+	i += argc
+	j += argc
+
+	let PREV_I = i
+
+	a[PREV_I] = arg1_i // prev_i
+	a[NEXT_I] = PREV_I + 3
+
+	return arg1_i
+}
+
+let tdec = new TextDecoder()
+
+function unpack_record() {
+
+	// unpack commands
+	while (j < sj) {
+		let i = unpack_cmd()
+		let cmd = b[j++]
+		let unpack_f = unpack[cmd]
+		if (unpack_f)
+			unpack_f(a, i)
+	}
+
+	// unpack strings and put them back at their original indexes.
+	sj *= 2 // make it in bytes
+	while (sj < len) {
+		let i = dsb.getUint16(sj, true); sj += 2
+		let n = dsb.getUint16(sj, true); sj += 2
+		let b = new Uint8Array(ab, sj, n)
+		let s = tdec.decode(b)
+		a[i] = s
+		sj += n
+	}
+
+}
+
+async function decompress_frame(cb) {
+	let dcs = new DecompressionStream('gzip')
+	let writer = dcs.writable.getWriter()
+	writer.write(cb)
+	writer.close()
+	return await new Response(dcs.readable).arrayBuffer()
+}
+
+async function unpack_frame_binary() {
+
+	a = []
+	i = 0
+	j = 0
+
+	// read header
+	let version  = b[j++]
+
+	assert(version == ui.VERSION, 'wrong version ', version)
+
+	len          = b[j++] + 0xffff * b[j++]
+	sj           = b[j++] + 0xffff * b[j++]
+	let screen_w = b[j++]
+	let screen_h = b[j++]
+	let mx       = b[j++]
+	let my       = b[j++]
+
+	dsb = new DataView(ab, 0)
+
+	unpack_record()
+
+}
+
+async function unpack_frame_json() {
+	let t = json_arg(tdec.decode(ab))
+	assert(t.v == ui.VERSION, 'wrong version ', version)
+	a = t.a
+
+}
+
+let CC_CURLY_BRACE_OPEN = '{'.charCodeAt(0)
+
+// version can't be the first char in json encoding
+assert(ui.VERSION != CC_CURLY_BRACE_OPEN)
+
+async function unpack_frame(cb) {
+
+	let t0 = clock_ms()
+
+	ab = await decompress_frame(cb)
+
+	b = new Int16Array(ab, 0, ab.byteLength >> 1)
+
+	if (b[0] & 0xff == CC_CURLY_BRACE_OPEN)
+		unpack_frame_json()
+	else
+		unpack_frame_binary()
+
+	let t1 = clock_ms()
+
+	frame_graph_push('frame_unpack_time', t1 - t0)
+}
+
 }
 
 // p2p connection ------------------------------------------------------------
@@ -1363,13 +1595,17 @@ function layout_record(rec_a) {
 function redraw_all() {
 	let redraw_count = 0
 	while (1) {
+		let t0, t1
+
 		want_redraw = false
 
 		hit_all()
 		measure_req_all()
 
 		a.length = 0
-		clean_layers()
+		clear_layers()
+
+		t0 = clock_ms()
 
 		let i = ui.stack()
 		begin_layer(ui_layer('base'), i)
@@ -1381,15 +1617,27 @@ function redraw_all() {
 		layer_stack_check()
 		scope_stack_check()
 
+		t1 = clock_ms()
+		frame_graph_push('frame_make_time', t1 - t0)
+
+		t0 = t1
+
 		measure_all(0); position_all(0) // x-axis
 		measure_all(1); position_all(1) // y-axis
 		translate_all()
 		record_stack_check()
 
+		t1 = clock_ms()
+		frame_graph_push('frame_layout_time', t1 - t0)
+
 		id_state_gc()
 
-		if (!want_redraw)
+		if (!want_redraw) {
+			t0 = clock_ms()
 			draw_all()
+			t1 = clock_ms()
+			frame_graph_push('frame_draw_time', t1 - t0)
+		}
 		reset_canvas()
 
 		if (ui.clickup)
@@ -1781,24 +2029,6 @@ draw[CMD_END] = function(a, end_i) {
 	let draw_end_f = draw_end[a[i-1]]
 	if (draw_end_f)
 		draw_end_f(a, i)
-}
-
-pack[CMD_END] = function(a, end_i, pack_api) {
-	let i = a[end_i]
-	let pack_end_f = pack_end[a[i-1]]
-	if (pack_end_f) {
-		pack_end_f(a, i, pack_api)
-		return true
-	}
-}
-
-unpack[CMD_END] = function(b, end_j, a, i) {
-	let j = b[end_j]
-	let unpack_end_f = unpack_end[b[j-1]]
-	if (unpack_end_f)
-		unpack_end_f(b, j, a, i)
-	else
-		unpack_cmd(b, end_j, a, i)
 }
 
 // position phase utils
@@ -2213,7 +2443,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			}
 
 			// bits 0..1 = horiz state; bits 2..3 = vert. state.
-			hit_state |= 4 * axis * (cs ? 2 : hs ? 1 : 0)
+			hit_state |= (cs ? 2 : hs ? 1 : 0) << (2 * axis)
 		}
 		a[i+SB_STATE] = hit_state
 	}
@@ -2316,15 +2546,13 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 
 	for (let axis = 0; axis < 2; axis++) {
 
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-		if (!visible)
-			continue
-
 		let state = (a[i+SB_STATE] >> (2 * axis)) & 3
 		state = state == 2 && 'active' || state && 'hover' || null
 
-		if (state)
-			[visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, !!state)
+
+		if (!visible)
+			continue
 
 		cx.beginPath()
 		cx.rect(tx, ty, tw, th)
@@ -3241,6 +3469,7 @@ const CMD_TEXT = cmd('text')
 
 ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
 	// NOTE: min_w and min_h are measured, not given.
+	s = s ?? ''
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
  		if (s.includes('\n'))
@@ -3253,7 +3482,7 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 		keepalive(id)
 		s = ui.state(id, 'text') ?? s
 	}
-	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'c', valign ?? 'c',
+	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
 		min_w ?? -1, // -1=auto
 		min_h ?? -1, // -1=auto
 		0, // ascent
@@ -3266,6 +3495,8 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 	)
 	if (editable)
 		input_create(id, input_type)
+
+	return s
 }
 ui.text_editable = function(id, s, fr, align, valign, max_min_w, min_w, min_h, input_type) {
 	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, null, true, input_type)
@@ -3286,7 +3517,14 @@ measure_text = function(cx, font, s) {
 	let tsm = fm.get(TSM)
 	tsm.set(s, performance.now())
 	let m = fm.get(s)
-	if (!m) { m = cx.measureText(s); fm.set(s, m); }
+	if (!m) {
+		m = cx.measureText(s)
+		fm.set(s, m)
+		if (m.fontBoundingBoxAscent == null) { // Firefox < 116
+			m.fontBoundingBoxAscent  = 1.3 * m.actualBoundingBoxAscent
+			m.fontBoundingBoxDescent = 1.3 * m.actualBoundingBoxDescent
+		}
+	}
 	return m
 }
 
@@ -4034,12 +4272,12 @@ ui.widget('drag_point', {
 
 // button --------------------------------------------------------------------
 
-ui.button = function(id, s, style, align, valign) {
+ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
 	let hs = hit(id)
 	let state = hs ? ui.pressed ? 'active' : 'hover' : null
 	style = style ?? 'button'
 	ui.p(ui.sp2(), ui.sp())
-	ui.stack(id, 0, align ?? 'c', valign ?? 'c')
+	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h)
 		ui.shadow('button')
 		ui.bb('', style, state, 1, 'intense', state, ui.sp05())
 		ui.bold()
@@ -4048,8 +4286,8 @@ ui.button = function(id, s, style, align, valign) {
 	ui.end_stack()
 	return hs && ui.clickup
 }
-ui.button_primary = function(id, s, align, valign) {
-	return ui.button(id, s, 'button-primary', align, valign)
+ui.button_primary = function(id, s, fr, align, valign, min_w, min_h) {
+	return ui.button(id, s, fr, align, valign, min_w, 'button-primary')
 }
 ui.btn = ui.button
 ui.btn_pri = ui.button_primary
@@ -4220,8 +4458,9 @@ ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', fr, 's', 's')
 		ui.bb('', 'input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
-		ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(12), min_h, null, true)
+		s = ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(12), min_h, null, true)
 	ui.end_stack()
+	return s
 }
 
 ui.label = function(for_id, s, fr, align, valign) {
@@ -5707,9 +5946,13 @@ function frame_graph_push(name, v) {
 }
 ui.frame_graph_push = frame_graph_push
 
-frame_graph('frame_duration'   , 'ms'  , 0, 0,  1/60 * 1000)
-frame_graph('frame_bandwidth'  , 'Mbps', 1, 0,     5) // 5Mbps = 720p @ 60fps
+frame_graph('frame_time'       , 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_make_time'  , 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_layout_time', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_draw_time'  , 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_bandwidth'  , 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
 frame_graph('frame_compression', '%'   , 0, 0,   100)
+frame_graph('frame_pack_time'  , 'ms'  , 1, 0,    10)
 frame_graph('string_count'     , ''    , 0, 0, 20000)
 frame_graph('string_length'    , ''    , 0, 0, 20000)
 frame_graph('number_count'     , ''    , 0, 0, 20000)

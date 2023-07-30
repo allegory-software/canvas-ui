@@ -16,13 +16,13 @@
 </style>
 </head>
 <body theme=dark>
-<script src=/ui/glue.js></script>
-<script src=/ui/ui.js></script>
-<script src=/ui/validation.js></script>
-<script src=/ui/ui_nav.js></script>
-<script src=/ui/ui_grid.js></script>
-<script src=/ui/adapter.js></script>
-<script src=/ui/webrtc.js></script>
+<script src=glue.js></script>
+<script src=ui.js></script>
+<script src=validation.js></script>
+<script src=ui_nav.js></script>
+<script src=ui_grid.js></script>
+<script src=adapter.js></script>
+<script src=webrtc.js></script>
 <script>
 
 ui.DEBUG = 1
@@ -30,14 +30,70 @@ ui.DEBUG = 1
 const {
 	isnum, isobject, isfunc, isstr,
 	assert,
-	str, dec, format_kbytes,
+	str, dec, format_kbytes, json, json_arg,
 	runevery, runafter,
+	listen,
 } = glue
 
 let pr = console.log
 
 let tuts = []
 let demos = []
+
+let offer_signal_con  = rtc.signal_server.connect()
+let answer_signal_con = rtc.signal_server.connect()
+let offer_con  = rtc.offer ({signal_con: offer_signal_con , id: 'demo', recv: pr})
+let answer_con = rtc.answer({signal_con: answer_signal_con, id: 'demo', recv: pr})
+
+runevery(1, function() {
+	offer_con.send('Hello!')
+})
+
+listen('rtc', function(c) {
+	ui.animate()
+})
+
+demos.screen_sharing = `
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	ui.h(0, ui.sp())
+		ui.h(0, ui.sp())
+			if (offer_con.open) {
+				if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
+					offer_con.close()
+				}
+			} else if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
+				offer_con.connect()
+			}
+			let offer = rtc.signal_server.offers['demo']
+			ui.state('in_offer').set('text', json(offer))
+			ui.input('in_offer')
+		ui.end_h()
+		ui.text('', 'Status: '+(offer_con.ready ? 'ready' : offer_con.open ? 'open' : 'closed'))
+	ui.end_h()
+	ui.ml(ui.sp())
+	ui.h(0, ui.sp())
+		ui.h(0, ui.sp())
+			let answer = ui.input('in_answer')
+			if (answer_con.open) {
+				if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
+					answer_con.close()
+				}
+			} else if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
+				answer_con.connect()
+			}
+		ui.end_h()
+		ui.text('', 'Status: '+(answer_con.ready ? 'ready' : answer_con.open ? 'open' : 'closed'))
+	ui.end_h()
+	ui.scrollbox('sb_shared_screen')
+		ui.bb('', null, null, 't', 'light')
+		ui.stack('', 1, 's', 's', 3000, 3000)
+			//ui.shared_screen(answer_con)
+		ui.end_stack()
+	ui.end_scrollbox()
+ui.end_v()
+`
 
 demos.silder = `
 ui.v(0, 0, 'c', 'c', 400)
@@ -546,13 +602,13 @@ ui.main = function() {
 				ui.color('link')
 				ui.text('', format_kbytes(a_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
 
-				if (ui.button('btn_light', 'lights')) {
+				if (ui.button('btn_light', 'lights', 0)) {
 					dark_mode = !dark_mode
 					ui.default_theme = dark_mode ? 'dark' : 'light'
 					ui.redraw()
 				}
 
-				if (ui.button('btn_debug', 'DEBUG')) {
+				if (ui.button('btn_debug', 'DEBUG', 0)) {
 					ui.DEBUG = !ui.DEBUG
 					ui.redraw()
 				}
@@ -565,7 +621,7 @@ ui.main = function() {
 
 		ui.h()
 
-			ui.stack('', .2)
+			ui.stack('', .2, 's', 's', ui.em(8))
 				ui.bb('', null, null, 'r', 'light')
 				ui.pr(1)
 				ui.sb('demos_list_sb')
@@ -593,23 +649,29 @@ ui.main = function() {
 			if (ui.DEBUG) {
 
 				ui.v(0, 0, 's', 's', 200)
-					ui.bb('', null, null, 1, 'intense')
+					ui.bb('', null, null, 'l', 'intense')
 
-					ui.stack('', 0)
-						ui.bb('', 'bg2')
-						ui.color('text')
-						ui.p(ui.sp())
-						ui.text('', 'FRAME OVERHEAD', 0, 'l')
-					ui.end_stack()
-					ui.frame_graph('frame_duration', .25)
+					function fgr(graph_name, fr) {
+						ui.stack('', 0)
+							ui.bb('', 'bg2')
+							ui.color('text')
+							ui.p(ui.sp())
+							ui.text('', graph_name, 0, 'l')
+						ui.end_stack()
+						ui.frame_graph(graph_name, fr)
+					}
+					fgr('frame_time')
+					fgr('frame_make_time')
+					fgr('frame_layout_time')
+					fgr('frame_draw_time')
+					fgr('frame_pack_time')
+					fgr('frame_compression')
+					fgr('frame_bandwidth')
 
-					ui.stack('', 0)
-						ui.bb('', 'bg2')
-						ui.color('text')
-						ui.p(ui.sp())
-						ui.text('', 'BANDWIDTH', 0, 'l')
-					ui.end_stack()
-					ui.frame_graph('frame_bandwidth', .25)
+				ui.end_v()
+
+				ui.v(0, 0, 's', 's', 200)
+					ui.bb('', null, null, 'l', 'intense')
 
 					ui.stack('', 0)
 						ui.bb('', 'bg2')
@@ -705,13 +767,6 @@ ui.main = function() {
 
 	a_length = ui.a.length
 }
-
-runevery(1, async function() {
-	let cb = await ui.compress(JSON.stringify(ui.a))
-	let bps = (60 * cb.byteLength * 8)
-	a_strlen = bps
-	// a_strlen = b.byteLength
-})
 
 ui.ready()
 

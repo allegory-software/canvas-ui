@@ -75,7 +75,6 @@ ERRORS
 	trace(...)
 	trace_if(cond, ...)
 	assert(v, err, ...) -> v
-	stacktrace()
 
 EXTENDING BUILT-IN OBJECTS
 
