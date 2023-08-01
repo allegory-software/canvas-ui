@@ -639,8 +639,8 @@ function ui_layer(name, index) {
 		layer_map[name] = layer
 		layer_arr.push(layer)
 		layer.i = layer_arr.length-1
-		if (!layer.a)
-			layer.a = []
+		if (!layer.indexes)
+			layer.indexes = [] // [record1_i, ct1_i, record2_i, ct2_i, ...]
 	}
 	return layer
 }
@@ -648,9 +648,10 @@ ui.layer = ui_layer
 
 function clear_layers() {
 	for (let layer of layers)
-		layer.a.length = 0
+		layer.indexes.length = 0
 }
 
+const layer_base =
 ui_layer('base'   , 0)
 ui_layer('handle' , 1)
 ui_layer('window' , 2)
@@ -661,9 +662,13 @@ let layer_stack = [] // [layer1_i, ...]
 let layer_i // current layer = layer_arr[layer_i]
 
 function begin_layer(layer, i) {
-	layer.a.push(i)
-	layer_i = layer.i
 	layer_stack.push(layer_i)
+	let layer_i0 = layer_i
+	layer_i = layer.i
+	// NOTE: adding the cmd on the same layer will just draw it twice but badly
+	// since it won't even have the right context!
+	if (layer_i != layer_i0)
+		layer.indexes.push(record_i, i)
 }
 
 function end_layer() {
@@ -886,6 +891,7 @@ ui.focusing = function(id) {
 
 // container stack -----------------------------------------------------------
 
+// used in both frame creation and measuring stages.
 let ct_stack = [] // [ct_i1,...]
 ui.ct_stack = ct_stack
 
@@ -901,7 +907,7 @@ function ct_stack_check() {
 	}
 }
 
-// command array -------------------------------------------------------------
+// current command array -----------------------------------------------------
 
 // format of a:
 //
@@ -967,10 +973,7 @@ ui.cmd = ui_cmd
 // index after the last arg.
 let cmd_arg_end_i = (a, i) => a[i-2] - 3
 
-ui.nm = cmd_name_map
-ui.n = cmd_names
-
-// cmd buffers ---------------------------------------------------------------
+// command arrays ------------------------------------------------------------
 
 let record_freelist = array_freelist()
 
@@ -990,6 +993,11 @@ ui.end_record = function() {
 
 let reindex = []
 
+function record_free(a) {
+	a.length = 0
+	record_freelist.free(a)
+}
+
 ui.record_play = function(a1) {
 
 	// fix all indexes in a1 to fit into their new place in a.
@@ -1008,13 +1016,34 @@ ui.record_play = function(a1) {
 	}
 
 	a.push(...a1)
-
-	a1.length = 0
-	record_freelist.free(a1)
+	record_free(a1)
 }
 
 function record_stack_check() {
 	assert(!record_stack.length, 'records left unplayed')
+}
+
+let records = []
+let record_i
+
+function begin_record() {
+	let a0 = a
+	a = record_freelist.alloc()
+	record_i = records.length
+	records.push(a)
+	return a0
+}
+
+function end_record(a0) {
+	let a1 = a
+	a = a0
+	return a1
+}
+
+function free_records() {
+	for (let a of records)
+		record_free(a)
+	records.length = 0
 }
 
 // rendering phases ----------------------------------------------------------
@@ -1051,12 +1080,6 @@ function measure_record(a, axis) {
 	}
 }
 
-function measure_all(axis) {
-	reset_canvas()
-	measure_record(a, axis)
-	ct_stack_check()
-}
-
 // positioning phase (per-axis) ----------------------------------------------
 
 // walk the element tree top-down, and call the position function for each
@@ -1070,24 +1093,16 @@ function position_record(a, axis, ct_w) {
 	position_f(a, i, axis, 0, max(min_w, ct_w))
 }
 
-function position_all(axis) {
-	let ct_w = axis ? screen_h : screen_w
-	position_record(a, axis, ct_w)
-}
-
 // translation phase ---------------------------------------------------------
 
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
-function translate_record(a) {
+function translate_record(a, x, y) {
 	let i = 2
 	let cmd = a[i-1]
 	let translate_f = translate[cmd]
-	translate_f(a, i, 0, 0)
-}
-
-function translate_all() {
-	translate_record(a)
+	if (translate_f)
+		translate_f(a, i, x, y)
 }
 
 ui.translate = function(a, i) {
@@ -1098,39 +1113,42 @@ ui.translate = function(a, i) {
 
 let theme_stack = []
 
-function draw_frame(a, layers) {
+function draw_cmd(a, i, records) {
+	let next_ext_i = get_next_ext_i(a, i)
+	while (i < next_ext_i) {
+
+		let cmd = a[i-1]
+		if (cmd & 1) // container
+			theme_stack.push(theme)
+		else if (cmd == CMD_END)
+			theme = theme_stack.pop()
+
+		let draw_f = draw[cmd]
+		if (draw_f && draw_f(a, i, records)) {
+			i = get_next_ext_i(a, i)
+			if (cmd & 1) // container
+				theme = theme_stack.pop()
+		} else {
+			i = a[i-2] // next_i
+		}
+	}
+}
+
+function draw_frame(records, layers) {
 	screen.style.background = bg_color('bg')
 	for (let layer of layers) {
 		/*global*/ layer_i = layer.i
-		for (let i of layer.a) {
-			let next_ext_i = get_next_ext_i(a, i)
+		let indexes = layer.indexes
+		for (let k = 0, n = indexes.length; k < n; k += 2) {
 			reset_canvas()
-			while (i < next_ext_i) {
-
-				let cmd = a[i-1]
-				if (cmd & 1) // container
-					theme_stack.push(theme)
-				else if (cmd == CMD_END)
-					theme = theme_stack.pop()
-
-				let draw_f = draw[cmd]
-				if (draw_f && draw_f(a, i)) {
-					i = get_next_ext_i(a, i)
-					if (cmd & 1) // container
-						theme = theme_stack.pop()
-				} else {
-					i = a[i-2] // next_i
-				}
-			}
+			let rec_i = indexes[k]
+			let i     = indexes[k+1]
+			let a = records[rec_i]
+			draw_cmd(a, i, records)
 			assert(!theme_stack.length)
 		}
 		layer_i = null
 	}
-}
-
-function draw_all() {
-	draw_frame(a, layers)
-	pack_frame()
 }
 
 // hit-testing phase ---------------------------------------------------------
@@ -1167,7 +1185,7 @@ function hovers(id, k) {
 }
 ui.hovers = hovers
 
-function hit_all() {
+function hit_frame(records, layers) {
 
 	ui.set_cursor()
 
@@ -1189,9 +1207,12 @@ function hit_all() {
 		let layer = layers[j]
 		/*global*/ layer_i = layer.i
 		// iterate layer's cointainers in reverse order.
-		for (let k = layer.a.length-1; k >= 0; k--) {
+		let indexes = layer.indexes
+		for (let k = indexes.length-2; k >= 0; k -= 2) {
 			reset_canvas()
-			let i = layer.a[k]
+			let rec_i = indexes[k]
+			let i     = indexes[k+1]
+			let a = records[rec_i]
 			let hit_f = hittest[a[i-1]]
 			if (hit_f(a, i)) {
 				j = -1
@@ -1203,32 +1224,7 @@ function hit_all() {
 
 }
 
-/* frame packing -------------------------------------------------------------
-
-frame format:
-	1. header
-	2. commands
-	3. strings
-header:
-	int16  version
-	int16  frame length: ho-word
-	int16  frame length: hi-word
-	int16  strings offset in in16s: lo-word
-	int16  strings offset in in16s: hi-word
-	int16  screen_w
-	int16  screen_h
-	int16  mx
-	int16  my
-commands: multiple of (until strings offset):
-	int16    cmd
-	int16    argc
-	int16[]  args
-strings: multiple of (until len):
-	int16    index
-	int16    len
-	int8[]   text in ut8
-
-*/
+// frame packing -------------------------------------------------------------
 
 // check that cmd is entirely typed.
 function check_types(a, i) {
@@ -1245,137 +1241,7 @@ function check_types_all(a) {
 	}
 }
 
-let pack_frame
-{
-let ab  = new ArrayBuffer(512*1024)
-let b   = new Int16Array(ab)
-let asb = new ArrayBuffer(512*1024)
-let sb  = new Uint8Array(asb)
-let dsb = new DataView(asb)
-let j  // current index in b
-let sj // current index in sb
-
 let tenc = new TextEncoder()
-let tenc_abuf = new ArrayBuffer(2*64*1024)
-let tenc_buf  = new Uint8Array(tenc_abuf)
-
-function copy(d, i, s, n) {
-	for (let j = 0; j < n; j++)
-		d[i+j] = s[j]
-}
-
-function pack_cmd(a, i) {
-	let i0 = i // index at arg1
-	let i1 = a[i-2] - 3 // index after last arg
-	let argc = i1 - i0
-	b[j++] = a[i-1] // cmd
-	b[j++] = argc
-	let j0 = j // index at arg1
-	for (let k = 0; k < argc; k++) {
-		let i = i0 + k
-		let j = j0 + k
-		let v = a[i]
-		if (isstr(v)) {
-			if (1) {
-				let {read, written} = tenc.encodeInto(v, tenc_buf)
-				let n = written
-				assert(read == v.length, 'string too long')
-				b[j] = sj
-				dsb.setUint16(sj, i, true); sj += 2
-				dsb.setUint16(sj, n, true); sj += 2
-				copy(sb, sj, tenc_buf, n)
-				sj += n
-			}
-		} else if (isnum(v)) {
-			assert(isnum(v)     , ' on: ', i, ' ', C(a, i), '+', k-1, ' ', typeof v, ': ', v)
-			assert(floor(v) == v, ' on: ', i, ' ', C(a, i), '+', k-1, ' ', v)
-			b[j] = v
-		} else {
-			pr(typeof v, a)
-		}
-	}
-	j += argc
-	return j0
-}
-
-let pack_api = {}
-
-function pack_record(a) {
-
-	let i = 2
-	while (i < a.length) {
-		let j = pack_cmd(a, i)
-		let pack_f = pack[a[i-1]]
-		if (pack_f)
-			pack_f(a, i, b, j)
-		i = a[i-2] // next_i
-	}
-
-	if (ui.DEBUG) {
-		let sn = 0
-		let sl = 0
-		let nn = 0
-		let on = 0
-		for (let s of a) {
-			if (isstr(s)) { sn++; sl += s.length; continue; }
-			if (isnum(s)) { nn++; continue; }
-			on++
-		}
-		frame_graph_push('string_count' , sn)
-		frame_graph_push('string_length', sl)
-		frame_graph_push('number_count' , nn)
-		frame_graph_push('other_count'  , on)
-	}
-
-}
-
-async function pack_frame_binary() {
-
-	let t0 = clock_ms()
-
-	j = 0
-	sj = 0
-
-	// write header
-	b[j++] = ui.VERSION
-	j += 2 // len lo+hi
-	j += 2 // strings offset lo+hi
-	b[j++] = screen_w
-	b[j++] = screen_h
-	b[j++] = ui.mx
-	b[j++] = ui.my
-
-	pack_record(a)
-
-	// write total length
-	let len = j * 2 + sj
-	b[1] = len & 0xffff
-	b[2] = len >> 16
-
-	// write strings offset
-	b[3] = j & 0xffff
-	b[4] = j >> 16
-
-	// compress frame
-	let ib = new Int16Array(ab , 0, j) // garbage!
-	let sb = new Uint8Array(asb, 0, sj) // garbage!
-	let cs = new CompressionStream('gzip')
-	let writer = cs.writable.getWriter()
-	writer.write(ib)
-	writer.write(sb)
-	writer.close()
-	let cb = await new Response(cs.readable).arrayBuffer()
-
-	let t1 = clock_ms()
-
-	frame_graph_push('frame_bandwidth'  , (60 * cb.byteLength * 8) / (1024 * 1024)) // Mbps @ 60fps
-	frame_graph_push('frame_compression', (cb.byteLength / (ib.byteLength + sb.byteLength)) * 100)
-	frame_graph_push('frame_pack_time'  , t1 - t0)
-
-	return cb
-}
-
-// alternative packing to json
 async function pack_frame_json() {
 
 	let t0 = clock_ms()
@@ -1386,7 +1252,7 @@ async function pack_frame_json() {
 		h: screen_h,
 		mx: ui.mx,
 		my: ui.my,
-		a: a,
+		records: records,
 		layers: layers,
 	})
 	let b = tenc.encode(s)
@@ -1405,9 +1271,7 @@ async function pack_frame_json() {
 
 	return cb
 }
-
-pack_frame = pack_frame_json
-}
+let pack_frame = pack_frame_json
 
 async function send_frame(cb) {
 
@@ -1423,67 +1287,6 @@ async function send_frame(cb) {
 
 // frame unpacking -----------------------------------------------------------
 
-let unpack_frame
-{
-let a, i
-let ab, b, dsb
-let j, sj
-let len
-
-let unpack_api = {}
-
-function unpack_cmd() {
-
-	// src: cmd, argc, arg1..n, argc, cmd...
-	// dst: next_i, cmd, arg1..n, prev_i, next_i, cmd, arg1...
-
-	let NEXT_I = i
-
-	a[i++] = 0 // next_i
-	a[i++] = b[j++] // cmd
-
-	let arg1_i = i
-
-	let argc = b[j++]
-	for (let k = 0; k < argc; k++)
-		a[i+k] = b[j+k]
-	i += argc
-	j += argc
-
-	let PREV_I = i
-
-	a[PREV_I] = arg1_i // prev_i
-	a[NEXT_I] = PREV_I + 3
-
-	return arg1_i
-}
-
-let tdec = new TextDecoder()
-
-function unpack_record() {
-
-	// unpack commands
-	while (j < sj) {
-		let i = unpack_cmd()
-		let cmd = b[j++]
-		let unpack_f = unpack[cmd]
-		if (unpack_f)
-			unpack_f(a, i)
-	}
-
-	// unpack strings and put them back at their original indexes.
-	sj *= 2 // make it in bytes
-	while (sj < len) {
-		let i = dsb.getUint16(sj, true); sj += 2
-		let n = dsb.getUint16(sj, true); sj += 2
-		let b = new Uint8Array(ab, sj, n)
-		let s = tdec.decode(b)
-		a[i] = s
-		sj += n
-	}
-
-}
-
 async function decompress_frame(cb) {
 	let dcs = new DecompressionStream('gzip')
 	let writer = dcs.writable.getWriter()
@@ -1492,60 +1295,24 @@ async function decompress_frame(cb) {
 	return await new Response(dcs.readable).arrayBuffer()
 }
 
-async function unpack_frame_binary() {
-
-	a = []
-	i = 0
-	j = 0
-
-	// read header
-	let version  = b[j++]
-
-	assert(version == ui.VERSION, 'wrong version ', version)
-
-	len          = b[j++] + 0xffff * b[j++]
-	sj           = b[j++] + 0xffff * b[j++]
-	let screen_w = b[j++]
-	let screen_h = b[j++]
-	let mx       = b[j++]
-	let my       = b[j++]
-
-	dsb = new DataView(ab, 0)
-
-	unpack_record()
-
-}
-
-async function unpack_frame_json() {
+let tdec = new TextDecoder()
+async function unpack_frame_json(ab) {
 	let t = json_arg(tdec.decode(ab))
-	assert(t.v == ui.VERSION, 'wrong version ', version)
-	a = t.a
-
+	assert(t.v == ui.VERSION, 'wrong version ', t.v)
 }
-
-let CC_CURLY_BRACE_OPEN = '{'.charCodeAt(0)
-
-// version can't be the first char in json encoding
-assert(ui.VERSION != CC_CURLY_BRACE_OPEN)
 
 async function unpack_frame(cb) {
 
 	let t0 = clock_ms()
 
-	ab = await decompress_frame(cb)
-
-	b = new Int16Array(ab, 0, ab.byteLength >> 1)
-
-	if (b[0] & 0xff == CC_CURLY_BRACE_OPEN)
-		unpack_frame_json()
-	else
-		unpack_frame_binary()
+	let ab = await decompress_frame(cb)
+	let t = await unpack_frame_json(ab)
 
 	let t1 = clock_ms()
 
 	frame_graph_push('frame_unpack_time', t1 - t0)
-}
 
+	return t
 }
 
 // p2p connection ------------------------------------------------------------
@@ -1583,13 +1350,27 @@ ui.redraw = function() {
 	want_redraw = true
 }
 
-function layout_record(rec_a) {
-	let a0 = a
-	a = null // protect a
-	measure_record(rec_a); position_record(rec_a) // x-axis
-	measure_record(rec_a); position_record(rec_a) // y-axis
-	translate_record(a)
-	a = a0
+function layout_record(a, x, y, w, h) {
+	reset_canvas()
+
+	// x-axis
+	measure_record(a, 0)
+	ct_stack_check()
+	position_record(a, 0, w)
+
+	// y-axis
+	measure_record(a, 1)
+	ct_stack_check()
+	position_record(a, 1, h)
+
+	translate_record(a, x, y)
+}
+
+function frame_end_check() {
+	ct_stack_check()
+	layer_stack_check()
+	scope_stack_check()
+	record_stack_check()
 }
 
 function redraw_all() {
@@ -1599,33 +1380,32 @@ function redraw_all() {
 
 		want_redraw = false
 
-		hit_all()
+		hit_frame(records, layers)
 		measure_req_all()
 
-		a.length = 0
 		clear_layers()
+		free_records()
 
 		t0 = clock_ms()
 
+		begin_record()
 		let i = ui.stack()
-		begin_layer(ui_layer('base'), i)
+		assert(record_i == 0)
+		assert(i == 2)
+		begin_layer(layer_base, i)
 		ui.main()
 		reset_paddings()
 		ui.end()
 		end_layer()
-		ct_stack_check()
-		layer_stack_check()
-		scope_stack_check()
+		frame_end_check()
 
 		t1 = clock_ms()
 		frame_graph_push('frame_make_time', t1 - t0)
 
 		t0 = t1
 
-		measure_all(0); position_all(0) // x-axis
-		measure_all(1); position_all(1) // y-axis
-		translate_all()
-		record_stack_check()
+		let a = end_record()
+		layout_record(a, 0, 0, screen_w, screen_h)
 
 		t1 = clock_ms()
 		frame_graph_push('frame_layout_time', t1 - t0)
@@ -1634,7 +1414,11 @@ function redraw_all() {
 
 		if (!want_redraw) {
 			t0 = clock_ms()
-			draw_all()
+
+			draw_frame(records, layers)
+
+			pack_frame()
+
 			t1 = clock_ms()
 			frame_graph_push('frame_draw_time', t1 - t0)
 		}
@@ -1951,8 +1735,8 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		}
 	}
 	return ui.widget(cmd_name, assign({
-		position  : box_position,
 		measure   : box_measure,
+		position  : box_position,
 		translate : box_translate,
 		hit       : ID != null && box_hit,
 		is_flex_child: true,
@@ -1970,6 +1754,7 @@ function get_next_ext_i(a, i) {
 
 // NOTE: `ct` is short for container, which must end with ui.end().
 function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
+	begin_scope()
 	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		0, // next_ext_i
 		...args
@@ -2099,7 +1884,6 @@ function hit_children(a, i) {
 const FLEX_GAP = S+0
 
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
-	begin_scope()
 	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
 		gap ?? 0,
 	)
@@ -2262,7 +2046,6 @@ const STACK_ID = S+0
 const CMD_STACK = cmd_ct('stack')
 
 ui.stack = function(id, fr, align, valign, min_w, min_h) {
-	begin_scope()
 	return ui_cmd_box_ct(CMD_STACK, fr, align, valign, min_w, min_h,
 		id || '')
 }
@@ -2320,6 +2103,12 @@ const CMD_SCROLLBOX = cmd_ct('scrollbox')
 
 ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
 
+	overflow_x = parse_sb_overflow(overflow_x)
+	overflow_y = parse_sb_overflow(overflow_y)
+
+	if (overflow_x == SB_OVERFLOW_AUTO || overflow_x == SB_OVERFLOW_SCROLL)
+		assert(id, 'id required for stateful scrollbox')
+
 	let ss
 	if (id) {
 		keepalive(id)
@@ -2328,10 +2117,9 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 		sy = sy ?? ss.get('scroll_y')
 	}
 
-	begin_scope()
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
-		parse_sb_overflow(overflow_x),
-		parse_sb_overflow(overflow_y),
+		overflow_x,
+		overflow_y,
 		round(min_w ?? 0), // swapped with content w on `end`
 		round(min_h ?? 0), // swapped with content h on `end`
 		id,
@@ -2672,14 +2460,6 @@ const CMD_POPUP = cmd_ct('popup')
 
 ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) {
 	let layer = layer_name ? ui_layer(layer_name) : layer_arr[layer_i]
-	begin_scope()
-	if (layer.i != layer_i) {
-		force_color(color, color_state)
-		force_font(font)
-		force_font_size(font_size)
-		force_font_weight(font_weight)
-		force_line_gap(line_gap)
-	}
 	target_i = repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i()
 	side  = popup_parse_side  (side  ?? 't')
 	align = popup_parse_align (align ?? 'c')
@@ -2699,6 +2479,8 @@ ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) 
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
 	begin_layer(layer, i)
+	if (layer.i != layer_i)
+		force_scope_vars()
 	return i
 }
 
@@ -3448,6 +3230,14 @@ draw[CMD_FONT_SIZE] = set_font_size
 draw[CMD_FONT_WEIGHT] = set_font_weight
 draw[CMD_LINE_GAP] = set_line_gap
 
+function force_scope_vars() {
+	force_color(color, color_state)
+	force_font(font)
+	force_font_size(font_size)
+	force_font_weight(font_weight)
+	force_line_gap(line_gap)
+}
+
 // text box ------------------------------------------------------------------
 
 const TEXT_ASC      = S-1
@@ -3923,47 +3713,86 @@ hittest[CMD_TEXT] = function(a, i) {
 
 // frame widget --------------------------------------------------------------
 
-const FRAME_ON_MEASURE = 0
-const FRAME_ON_FRAME   = 1
-const FRAME_REC_A      = 2
+const FRAME_ON_MEASURE = S-1
+const FRAME_ON_FRAME   = S+0
+const FRAME_CT_I       = S+1
+const FRAME_REC_I      = S+2
+const FRAME_LAYER_I    = S+3
 
-const CMD_FRAME = cmd('frame')
+let frame = {}
 
-ui.frame = function(on_measure, on_frame) {
+frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min_h) {
 
-	ui_cmd(CMD_FRAME, on_measure, on_frame,
-		0, // rec_a
+	let ct_i = ui.ct_i()
+	assert(a[ct_i-1] == CMD_SCROLLBOX, 'frame is not inside a scrollbox')
+
+	ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+		on_measure, on_frame,
+		ct_i,
+		0, // rec_i
+		layer_i,
 	)
 
 }
 
-measure[CMD_FRAME] = function(a, i, axis) {
+frame.measure = function(a, i, axis) {
 
 	let on_measure = a[i+FRAME_ON_MEASURE]
-	if (on_measure)
-		on_measure(a, i, axis)
+	if (on_measure) {
+		let min_w = on_measure(axis)
+		if (min_w != null) {
+			a[i+2+axis] = max(a[i+2+axis], min_w)
+			add_ct_min_wh(a, axis, min_w)
+		}
+	}
 
 }
 
-translate[CMD_FRAME] = function(a, i, dx, dy) {
+frame.translate = function(a, i, dx, dy) {
+
+	a[i+0] += dx
+	a[i+1] += dy
+
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+
+	let ct_i = a[i+FRAME_CT_I]
+	let cx = a[ct_i+0]
+	let cy = a[ct_i+1]
+	let cw = a[ct_i+2]
+	let ch = a[ct_i+3]
 
 	let on_frame = a[i+FRAME_ON_FRAME]
-	ui.record()
-		on_frame()
-	let rec_a = end_record()
-	a[i+FRAME_REC_A] = rec_a
+	let a0 = begin_record()
+		a[i+FRAME_REC_I] = record_i
+		let layer_i0 = layer_i
+		layer_i = a[i+FRAME_LAYER_I]
+		let layer_ct_i = ui.stack()
+			force_scope_vars()
+			on_frame(x, y, w, h, cx, cy, cw, ch)
+			reset_paddings()
+		ui.end_stack()
+		layer_i = layer_i0
+		frame_end_check()
+	let a1 = end_record(a0)
 
-	layout_record(rec_a)
+	layout_record(a1, x, y, w, h)
 
 }
 
-draw[CMD_FRAME] = function(a, i) {
+frame.hit = noop
 
-	let rec_a = a[i+FRAME_REC_A]
-
-	draw_all(rec_a)
-
+frame.draw = function(a, i, records) {
+	layer_i = a[i+FRAME_LAYER_I]
+	let layer = layer_arr[layer_i]
+	let rec_i = a[i+FRAME_REC_I]
+	let a1 = records[rec_i]
+	draw_cmd(a1, 2, records)
 }
+
+ui.box_widget('frame', frame)
 
 // template widget -----------------------------------------------------------
 
@@ -5961,7 +5790,7 @@ frame_graph('other_count'      , ''    , 0, 0, 10000)
 ui.box_widget('frame_graph', {
 	create: function(cmd, name, fr, align, valign, min_w, min_h) {
 		ui_cmd_box(cmd, fr, align, valign, min_w, min_h, name)
-		ui.animate()
+		//ui.animate()
 	},
 	draw: function(a, i) {
 		let x0 = a[i+0]

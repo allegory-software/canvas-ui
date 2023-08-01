@@ -53,6 +53,21 @@ listen('rtc', function(c) {
 	ui.animate()
 })
 
+demos.frame = `
+ui.scrollbox('sb1')
+	function on_measure(axis) {
+		return 9000
+	}
+	function on_frame(x, y, w, h, cx, cy, cw, ch) {
+		ui.m(cx-x, cy-y)
+		ui.stack('', 0, 'l', 't', 100, 100)
+			ui.bb('', ':red')
+		ui.end_stack()
+	}
+	ui.frame(on_measure, on_frame)
+ui.end_scrollbox()
+`
+
 demos.screen_sharing = `
 ui.mt(ui.sp())
 ui.v(1, ui.sp())
