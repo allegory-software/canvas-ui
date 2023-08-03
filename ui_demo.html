@@ -61,7 +61,7 @@ ui.scrollbox('sb1')
 	function on_frame(x, y, w, h, cx, cy, cw, ch) {
 		ui.m(cx-x, cy-y)
 		ui.stack('', 0, 'l', 't', 100, 100)
-			ui.bb('', ':red')
+			ui.bb('bb1', ui.hit('bb1') ? ':green' : ':red')
 		ui.end_stack()
 	}
 	ui.frame(on_measure, on_frame)

@@ -60,8 +60,8 @@ let map_freelist   = () => freelist(map)
 let array_freelist = () => freelist(array)
 let obj_freelist   = () => freelist(obj)
 
-// When using capture_pointer(), setting the cursor for the element that
-// is hovered doesn't work anymore, so use this hack instead.
+// When capturing the mouse, setting the cursor for the element that
+// is hovered doesn't work anymore, so we use this hack instead.
 // We haven't even started yet and the DOM is already giving us trouble.
 {
 let style = document.createElement('style')
@@ -145,7 +145,8 @@ function theme_make(name, is_dark) {
 	themes[name] = {
 		is_dark : is_dark,
 		name    : name,
-		// TODO: 255 seems excessive...
+		// TODO: 255 seems excessive, though it's probably still faster
+		// than a hashmap access, dunno...
 		fg     : array_of_objs(255),
 		border : array_of_objs(255),
 		bg     : array_of_objs(255),
@@ -189,7 +190,13 @@ function parse_state(s) {
 	return parse_state_combis(s)
 }
 
-// named HSL colors ----------------------------------------------------------
+// styling colors ------------------------------------------------------------
+
+// Colors are defined in HSL so they can be adjusted if needed.
+// Colors are specified by (name, state) with state 0 (normal) as fallback.
+// Concrete colors can also be specified by prefixing them with a a colon,
+// eg. `:red`, `:#fff`, etc. but that throws away themes and the ability to
+// HSL-adjust the color.
 
 function def_color_func(k) {
 	function def_color(theme, name, state, h, s, L, a, is_dark) {
@@ -368,8 +375,8 @@ ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 // TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
 for (let theme of ['light', 'dark']) {
 	for (let state of ['normal', 'hover', 'active']) {
-		ui.bg_style(theme, 'text', state, ui.fg_color_hsl('text', state, theme))
-		ui.bg_style(theme, 'link', state, ui.fg_color_hsl('link', state, theme))
+		ui.bg_style(theme, 'text', state, fg_color_hsl('text', state, theme))
+		ui.bg_style(theme, 'link', state, fg_color_hsl('link', state, theme))
 	}
 }
 
@@ -426,6 +433,10 @@ ui.bg_style('dark' , 'row' , 'item-focused'                       ,   0, 0.00, 0
 ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0.60)
 
 // canvas --------------------------------------------------------------------
+
+// There's only one global canvas stretched to the entire viewport for now
+// since we're not planning to have our canvas-based UI embedded in a normal
+// HTML page any time soon.
 
 let screen = document.createElement('div')
 screen.classList.add('ui-screen')
@@ -640,7 +651,7 @@ function ui_layer(name, index) {
 		layer_arr.push(layer)
 		layer.i = layer_arr.length-1
 		if (!layer.indexes)
-			layer.indexes = [] // [record1_i, ct1_i, record2_i, ct2_i, ...]
+			layer.indexes = [] // [rec1_i, ct1_i, rec2_i, ct2_i, ...]
 	}
 	return layer
 }
@@ -668,7 +679,7 @@ function begin_layer(layer, i) {
 	// NOTE: adding the cmd on the same layer will just draw it twice but badly
 	// since it won't even have the right context!
 	if (layer_i != layer_i0)
-		layer.indexes.push(record_i, i)
+		layer.indexes.push(rec_i, i)
 }
 
 function end_layer() {
@@ -758,8 +769,8 @@ the widget doesn't appear again on a future frame. State updates should be
 done inside an update callback registered with keepalive() so that the widget
 state can be updated in advance of the widget appearing in the frame in case
 the widget state is queried from outside before the widget appears in the frame.
-The update callback will be called once per frame, either from a state access
-or from the widget command call.
+The update callback will be called once per frame, either due to a state access
+or when the widget is created in the frame.
 
 */
 
@@ -892,6 +903,7 @@ ui.focusing = function(id) {
 // container stack -----------------------------------------------------------
 
 // used in both frame creation and measuring stages.
+
 let ct_stack = [] // [ct_i1,...]
 ui.ct_stack = ct_stack
 
@@ -907,9 +919,9 @@ function ct_stack_check() {
 	}
 }
 
-// current command array -----------------------------------------------------
+// current command recording -------------------------------------------------
 
-// format of a:
+// Format of a command recording array:
 //
 //  next_i, cmd, arg1..n, prev_i, next_i, cmd, arg1..n, ...
 //    |            ^        |                    ^
@@ -917,15 +929,25 @@ function ct_stack_check() {
 //    |            +--------+                    |
 //    +------------------------------------------+
 //
-let a = []
-ui.a = a
+// With next_i and prev_i we can walk back and forth between commands,
+// always landing at the command's arg#1. From the arg#1 index then we have
+// the command code at a[i-1], next command's arg#1 at a[i-2] and prev
+// command's arg#1 at a[i-3]. To walk the command array as a tree, we check
+// when a container starts with `a[i-1] & 1` (all containers have even codes)
+// and when it ends with `a[i-1] == CMD_END` (all containers end with the same
+// "end" command). To skip all container's children and jump to the next
+// sibling we use get_next_ext_i(). To go back to the container's command
+// from its "end" command, we use a[i].
+
+let a = [] // current recording.
+ui.a = a // published for inspecting only.
 
 let cmd_names = []
 let cmd_name_map = map()
 
 function C(a, i) { return cmd_names[a[i-1]] }
 
-let max_cmd    =  0 // even numbers for non-containers  (0 is reserved).
+let max_cmd    =  0 // even numbers for non-containers (0 is reserved).
 let max_cmd_ct = -1 // odd numbers containers
 function unsparse(a, i) {
 	if (a[i] == undefined)
@@ -973,29 +995,29 @@ ui.cmd = ui_cmd
 // index after the last arg.
 let cmd_arg_end_i = (a, i) => a[i-2] - 3
 
-// command arrays ------------------------------------------------------------
+// command recordings --------------------------------------------------------
 
-let record_freelist = array_freelist()
+let rec_freelist = array_freelist()
 
-let record_stack = []
+let rec_stack = []
 
 ui.record = function() {
-	let a1 = record_freelist.alloc()
-	record_stack.push(a)
+	let a1 = rec_freelist.alloc()
+	rec_stack.push(a)
 	a = a1
 }
 
 ui.end_record = function() {
 	let a1 = a
-	a = record_stack.pop()
+	a = rec_stack.pop()
 	return a1
 }
 
 let reindex = []
 
-function record_free(a) {
+function rec_free(a) {
 	a.length = 0
-	record_freelist.free(a)
+	rec_freelist.free(a)
 }
 
 ui.record_play = function(a1) {
@@ -1016,34 +1038,34 @@ ui.record_play = function(a1) {
 	}
 
 	a.push(...a1)
-	record_free(a1)
+	rec_free(a1)
 }
 
-function record_stack_check() {
-	assert(!record_stack.length, 'records left unplayed')
+function rec_stack_check() {
+	assert(!rec_stack.length, 'recordings left unplayed')
 }
 
-let records = []
-let record_i
+let recs = []
+let rec_i
 
-function begin_record() {
+function begin_rec() {
 	let a0 = a
-	a = record_freelist.alloc()
-	record_i = records.length
-	records.push(a)
+	a = rec_freelist.alloc()
+	rec_i = recs.length
+	recs.push(a)
 	return a0
 }
 
-function end_record(a0) {
+function end_rec(a0) {
 	let a1 = a
 	a = a0
 	return a1
 }
 
-function free_records() {
-	for (let a of records)
-		record_free(a)
-	records.length = 0
+function free_recs() {
+	for (let a of recs)
+		rec_free(a)
+	recs.length = 0
 }
 
 // rendering phases ----------------------------------------------------------
@@ -1067,7 +1089,7 @@ ui.is_flex_child = is_flex_child
 // element that has it. non-recursive, uses ct_stack and containers'
 // measure_end callback to do the work.
 
-function measure_record(a, axis) {
+function measure_rec(a, axis) {
 	let i = 2
 	let n = a.length
 	while (i < n) {
@@ -1085,7 +1107,7 @@ function measure_record(a, axis) {
 // walk the element tree top-down, and call the position function for each
 // element that has it. recursive, uses call stack to pass ct_i.
 
-function position_record(a, axis, ct_w) {
+function position_rec(a, axis, ct_w) {
 	let i = 2
 	let cmd = a[i-1]
 	let min_w = a[i+2+axis]
@@ -1097,7 +1119,7 @@ function position_record(a, axis, ct_w) {
 
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
-function translate_record(a, x, y) {
+function translate_rec(a, x, y) {
 	let i = 2
 	let cmd = a[i-1]
 	let translate_f = translate[cmd]
@@ -1113,7 +1135,7 @@ ui.translate = function(a, i) {
 
 let theme_stack = []
 
-function draw_cmd(a, i, records) {
+function draw_cmd(a, i, recs) {
 	let next_ext_i = get_next_ext_i(a, i)
 	while (i < next_ext_i) {
 
@@ -1124,7 +1146,7 @@ function draw_cmd(a, i, records) {
 			theme = theme_stack.pop()
 
 		let draw_f = draw[cmd]
-		if (draw_f && draw_f(a, i, records)) {
+		if (draw_f && draw_f(a, i, recs)) {
 			i = get_next_ext_i(a, i)
 			if (cmd & 1) // container
 				theme = theme_stack.pop()
@@ -1134,7 +1156,7 @@ function draw_cmd(a, i, records) {
 	}
 }
 
-function draw_frame(records, layers) {
+function draw_frame(recs, layers) {
 	screen.style.background = bg_color('bg')
 	for (let layer of layers) {
 		/*global*/ layer_i = layer.i
@@ -1143,8 +1165,8 @@ function draw_frame(records, layers) {
 			reset_canvas()
 			let rec_i = indexes[k]
 			let i     = indexes[k+1]
-			let a = records[rec_i]
-			draw_cmd(a, i, records)
+			let a = recs[rec_i]
+			draw_cmd(a, i, recs)
 			assert(!theme_stack.length)
 		}
 		layer_i = null
@@ -1185,7 +1207,7 @@ function hovers(id, k) {
 }
 ui.hovers = hovers
 
-function hit_frame(records, layers) {
+function hit_frame(recs, layers) {
 
 	ui.set_cursor()
 
@@ -1212,9 +1234,9 @@ function hit_frame(records, layers) {
 			reset_canvas()
 			let rec_i = indexes[k]
 			let i     = indexes[k+1]
-			let a = records[rec_i]
+			let a = recs[rec_i]
 			let hit_f = hittest[a[i-1]]
-			if (hit_f(a, i)) {
+			if (hit_f(a, i, recs)) {
 				j = -1
 				break
 			}
@@ -1252,7 +1274,7 @@ async function pack_frame_json() {
 		h: screen_h,
 		mx: ui.mx,
 		my: ui.my,
-		records: records,
+		recs: recs,
 		layers: layers,
 	})
 	let b = tenc.encode(s)
@@ -1350,27 +1372,27 @@ ui.redraw = function() {
 	want_redraw = true
 }
 
-function layout_record(a, x, y, w, h) {
+function layout_rec(a, x, y, w, h) {
 	reset_canvas()
 
 	// x-axis
-	measure_record(a, 0)
+	measure_rec(a, 0)
 	ct_stack_check()
-	position_record(a, 0, w)
+	position_rec(a, 0, w)
 
 	// y-axis
-	measure_record(a, 1)
+	measure_rec(a, 1)
 	ct_stack_check()
-	position_record(a, 1, h)
+	position_rec(a, 1, h)
 
-	translate_record(a, x, y)
+	translate_rec(a, x, y)
 }
 
 function frame_end_check() {
 	ct_stack_check()
 	layer_stack_check()
 	scope_stack_check()
-	record_stack_check()
+	rec_stack_check()
 }
 
 function redraw_all() {
@@ -1380,17 +1402,17 @@ function redraw_all() {
 
 		want_redraw = false
 
-		hit_frame(records, layers)
+		hit_frame(recs, layers)
 		measure_req_all()
 
 		clear_layers()
-		free_records()
+		free_recs()
 
 		t0 = clock_ms()
 
-		begin_record()
+		begin_rec()
 		let i = ui.stack()
-		assert(record_i == 0)
+		assert(rec_i == 0)
 		assert(i == 2)
 		begin_layer(layer_base, i)
 		ui.main()
@@ -1404,8 +1426,8 @@ function redraw_all() {
 
 		t0 = t1
 
-		let a = end_record()
-		layout_record(a, 0, 0, screen_w, screen_h)
+		let a = end_rec()
+		layout_rec(a, 0, 0, screen_w, screen_h)
 
 		t1 = clock_ms()
 		frame_graph_push('frame_layout_time', t1 - t0)
@@ -1415,7 +1437,7 @@ function redraw_all() {
 		if (!want_redraw) {
 			t0 = clock_ms()
 
-			draw_frame(records, layers)
+			draw_frame(recs, layers)
 
 			pack_frame()
 
@@ -1857,7 +1879,7 @@ function translate_ct(a, i, dx, dy) {
 
 // hit phase utils
 
-function hit_children(a, i) {
+function hit_children(a, i, recs) {
 
 	// hit direct children in reverse paint order.
 	let ct_i = i
@@ -1869,7 +1891,7 @@ function hit_children(a, i) {
 		if (a[i-1] == CMD_END)
 			i = a[i] // start_i
 		let hit_f = hittest[a[i-1]]
-		if (hit_f && hit_f(a, i)) {
+		if (hit_f && hit_f(a, i, recs)) {
 			found = true
 			break
 		}
@@ -2030,8 +2052,8 @@ is_flex_child[CMD_V] = true
 translate[CMD_H] = translate_ct
 translate[CMD_V] = translate_ct
 
-function hit_flex(a, i) {
-	if (hit_children(a, i))
+function hit_flex(a, i, recs) {
+	if (hit_children(a, i, recs))
 		return true
 	if (hit_box(a, i))
 		hit_template(a, i)
@@ -2067,8 +2089,8 @@ ui.end_stack = function() { ui.end(CMD_STACK) }
 
 translate[CMD_STACK] = translate_ct
 
-hittest[CMD_STACK] = function(a, i) {
-	if (hit_children(a, i)) {
+hittest[CMD_STACK] = function(a, i, recs) {
+	if (hit_children(a, i, recs)) {
 		hover(a[i+STACK_ID])
 		return true
 	}
@@ -2350,7 +2372,7 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 	}
 }
 
-hittest[CMD_SCROLLBOX] = function(a, i) {
+hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 	let id = a[i+SB_ID]
 
 	// fast-test the outer box since we're clipping the contents.
@@ -2373,7 +2395,7 @@ hittest[CMD_SCROLLBOX] = function(a, i) {
 	}
 
 	// test the children
-	hit_children(a, i)
+	hit_children(a, i, recs)
 
 	return true
 }
@@ -2688,13 +2710,13 @@ draw[CMD_POPUP] = function(a, i) {
 		return true
 }
 
-hittest[CMD_POPUP] = function(a, i) {
+hittest[CMD_POPUP] = function(a, i, recs) {
 
 	let popup_layer_i = a[i+POPUP_LAYER_I]
 	if (popup_layer_i != layer_i)
 		return
 
-	return hit_children(a, i)
+	return hit_children(a, i, recs)
 }
 
 // tooltip background & border -----------------------------------------------
@@ -3765,8 +3787,8 @@ frame.translate = function(a, i, dx, dy) {
 	let ch = a[ct_i+3]
 
 	let on_frame = a[i+FRAME_ON_FRAME]
-	let a0 = begin_record()
-		a[i+FRAME_REC_I] = record_i
+	let a0 = begin_rec()
+		a[i+FRAME_REC_I] = rec_i
 		let layer_i0 = layer_i
 		layer_i = a[i+FRAME_LAYER_I]
 		let layer_ct_i = ui.stack()
@@ -3776,20 +3798,27 @@ frame.translate = function(a, i, dx, dy) {
 		ui.end_stack()
 		layer_i = layer_i0
 		frame_end_check()
-	let a1 = end_record(a0)
+	let a1 = end_rec(a0)
 
-	layout_record(a1, x, y, w, h)
+	layout_rec(a1, x, y, w, h)
 
 }
 
-frame.hit = noop
-
-frame.draw = function(a, i, records) {
+frame.draw = function(a, i, recs) {
 	layer_i = a[i+FRAME_LAYER_I]
 	let layer = layer_arr[layer_i]
 	let rec_i = a[i+FRAME_REC_I]
-	let a1 = records[rec_i]
-	draw_cmd(a1, 2, records)
+	let a1 = recs[rec_i]
+	draw_cmd(a1, 2, recs)
+}
+
+frame.hit = function(a, i, recs) {
+	layer_i = a[i+FRAME_LAYER_I]
+	let layer = layer_arr[layer_i]
+	let rec_i = a[i+FRAME_REC_I]
+	let a1 = recs[rec_i]
+	let hit_f = hittest[a1[1]]
+	return hit_f(a1, 2, recs)
 }
 
 ui.box_widget('frame', frame)
