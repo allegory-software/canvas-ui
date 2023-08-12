@@ -123,6 +123,7 @@ HASH MAPS
 	s.equals(s2[, same_order]) -> t|f    compare sets
 	map(iter) -> m                  create a map, keys and values can be of any type
 	m.first_key
+	m.assign                        like assign but for a map
 	empty -> {}                     global empty object, inherits Object
 	empty_obj -> obj()              global empty object, does not inherit Object
 	empty_set -> set()              global empty set, read-only!
@@ -741,6 +742,12 @@ function map_first_key(m) {
 	// an iterator object for this.
 	for (let k of m.keys())
 		return k
+}
+
+function map_assign(m, m1) {
+	for (let [k,v] of m1)
+		m.set(k, v)
+	return m
 }
 
 function set_addset(s, s1) {
@@ -2327,6 +2334,7 @@ g.obj                          = obj
 g.set                          = set
 g.map                          = map
 g.map_first_key                = map_first_key
+g.map_assign                   = map_assign
 g.set_addset                   = set_addset
 g.set_set                      = set_set
 g.set_toarray                  = set_toarray
@@ -2499,6 +2507,10 @@ method(a, 'remove_duplicates', m(remove_duplicates       ))
 // Map extensions ------------------------------------------------------------
 
 property(Map, 'first_key', m(map_first_key))
+
+let M = Map.prototype
+
+M.assign = m(map_assign)
 
 // Set extensions ------------------------------------------------------------
 

@@ -206,8 +206,8 @@ tuts.h = `
 // how to call it: ui.h(fr=1, gap=0, align='stretch', valign='stretch', min_w=0, min_h=0)
 
 ui.h()
-	ui.text('', 'Hello')
-	ui.text('', 'World')
+	ui.text('', 'Hello', 1, 'c')
+	ui.text('', 'World', 1, 'c')
 ui.end()
 `
 
@@ -249,7 +249,7 @@ ui.border_style('*', 'brown'  , 'normal',   0, .59, .41)
 ui.stack('', 0, 'c', 'c', 150, 50)
 	ui.shadow(2, 2, 5, 0, false, 'black')
 	ui.bb('', 'crimson', null, 'ltrb', 'brown', null, 10)
-	ui.text('', 'Hello World!')
+	ui.text('', 'Hello World!', 0, 'c')
 ui.end()
 `
 
@@ -259,7 +259,7 @@ tuts.font_size = `
 
 ui.v(0, 20, 'c', 'c')
 	ui.font_size(24)
-	ui.color(['teal'])
+	ui.color(':teal')
 	ui.text('', 'Buongiorno!')
 	ui.h(0, 10, 'c')
 		// font and color changes are scoped.
@@ -267,9 +267,9 @@ ui.v(0, 20, 'c', 'c')
 		ui.font('Serif')
 		ui.font_size(42)
 		ui.font_weight('bold')
-		ui.color(['green'])
-		ui.text('', 'Hello', 0)
-		ui.text('', 'World!', 0)
+		ui.color(':green')
+		ui.text('', 'Hello')
+		ui.text('', 'World!')
 	ui.end()
 	// using the font size set above in this scope.
 	ui.text('', 'Buona notte!')
@@ -437,7 +437,7 @@ ui.bg_dots('dots1', 0.3)
 demos.button = `
 ui.m(ui.sp2())
 ui.h(1, ui.sp2(), 's', 't')
-	if (ui.button_primary('btn1', 'Click me!'))
+	if (ui.button_primary('btn1', 'Click me!', 0))
 		pr('clicked btn1!')
 	if (ui.button('btn2', 'Click me too!'))
 		pr('clicked btn2!')
@@ -449,7 +449,7 @@ ui.m(10)
 ui.v(1, 30, 'c', 'c')
 	let i = 1
 	for (let inner of ['', 'i']) {
-		ui.h(1, 0, 'c', 'c', 400, 180)
+		ui.h(1, 0, 'c', 'c', 360, 180)
 			for (let align of ['c', '[', ']']) {
 				ui.m(60, 30)
 				ui.stack()
@@ -485,7 +485,7 @@ for (let align of ['c', '[', ']']) {
 				side == 'l' || side == 'r' ? ui.sp2() : 0,
 				side == 't' || side == 'b' ? ui.sp2() : 0,
 			)
-			ui.popup('tt'+j+i, ui.layer_popup, ct_i, side, align, 100, 50, 'change_side constrain')
+			ui.popup('tt'+j+i, 'tooltip', ct_i, side, align, 100, 50, 'change_side constrain')
 				ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
 				ui.bb_tooltip('', 'bg2', null, 'intense', null, ui.sp1())
 			ui.end_popup()

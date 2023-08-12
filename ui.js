@@ -22,6 +22,36 @@ WIDGETS
 	line_gap(lg)
 	text()
 
+TODO
+
+	<tooltip>         text  target  align  side  kind  icon_visible
+	<toaster>         side  align  timeout  spacing
+	<checklist>
+	<menu>
+	<tabs>            tabs_side  auto_focus  selected_item_id
+	<action-band>
+	<dialog>
+	<slides>
+	<md>
+	<pagenav>
+	<info>
+	<erors>
+	<range-slider>
+	<input-group>
+	<textarea>
+	<[v]select-button>
+	<textarea-input>
+	<pass-input>
+	<num-input>
+	<tags-box>
+	<tags-input>
+	<check-dropdown>
+	<range-calendar>
+	<ranges-calendar>
+	<date-input>
+	<timeofday-input>
+	<datetime-input>
+	<date-range-input>
 
 */
 
@@ -43,7 +73,7 @@ const {
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str, json, json_arg,
 	obj, set, map, array,
-	assign, insert,
+	assign, insert, map_assign,
 	noop, return_true, do_after,
 	runafter,
 	memoize,
@@ -306,7 +336,7 @@ let border_color_hsl = lookup_color_hsl_func('border')
 let border_color = lookup_color_func(border_color_hsl)
 let ui_border_color = border_color
 ui.border_color_hsl = ui.border_color_hsl
-ui.border_color = ui.border_color
+ui.border_color = border_color
 
 //               theme    name        state       h    s    L     a
 // ---------------------------------------------------------------------------
@@ -576,10 +606,11 @@ ui.capture = function(id) {
 		return
 	if (!ui.pressed)
 		return
-	if (!hovers(id))
+	let hs = hovers(id)
+	if (!hs)
 		return
 	ui.captured_id = id
-	capture_state.clear()
+	map_assign(capture_state, hs)
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
 	return capture_state
@@ -1213,8 +1244,8 @@ function hit_frame(recs, layers) {
 
 	hit_template_id = null
 	hit_template_i0 = null
-	hit_template_i1 = null
 
+	hit_template_i1 = null
 	for (let m of hit_state_maps.values()) {
 		m.clear()
 		hit_state_map_freelist.free(m)
@@ -1348,13 +1379,14 @@ let measure_req = []
 
 ui.measure = function(dest) {
 	let i = assert(ct_stack.at(-1), 'measure outside container')
-	measure_req.push(dest, i)
+	measure_req.push(dest, a, i)
 }
 
 function measure_req_all() {
-	for (let k = 0, n = measure_req.length; k < n; k += 2) {
+	for (let k = 0, n = measure_req.length; k < n; k += 3) {
 		let dest = measure_req[k+0]
-		let i    = measure_req[k+1]
+		let a    = measure_req[k+1]
+		let i    = measure_req[k+2]
 		let s = isstr(dest) ? ui.state(dest) : dest
 		s.set('x', a[i+0])
 		s.set('y', a[i+1])
@@ -1402,7 +1434,17 @@ function redraw_all() {
 
 		want_redraw = false
 
-		hit_frame(recs, layers)
+		if (ui.captured_id) {
+			ui.hit_for = 'captured'
+			hit_frame(recs, layers)
+			if (ui.dragging) {
+				ui.hit_for = 'drop'
+				hit_frame(recs, layers)
+			}
+		} else {
+			ui.hit_for = 'hover'
+			hit_frame(recs, layers)
+		}
 		measure_req_all()
 
 		clear_layers()
@@ -2487,14 +2529,13 @@ ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) 
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
 
-	// TODO: find a way to use ui_cmd_box_ct() again here...
 	let i = ui_cmd_box_ct(CMD_POPUP,
 		null, // fr -> id
 		null, // align -> side
 		null, // valign -> align
 		min_w, min_h,
 		// S+0
-		layer_i, target_i, flags,
+		layer.i, target_i, flags,
 		side, // side_real
 	)
 	a[i+POPUP_ID   ] = id
@@ -2935,6 +2976,8 @@ ui.shadow = function(x, y, blur, spread, inset, color) {
 	ui_cmd(CMD_SHADOW, x, y, blur, spread, inset ? 1 : 0, color)
 }
 
+let shadow_set
+
 // TODO: use spread & inset
 ui.set_shadow = function(s) {
 	let [x, y, blur, spread, inset, color] = assert(theme.shadow[s], 'unknown shadow ', s)
@@ -2942,9 +2985,9 @@ ui.set_shadow = function(s) {
 	cx.shadowOffsetX = x
 	cx.shadowOffsetY = y
 	cx.shadowColor   = color
+	shadow_set = true
 }
 
-let shadow_set
 draw[CMD_SHADOW] = function(a, i) {
 	cx.shadowOffsetX = a[i+0]
 	cx.shadowOffsetY = a[i+1]
@@ -3805,8 +3848,8 @@ frame.translate = function(a, i, dx, dy) {
 }
 
 frame.draw = function(a, i, recs) {
-	layer_i = a[i+FRAME_LAYER_I]
 	let layer = layer_arr[layer_i]
+	layer_i = a[i+FRAME_LAYER_I]
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	draw_cmd(a1, 2, recs)
@@ -3822,6 +3865,8 @@ frame.hit = function(a, i, recs) {
 }
 
 ui.box_widget('frame', frame)
+
+//
 
 // template widget -----------------------------------------------------------
 
@@ -4145,42 +4190,10 @@ ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
 	return hs && ui.clickup
 }
 ui.button_primary = function(id, s, fr, align, valign, min_w, min_h) {
-	return ui.button(id, s, fr, align, valign, min_w, 'button-primary')
+	return ui.button(id, s, fr, align, valign, min_w, min_h, 'button-primary')
 }
 ui.btn = ui.button
 ui.btn_pri = ui.button_primary
-
-/*
-
-	<tooltip>         text  target  align  side  kind  icon_visible
-	<toaster>         side  align  timeout  spacing
-	<checklist>
-	<menu>
-	<tabs>            tabs_side  auto_focus  selected_item_id
-	<action-band>
-	<dlg>
-	<slides>
-	<md>
-	<pagenav>
-	<info>
-	<erors>
-	<range-slider>
-	<input-group>
-	<textarea>
-	<[v]select-button>
-	<textarea-input>
-	<pass-input>
-	<num-input>
-	<tags-box>
-	<tags-input>
-	<check-dropdown>
-	<range-calendar>
-	<ranges-calendar>
-	<date-input>
-	<timeofday-input>
-	<datetime-input>
-	<date-range-input>
-*/
 
 // split ---------------------------------------------------------------------
 
@@ -4851,7 +4864,7 @@ toggle.draw = function(a, i) {
 	ui.set_shadow('button')
 	cx.fillStyle = ui_bg_color('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
-
+	reset_shadow()
 }
 
 ui.box_widget('toggle', toggle)
@@ -4970,6 +4983,7 @@ radio.draw = function(a, i) {
 	ui.set_shadow('button')
 	cx.fillStyle = bg_color('toggle-thumb', hs ? 'hover' : null)
 	cx.fill()
+	reset_shadow()
 
 }
 
@@ -5272,6 +5286,7 @@ ui.box_widget('slider', {
 		cx.beginPath()
 		cx.arc(thumb_cx, thumb_cy, thumb_r, 0, 2 * PI)
 		cx.fill()
+		reset_shadow()
 
 		if (markers) {
 
@@ -5575,14 +5590,12 @@ ui.widget('hue_bar', {
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
-		let ht = hit_rect(x, y, w, h)
-		let hs = ht && hover(id)
-		let cs = captured(id)
-		if (cs || hs) {
+		let hs = ui.hit_for == 'captured' ? ui.captured(id) : hit_rect(x, y, w, h) && hover(id)
+		if (hs) {
 			let hue = clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360)
-			;(cs || hs).set('hue', hue)
+			hs.set('hue', hue)
+			return true
 		}
-		return ht
 	},
 
 })
@@ -5627,7 +5640,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
-				ui.bb('', hsl(hue, sat, lum))
+				ui.bb('', ':'+hsl(hue, sat, lum))
 			ui.end_aspect_box()
 			ui.record_play(sl_square)
 			ui.record_play(hue_bar)

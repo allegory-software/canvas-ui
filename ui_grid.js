@@ -278,9 +278,6 @@ function cellview_view(nav) {
 		else
 			fg = ui.bg_is_dark(bg) ? e.fg_dark : e.fg_light
 
-		bg = bg[0]
-		fg = fg[0]
-
 		// drawing
 
 		cx.save()
