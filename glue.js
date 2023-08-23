@@ -2192,7 +2192,8 @@ function post(url, upload, success, fail, opt) {
 // JSHint linter -------------------------------------------------------------
 
 // lint any loaded js file from the browser directly, no server needed!
-// we use this mostly to catch `for (v ...` which should be `for(let v ...`.
+// we use this mostly to catch `for (v ...` which should be `for(let v ...`,
+// otherwise this linter is pretty useless...
 function lint(file, opt) {
 	if (!G.JSHINT) {
 		let script = document.createElement('script')

@@ -16,14 +16,15 @@ let {
 	debug, pr, clock, json, json_arg, noop,
 	runafter, runevery,
 	announce,
+	assign,
 } = glue
 
-rtc.DEBUG = 0
+rtc.DEBUG = 1
 rtc.servers = null
 
 function rtc_debug(...args) {
 	if (!rtc.DEBUG) return
-	debug(this.id, this.type, ':', ...args)
+	debug(this.signal_con.sid, this.type, ':', ...args)
 }
 
 rtc.offer = function(e) {
@@ -34,10 +35,12 @@ rtc.offer = function(e) {
 	e.ready = false
 	e.max_message_size = null
 
-	e.connect = async function() {
+	e.connect = async function(to_sid) {
 		if (e.open)
 			return
 		e.open = true
+
+		e.signal_con.to_sid = to_sid
 
 		e.con = new RTCPeerConnection(rtc.servers)
 
@@ -46,7 +49,7 @@ rtc.offer = function(e) {
 
 		e.con.onicecandidate = function(ev) {
 			if (!ev.candidate) return
-			e.signal_con.signal(e.id, 'candidate', ev.candidate)
+			e.signal_con.signal('candidate', ev.candidate)
 		}
 
 		e.chan.onopen = function() {
@@ -69,7 +72,7 @@ rtc.offer = function(e) {
 		let offer = await e.con.createOffer()
 		await e.con.setLocalDescription(offer)
 
-		e.signal_con.signal(e.id, 'offer', offer)
+		e.signal_con.signal('offer', offer, to_sid)
 
 		announce('rtc', e, 'open')
 	}
@@ -90,16 +93,23 @@ rtc.offer = function(e) {
 			e.con = null
 		}
 
-		e.signal_con.signal(e.id, 'close')
+		e.signal_con.signal('close')
 		announce('rtc', e, 'close')
+
+		e.signal_con.close()
 	}
+
+	e.signal_con = e.signal_server.connect({})
 
 	e.signal_con.on_signal = function(k, v) {
 		if (!e.open)
 			return
 		if (k == 'candidate') {
 			e.debug('<- candidate', v)
-			e.con.addIceCandidate(v)
+			let c = new RTCIceCandidate(assign(v, {
+				sdpMLineIndex: v.label ?? v.sdpMLineIndex,
+			}))
+			e.con.addIceCandidate(c)
 		} else if (k == 'answer') {
 			e.debug('<- answer', v)
 			e.con.setRemoteDescription(v)
@@ -125,10 +135,12 @@ rtc.answer = function(e) {
 	e.open = false
 	e.ready = false
 
-	e.connect = function() {
+	e.connect = function(to_sid) {
 		if (e.open)
 			return
 		e.open = true
+
+		e.signal_con.to_sid = to_sid
 
 		e.con = new RTCPeerConnection(rtc.servers)
 
@@ -153,7 +165,7 @@ rtc.answer = function(e) {
 			announce('rtc', e, 'ready')
 		}
 
-		e.signal_con.signal(e.id, 'ready')
+		e.signal_con.signal('ready')
 
 		announce('rtc', e, 'open')
 	}
@@ -173,23 +185,30 @@ rtc.answer = function(e) {
 			e.con = null
 		}
 
-		e.signal_con.signal(e.id, 'close')
+		e.signal_con.signal('close')
 		announce('rtc', e, 'close')
+
+		e.signal_con.close()
 	}
+
+	e.signal_con = e.signal_server.connect({})
 
 	e.signal_con.on_signal = function(k, v) {
 		if (!e.open)
 			return
 		if (k == 'candidate') {
 			e.debug('<- candidate', v)
-			e.con.addIceCandidate(v)
+			let c = new RTCIceCandidate(assign(v, {
+				sdpMLineIndex: v.label ?? v.sdpMLineIndex,
+			}))
+			e.con.addIceCandidate(c)
 		} else if (k == 'offer') {
 			e.debug('<- offer', v)
 			e.con.setRemoteDescription(v)
 			runafter(0, async function() {
 				let answer = await e.con.createAnswer()
 				await e.con.setLocalDescription(answer)
-				e.signal_con.signal(e.id, 'answer', answer)
+				e.signal_con.signal('answer', answer)
 			})
 		}
 	}
@@ -197,7 +216,7 @@ rtc.answer = function(e) {
 	return e
 }
 
-function create_signal_server() {
+rtc.mock_signal_server = function() {
 
 	let e = {}
 
@@ -209,10 +228,10 @@ function create_signal_server() {
 
 	e.connect = function(c) {
 
-		c = c ?? {}
-
 		c.on_signal = null
 		c.candidates = set()
+
+		let id = 'local'
 
 		c.signal_candidates = function(id) {
 			let c2 = c == offer_con[id] ? ready_con[id] : offer_con[id]
@@ -224,7 +243,7 @@ function create_signal_server() {
 			}
 		}
 
-		c.signal = function(id, k, v) {
+		c.signal = function(k, v) {
 			if (k == 'offer') {
 				let offer = v
 				offers[id] = offer
@@ -267,30 +286,43 @@ function create_signal_server() {
 	}
 
 	return e
-
 }
 
-rtc.signal_server = create_signal_server()
+rtc.demo_signal_server = function() {
 
-if (0) {
+	let e = {}
 
-	runafter(0, async function() {
+	e.connect = function(c) {
 
-		let signal_con = rtc.signal_server.connect()
-		let con = await rtc.offer({signal_con: signal_con, id: 'demo'})
+		c.on_signal = null
 
-		runevery(1, function() {
-			con.send('Hello!')
-		})
+		c.signal = function(k, v) {
+			assert(c.sid, 'connection to signal server not ready')
+			let t = {sid: c.sid, k: k, v: v, to_sid: c.to_sid}
+			post('/rtc_signal', t)
+		}
 
-	})
+		// poor man's bidi communication in lieu of websockets.
+		// the server identifies our "connection" based on sid (session id).
+		let es = new EventSource('/rtc_signal.events')
 
-	runafter(0, async function() {
+		es.onmessage = function(ev) {
+			let t = json_arg(ev.data)
+			if (t.sid)
+				c.sid = t.sid
+			else
+				c.on_signal(t.k, t.v)
+		}
 
-		let signal_con = rtc.signal_server.connect()
-		let con = await rtc.answer({signal_con: signal_con, id: 'demo', recv: pr})
+		c.close = function() {
+			es.close()
+			es = null
+		}
 
-	})
+		return c
+	}
+
+	return e
 }
 
 }()) // module function

@@ -506,7 +506,6 @@ let raf_id
 function raf_animate() {
 	raf_id = null
 	let t0 = clock_ms()
-	cx.clearRect(0, 0, canvas.width, canvas.height)
 	redraw_all()
 	let t1 = clock_ms()
 	frame_graph_push('frame_time', t1 - t0)
@@ -1188,7 +1187,15 @@ function draw_cmd(a, i, recs) {
 }
 
 function draw_frame(recs, layers) {
-	screen.style.background = bg_color('bg')
+	let theme_stack_length0 = theme_stack.length
+	theme_stack.push(theme)
+	theme = themes[ui.default_theme] // cuz we call bg_color()
+
+	cx.beginPath()
+	cx.rect(0, 0, canvas.width, canvas.height)
+	cx.fillStyle = bg_color('bg')
+	cx.fill()
+
 	for (let layer of layers) {
 		/*global*/ layer_i = layer.i
 		let indexes = layer.indexes
@@ -1198,10 +1205,12 @@ function draw_frame(recs, layers) {
 			let i     = indexes[k+1]
 			let a = recs[rec_i]
 			draw_cmd(a, i, recs)
-			assert(!theme_stack.length)
 		}
 		layer_i = null
 	}
+
+	theme = theme_stack.pop()
+	assert(theme_stack.length == theme_stack_length0)
 }
 
 // hit-testing phase ---------------------------------------------------------
@@ -1325,18 +1334,7 @@ async function pack_frame_json() {
 	return cb
 }
 let pack_frame = pack_frame_json
-
-async function send_frame(cb) {
-
-	// announce('packed_frame', cb)
-	//try {
-	await unpack_frame(cb)
-	//} catch (e) {
-	//	//throw new Error(e)
-	//	console.error(e, e.stack)
-	//}
-
-}
+ui.pack_frame = pack_frame
 
 // frame unpacking -----------------------------------------------------------
 
@@ -1352,6 +1350,7 @@ let tdec = new TextDecoder()
 async function unpack_frame_json(ab) {
 	let t = json_arg(tdec.decode(ab))
 	assert(t.v == ui.VERSION, 'wrong version ', t.v)
+	return t
 }
 
 async function unpack_frame(cb) {
@@ -1428,6 +1427,7 @@ function frame_end_check() {
 }
 
 function redraw_all() {
+
 	let redraw_count = 0
 	while (1) {
 		let t0, t1
@@ -1445,6 +1445,8 @@ function redraw_all() {
 			ui.hit_for = 'hover'
 			hit_frame(recs, layers)
 		}
+		ui.hit_for = null
+
 		measure_req_all()
 
 		clear_layers()
@@ -3866,7 +3868,56 @@ frame.hit = function(a, i, recs) {
 
 ui.box_widget('frame', frame)
 
-//
+// shared screen widget ------------------------------------------------------
+
+let SS_ID = S-1
+
+let ss = {}
+
+ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
+
+	if (ui.state(id, 'con') != answer_con) {
+		ui.state(id).set('con', answer_con)
+		answer_con.recv = async function(cb) {
+			answer_con.frame = await unpack_frame(cb)
+		}
+	}
+
+	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+		id,
+	)
+
+}
+
+ss.measure = function(a, i, axis) {
+	let id = a[i+SS_ID]
+	let t = ui.state(id, 'con')?.frame
+	a[i+2+axis] += paddings(a, i, axis) + ((axis ? t?.h : t?.w) ?? 0)
+	let min_w = a[i+2+axis]
+	add_ct_min_wh(a, axis, min_w)
+}
+
+let in_ss
+ss.draw = function(a, i) {
+	let id = a[i+SS_ID]
+	if (in_ss == id)
+		return
+	let t = ui.state(id, 'con')?.frame
+	//let t = a[i+SS_ID]
+	if (!t) return
+	let x = a[i+0]
+	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
+	in_ss = id
+	cx.save()
+	cx.translate(x, y)
+	draw_frame(t.recs, t.layers)
+	cx.restore()
+	in_ss = null
+}
+
+ui.box_widget('shared_screen', ss)
 
 // template widget -----------------------------------------------------------
 
@@ -5824,10 +5875,7 @@ frame_graph('frame_draw_time'  , 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_bandwidth'  , 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
 frame_graph('frame_compression', '%'   , 0, 0,   100)
 frame_graph('frame_pack_time'  , 'ms'  , 1, 0,    10)
-frame_graph('string_count'     , ''    , 0, 0, 20000)
-frame_graph('string_length'    , ''    , 0, 0, 20000)
-frame_graph('number_count'     , ''    , 0, 0, 20000)
-frame_graph('other_count'      , ''    , 0, 0, 10000)
+frame_graph('frame_unpack_time', 'ms'  , 1, 0,    10)
 
 ui.box_widget('frame_graph', {
 	create: function(cmd, name, fr, align, valign, min_w, min_h) {

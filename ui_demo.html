@@ -16,13 +16,13 @@
 </style>
 </head>
 <body theme=dark>
-<script src=glue.js></script>
-<script src=ui.js></script>
-<script src=validation.js></script>
-<script src=ui_nav.js></script>
-<script src=ui_grid.js></script>
-<script src=adapter.js></script>
-<script src=webrtc.js></script>
+<script src=ui/glue.js></script>
+<script src=ui/ui.js></script>
+<script src=ui/validation.js></script>
+<script src=ui/ui_nav.js></script>
+<script src=ui/ui_grid.js></script>
+<script src=ui/adapter.js></script>
+<script src=ui/webrtc.js></script>
 <script>
 
 ui.DEBUG = 1
@@ -33,6 +33,7 @@ const {
 	str, dec, format_kbytes, json, json_arg,
 	runevery, runafter,
 	listen,
+	post,
 } = glue
 
 let pr = console.log
@@ -40,13 +41,10 @@ let pr = console.log
 let tuts = []
 let demos = []
 
-let offer_signal_con  = rtc.signal_server.connect()
-let answer_signal_con = rtc.signal_server.connect()
-let offer_con  = rtc.offer ({signal_con: offer_signal_con , id: 'demo', recv: pr})
-let answer_con = rtc.answer({signal_con: answer_signal_con, id: 'demo', recv: pr})
-
-runevery(1, function() {
-	offer_con.send('Hello!')
+runevery(1, async function() {
+	if (!offer_con) return
+	let cb = await ui.pack_frame()
+	offer_con.send(cb)
 })
 
 listen('rtc', function(c) {
@@ -68,44 +66,129 @@ ui.scrollbox('sb1')
 ui.end_scrollbox()
 `
 
-demos.screen_sharing = `
+let signal_server, offer_con
+
+function demo_share_screen_init() {
+	signal_server = signal_server || rtc.demo_signal_server()
+	offer_con = offer_con || rtc.offer({signal_server: signal_server})
+}
+
+demos.share_screen = `
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	demo_share_screen_init()
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID', 0)
+		let my_sid = offer_con.signal_con.sid
+		ui.state('sid').set('text', my_sid)
+		ui.input('sid')
+		ui.text('', 'Other ID', 0)
+		let to_sid = ui.input('to_sid')
+		if (!offer_con.open && my_sid)
+			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10)))
+				offer_con.connect(to_sid)
+		if (offer_con.open)
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10)))
+				offer_con.close()
+	ui.end_h()
+	ui.ml(ui.sp())
+	ui.h(0)
+		ui.text('', 'Status: ', 0)
+		ui.text('', offer_con.open ? 'Open' : 'Closed')
+	ui.end_h()
+ui.end_v()
+`
+
+let answer_con
+
+function demo_see_screen_init() {
+	signal_server = signal_server || rtc.demo_signal_server()
+	answer_con = answer_con || rtc.answer({signal_server: signal_server})
+}
+
+demos.see_screen = `
+
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	demo_see_screen_init()
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID', 0)
+		let my_sid = answer_con.signal_con.sid
+		ui.state('sid').set('text', my_sid)
+		ui.input('sid')
+		ui.text('', 'Other ID')
+		let to_sid = ui.input('to_sid')
+		if (!answer_con.open && my_sid)
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10)))
+				answer_con.connect(to_sid)
+		if (answer_con.open)
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10)))
+				answer_con.close()
+	ui.end_h()
+	ui.scrollbox('sb_shared_screen')
+		ui.bb('', null, null, 't', 'light')
+		ui.shared_screen('ss1', answer_con)
+	ui.end_scrollbox()
+ui.end_v()
+
+`
+
+enter_see_this_screen = function() {
+	let signal_server = rtc.mock_signal_server()
+	let offer_con  = rtc.offer ({signal_server: signal_server, recv: pr})
+	let answer_con = rtc.answer({signal_server: signal_server, recv: pr})
+}
+
+demos.see_this_screen = `
 ui.mt(ui.sp())
 ui.v(1, ui.sp())
 	ui.ml(ui.sp())
 	ui.h(0, ui.sp())
-		ui.h(0, ui.sp())
-			if (offer_con.open) {
-				if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
-					offer_con.close()
-				}
-			} else if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
-				offer_con.connect()
+		ui.text('', 'My ID')
+		let my_sid = str(offer_con.signal_con.sid)
+		ui.state('offer_sid').set('text', my_sid)
+		ui.input('offer_sid')
+		if (offer_con.open) {
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
+				offer_con.close()
 			}
-			let offer = rtc.signal_server.offers['demo']
-			ui.state('in_offer').set('text', json(offer))
-			ui.input('in_offer')
-		ui.end_h()
-		ui.text('', 'Status: '+(offer_con.ready ? 'ready' : offer_con.open ? 'open' : 'closed'))
-	ui.end_h()
-	ui.ml(ui.sp())
-	ui.h(0, ui.sp())
-		ui.h(0, ui.sp())
-			let answer = ui.input('in_answer')
-			if (answer_con.open) {
-				if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
-					answer_con.close()
-				}
-			} else if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
-				answer_con.connect()
+		} else if (answer_con.open) {
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
+				answer_con.close()
 			}
-		ui.end_h()
-		ui.text('', 'Status: '+(answer_con.ready ? 'ready' : answer_con.open ? 'open' : 'closed'))
+		} else {
+			if (my_sid) {
+				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
+					offer_con.connect(to_sid)
+				}
+			}
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
+				answer_con.connect(to_sid)
+			}
+		}
+
+		/*
+		ui.state('in_send').set('text', json(signal_queue.signals))
+		ui.input('in_send')
+		if (ui.button('btn_send')) {
+			signal_queue.signals.length = 0
+		}
+		let answer = ui.input('in_answer')
+
+		let in_recv = ui.input('in_recv')
+		if (ui.button('btn_recv')) {
+			for (let [id, k, v] of json_arg(in_recv)) {
+				rtc.signal_server.signal(id, k, v)
+			}
+		}
+		*/
+
 	ui.end_h()
 	ui.scrollbox('sb_shared_screen')
 		ui.bb('', null, null, 't', 'light')
-		ui.stack('', 1, 's', 's', 3000, 3000)
-			//ui.shared_screen(answer_con)
-		ui.end_stack()
+		ui.shared_screen('ss1', answer_con)
 	ui.end_scrollbox()
 ui.end_v()
 `
@@ -639,6 +722,7 @@ ui.main = function() {
 			ui.stack('', .2, 's', 's', ui.em(8))
 				ui.bb('', null, null, 'r', 'light')
 				ui.pr(1)
+				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
 				ui.end_sb()
@@ -682,6 +766,7 @@ ui.main = function() {
 					fgr('frame_pack_time')
 					fgr('frame_compression')
 					fgr('frame_bandwidth')
+					fgr('frame_unpack_time')
 
 				ui.end_v()
 
