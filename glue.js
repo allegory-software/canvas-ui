@@ -1,7 +1,7 @@
 /*
 
 	JavaScript "assorted lengths of wire" library.
-	Written by Cosmin Apreutesei. Public domain.
+	Written by Cosmin Apreutesei. Public Domain.
 
 LOADING
 
@@ -257,10 +257,6 @@ AJAX REQUESTS
 	ajax(opt) -> req
 	get(url, success, [error], [opt]) -> req
 	post(url, data, [success], [error], [opt]) -> req
-
-JS LINTING
-
-	lint([js_file], [lint_options])
 
 */
 
@@ -1805,22 +1801,22 @@ function url_format(t) {
 
 /* events --------------------------------------------------------------------
 
-There are 5 types of events in this joint:
+There are 4 types of events in this joint:
 
 TYPE           FIRE                  LISTEN
 ------------------------------------------------------------------------------
 hook           foo()                 do_{after|before}('foo', f)
-^element       e.dispatchEvent(ev)   e.addEventListener(k, f)
-^window        dispatchEvent(k, ...) addEventListener(k, f, [on])
+^e             e.dispatchEvent(ev)   e.addEventListener(k, f)
 ^^announce     announce(k, ...)      listen(k, f, [on])
 ^^^broadcast   broadcast(k, ...)     listen(k, f, [on])
 
 Hooks are just function composition. They are the fastest but can't be unhooked.
-Use them when extending widgets. Element events are what we get from the browser.
+Use them when extending things. Native events are what we get from the browser.
 Most of them bubble so you get them on parents too. Events that are usually
-interesting to the outside world should be fired with announce() (preferred
-over firing native events on window/document). Broadcast should only be used
-when you need to sync all browser tabs of the same app.
+interesting to other things living in the same tab should be fired with
+announce() (preferrable over firing native events on window/document).
+Broadcast should only be used when you need to sync all browser tabs
+of the same app.
 
 */
 
@@ -1901,6 +1897,10 @@ function setglobal(k, v, default_v) {
 	broadcast('global_changed', k, v, v0)
 	broadcast(k+'_changed', v, v0)
 }
+
+listen('global_changed', function(k, v) {
+	window[k] = v
+})
 
 // multi-language stubs replaced in webb_spa.js ------------------------------
 
@@ -2189,54 +2189,6 @@ function post(url, upload, success, fail, opt) {
 	}, opt))
 }
 
-// JSHint linter -------------------------------------------------------------
-
-// lint any loaded js file from the browser directly, no server needed!
-// we use this mostly to catch `for (v ...` which should be `for(let v ...`,
-// otherwise this linter is pretty useless...
-function lint(file, opt) {
-	if (!G.JSHINT) {
-		let script = document.createElement('script')
-		script.onload = function() {
-			assert(G.JSHINT, 'jshint.js not loaded')
-			lint(file, opt)
-		}
-		script.onerror = function() {
-			assert(false, 'jshint.js failed to load')
-		}
-		script.src = 'jshint.js'
-		script.async = false
-		document.documentElement.append(script)
-		return
-	}
-	for (let sc of document.querySelectorAll('script[src]')) {
-		if (file && !sc.src.endsWith(file))
-			return
-		get(sc.src, function(s) {
-			pr(sc.src, s.length)
-			pr('------------------------------------------------------')
-			JSHINT(s, assign({
-				asi: true,
-				esversion: 6,
-				strict: true,
-				browser: true,
-				'-W014': true, // says starting a line with `?` is "confusing".
-				'-W119': true, // `a**b` is es7
-				'-W082': true, // func decl in block: in strict mode it's no problem.
-				'-W008': true, // says `.5` is confusing :facepalm:
-				'-W054': true, // says we shouldn't use `new Function()` sheesh.
-				'-W069': true, // says `foo['bar']` should be `foo.bar`, whatever.
-				'-W083': true, // says we shouldn't make closures in loops, what a joykill.
-				'-W061': true, // says eval() is "harmful"... only in the wrong hands :)
-				'-W018': true, // says "confusing use of !" in charts.js, dunno why.
-				'-W040': true, // says we shouldn't make standalone functions with `this` inside.
-			}, opt))
-			pr(JSHINT.errors.map(e => sc.src+':'+e.line + ':' + e.character + ': '
-				+ e.code + ' ' + subst(e.raw, e)).join('\n'))
-		})
-	}
-}
-
 // publishing ----------------------------------------------------------------
 
 g.DEBUG                        = DEBUG
@@ -2435,7 +2387,6 @@ g.href                         = href
 g.ajax                         = ajax
 g.get                          = get
 g.post                         = post
-g.lint                         = lint
 
 
 if (document.currentScript.hasAttribute('global')) {
