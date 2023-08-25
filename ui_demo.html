@@ -1,28 +1,13 @@
 <!DOCTYPE html>
-<html>
+<html theme=dark>
 <head>
-<style>
-* {
-	box-sizing: border-box;
-}
-@font-face {
-	font-family: 'far';
-	src: url('fa-regular-400.woff2');
-}
-@font-face {
-	font-family: 'fas';
-	src: url('fa-solid-900.woff2');
-}
-</style>
-</head>
-<body theme=dark>
-<script src=glue.js></script>
-<script src=ui.js></script>
-<script src=ui_validation.js></script>
-<script src=ui_nav.js></script>
-<script src=ui_grid.js></script>
-<script src=adapter.js></script>
-<script src=webrtc.js></script>
+<script src=www/glue.js></script>
+<script src=www/ui.js></script>
+<script src=www/ui_validation.js></script>
+<script src=www/ui_nav.js></script>
+<script src=www/ui_grid.js></script>
+<script src=www/adapter.js></script>
+<script src=www/webrtc.js></script>
 <script>
 
 ui.DEBUG = 1
@@ -868,8 +853,8 @@ ui.main = function() {
 	a_length = ui.a.length
 }
 
-ui.ready()
-
 </script>
+</head>
+<body>
 </body>
 </html>

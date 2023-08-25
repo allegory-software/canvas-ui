@@ -5,9 +5,7 @@
 
 LOADING
 
-	<body>
-		<script src=ui.js [global]>       <-- put it inside the <body> tag!
-	</body>
+	<script src=ui.js [global]>
 
 	global flag:   dump the `ui` namespace into `window`.
 
@@ -107,10 +105,18 @@ ui.set_cursor = function(cursor) {
 
 {
 let style = document.createElement('style')
-document.documentElement.appendChild(style)
 style.innerHTML = `
 
 * { box-sizing: border-box; }
+
+@font-face {
+	font-family: 'far';
+	src: url('fa-regular-400.woff2');
+}
+@font-face {
+	font-family: 'fas';
+	src: url('fa-solid-900.woff2');
+}
 
 html, body {
 	width: 100%;
@@ -143,7 +149,9 @@ body {
 	background: none;
 	outline: none;
 }
+
 `
+document.head.appendChild(style)
 }
 
 // colors --------------------------------------------------------------------
@@ -476,8 +484,6 @@ canvas.classList.add('ui-canvas')
 canvas.setAttribute('tabindex', 0)
 screen.appendChild(canvas)
 
-document.body.appendChild(screen)
-
 let cx = canvas.getContext('2d')
 ui.cx = cx
 
@@ -518,11 +524,20 @@ function animate() {
 }
 ui.animate = animate
 
-ui.ready = function() {
+ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
+ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
+// prevent flicker on load by setting the screen's background color now.
+theme = themes[ui.default_theme]
+document.documentElement.style.background = bg_color('bg')
+ui.screen = screen
+
+document.addEventListener('DOMContentLoaded', function() {
 	ready = true
 	assert(ui.main, 'ui.main not set')
+	document.body.appendChild(ui.screen)
+	reset_canvas()
 	resize_canvas()
-}
+})
 
 // mouse state ---------------------------------------------------------------
 
@@ -889,8 +904,6 @@ let color, color_state, font, font_size, font_weight, line_gap
 
 ui.get_font_size = () => font_size
 
-ui.default_theme = document.body.getAttribute('theme') ?? 'light'
-ui.default_font  = document.body.getAttribute('font' ) ?? 'Arial'
 ui.font_size_normal = 14
 
 function reset_canvas() {
@@ -5942,13 +5955,5 @@ ui.box_widget('frame_graph', {
 		cx.restore()
 	},
 })
-
-// init ----------------------------------------------------------------------
-
-reset_canvas()
-
-// prevent flicker
-theme = themes[ui.default_theme]
-screen.style.background = bg_color('bg')
 
 }()) // module function

@@ -1,3 +1,5 @@
+NOTE: This is in the works! Check out the demo to see how we're advancing.
+
 # :computer_mouse: Canvas UI
 
 Canvas-drawn IMGUI library in JavaScript with:
