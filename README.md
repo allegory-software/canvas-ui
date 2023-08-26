@@ -14,23 +14,23 @@ UI library in JavaScript: canvas-drawn, no dependencies, IMGUI API, screen shari
 	* group-by multiple columns
 	* multiple changes before saving
 	* master-detail with client-side and server-side detail filtering
-* data-bound widgets for data entry: editboxes: text, numeric, dropdown, etc.
+* data-bound widgets for data entry: editbox, dropdown, etc.
 * split-pane layouting widgets: tabs list and splitter.
 * p2p screen-sharing, needs only 2-5 Mbps for 60 fps.
-* RAD UI designer.
-* built-in flex layouting.
-* built-in popup positioning.
+* UI designer for modules and templates.
+* flex layouting.
+* popup positioning.
 * add-your-own layouting algorithms.
-* z-layering
+* z-layering.
 * styling system for colors and spacing better than CSS.
 * animations better than CSS.
-* no dependencies.
 * IMGUI, so stateless, no DOM updating or diff'ing because there is no ODM.
+* no dependencies, no build system, small, hackable code base.
 
 ## Why canvas-drawn?
 
 Sidestepping the DOM and CSS allows us to fix all the
-[problems with the web][https://github.com/allegory-software/x-widgets/blob/main/WHY-WEB-SUCKS.md]
+[problems with the web](https://github.com/allegory-software/x-widgets/blob/main/WHY-WEB-SUCKS.md)
 that bugged us for years in one fell swoop. But it also opens up opportunities
 to create better models for UIs in general. For instance, the IMGUI approach
 is reactive by design, but implementing a reactive system on top of the DOM
