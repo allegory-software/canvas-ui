@@ -17,15 +17,15 @@ UI library in JavaScript: canvas-drawn, no dependencies, IMGUI API, screen shari
 * data-bound widgets for data entry: editbox, dropdown, etc.
 * split-pane layouting widgets: tabs list and splitter.
 * p2p screen-sharing, needs only 2-5 Mbps for 60 fps.
-* UI designer for modules and templates.
+* UI designer for templates.
 * flex layouting.
 * popup positioning.
-* add-your-own layouting algorithms.
 * z-layering.
 * styling system for colors and spacing better than CSS.
 * animations better than CSS.
 * IMGUI, so stateless, no DOM updating or diff'ing because there is no ODM.
 * no dependencies, no build system, small, hackable code base.
+* possible to add new layouting algorithms.
 
 ## Why canvas-drawn?
 
@@ -50,7 +50,6 @@ animations, box model, etc. Most of these are easy though and you can even
 do a better job with not a lot of code. But some are hard or outright
 not feasible because of missing APIs. Text APIs in particular are
 kindergarten-level in the browser. So things like BiDi (UAX#9), Unicode line
-breaking algorithm (UAX#14), dictionary-based word wrapping, underlines
-that break under letter stems, those things are hard and we don't implement
-them.
+breaking (UAX#14), dictionary-based word wrapping, underlines that break under
+letter stems, those things are hard, and we don't implement them.
 
