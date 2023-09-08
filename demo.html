@@ -29,11 +29,11 @@ let pr = console.log
 let tuts = []
 let demos = []
 
-runevery(1, async function() {
+ui.frame_changed = async function() {
 	if (!offer_con) return
 	let cb = await ui.pack_frame()
 	offer_con.send(cb)
-})
+}
 
 listen('rtc', function(c) {
 	ui.animate()

@@ -1439,6 +1439,8 @@ function frame_end_check() {
 	rec_stack_check()
 }
 
+ui.frame_changed = noop
+
 function redraw_all() {
 
 	let redraw_count = 0
@@ -1496,10 +1498,10 @@ function redraw_all() {
 
 			draw_frame(recs, layers)
 
-			pack_frame()
-
 			t1 = clock_ms()
 			frame_graph_push('frame_draw_time', t1 - t0)
+
+			ui.frame_changed()
 		}
 		reset_canvas()
 
