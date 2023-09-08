@@ -20,7 +20,12 @@ let {
 } = glue
 
 rtc.DEBUG = 1
-rtc.servers = null
+rtc.servers = {
+	iceServers: [{
+		// Google STUN server
+		urls: 'stun:74.125.142.127:19302'
+	}]
+}
 
 function rtc_debug(...args) {
 	if (!rtc.DEBUG) return
@@ -143,6 +148,11 @@ rtc.answer = function(e) {
 		e.signal_con.to_sid = to_sid
 
 		e.con = new RTCPeerConnection(rtc.servers)
+
+		e.con.onicecandidate = function(ev) {
+			if (!ev.candidate) return
+			e.signal_con.signal('candidate', ev.candidate)
+		}
 
 		e.con.ondatachannel = function(ev) {
 
