@@ -3893,6 +3893,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 		ui.state(id).set('con', answer_con)
 		answer_con.recv = async function(cb) {
 			answer_con.frame = await unpack_frame(cb)
+			ui.animate()
 		}
 	}
 
