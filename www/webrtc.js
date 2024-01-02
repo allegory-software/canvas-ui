@@ -223,6 +223,15 @@ rtc.answer = function(e) {
 		}
 	}
 
+	e.send = function(s) {
+		if (!e.ready)
+			return
+		let wait_bytes = e.chan.bufferedAmount
+		if (wait_bytes > 64 * 1024)
+			return
+		e.chan.send(s)
+	}
+
 	return e
 }
 

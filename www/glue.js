@@ -356,7 +356,8 @@ function lerp(x, x0, x1, y0, y1) {
 
 // % that works with negative numbers.
 function mod(a, b) {
-	return (a % b + b) % b
+	let r = a % b
+	return r < 0 ? r+b : r
 }
 
 function nextpow2(x) {
@@ -2443,6 +2444,9 @@ n.base       = nm(format_base)
 let a = Array.prototype
 
 // NOTE: making these non-enumerable methods to avoid affecting Object.keys(array).
+
+// function array_last() { return this[this.length-1] }
+// method(a, 'last             ', m(array_last              ))
 
 method(a, 'extend           ', m(extend                  ))
 method(a, 'set              ', m(array_set               ))

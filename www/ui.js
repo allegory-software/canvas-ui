@@ -71,7 +71,7 @@ const {
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str, json, json_arg,
 	obj, set, map, array,
-	assign, insert, map_assign,
+	assign, insert, map_assign, remove_value,
 	noop, return_true, do_after,
 	runafter,
 	memoize,
@@ -534,6 +534,7 @@ ui.screen = screen
 document.addEventListener('DOMContentLoaded', function() {
 	ready = true
 	assert(ui.main, 'ui.main not set')
+	//document.body.innerHTML = ''
 	document.body.appendChild(ui.screen)
 	reset_canvas()
 	resize_canvas()
@@ -541,71 +542,140 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // mouse state ---------------------------------------------------------------
 
-ui.mx = null
-ui.my = null
+// we support multiple pointers for screen sharing / remote control situations
+// but only one can be active at any one time. so two users can't hover two
+// things at the same time and can't drag multiple things at the same time,
+// and other users can't use the mouse while one user is dragging something.
+
+// "true" multiple pointer support may sound cool, but it would complicate
+// mouse handling *for every widget*, and it would be a nightmare to figure
+// out what ops are allowed in the UI while one user is dragging something.
+
+ui.pointers = []
+
+ui.add_pointer = function() {
+
+	let p = obj()
+
+	p.mx = null
+	p.my = null
+	p.pressed = false
+	reset_pointer_state(p)
+
+	ui.pointers.push(p)
+
+	p.remove = function() {
+		remove_value(ui.pointers, p)
+	}
+
+	p.activate = function() {
+
+		if (ui.pointer && ui.pointer != p && ui.pointer.captured)
+			return
+
+		ui.pointer = p
+
+		if (!p.captured) {
+			if (ui.mx == null && p.mx != null) ui.mouseenter = true
+			if (ui.mx != null && p.mx == null) ui.mouseleave = true
+		}
+
+		ui.mx         = p.mx
+		ui.my         = p.my
+		ui.pressed    = p.pressed
+		ui.click      = p.click
+		ui.clickup    = p.clickup
+		ui.wheel_dy   = p.wheel_dy
+		ui.trackpad   = p.trackpad
+
+		return true
+	}
+
+	return p
+}
+
 ui.mx0 = null
 ui.my0 = null
-ui.pressed = false
-ui.click = false
-ui.clickup = false
 ui.captured_id = null
-ui.wheel_dy = 0
-ui.trackpad = false
-ui.mouseenter = false
-ui.mouseleave = false
+
+ui.mouse = ui.add_pointer()
+
+ui.mouse.activate()
+
+function reset_pointer_state(p) {
+	p.click = false
+	p.clickup = false
+	p.wheel_dy = 0
+	p.trackpad = false
+	p.mouseenter = false
+	p.mouseleave = false
+	p.changed = false
+}
+
+function diff_pointer_state(d, s) {
+	let o = obj()
+
+}
 
 function update_mouse(ev) {
-	ui.mx = round(ev.clientX * dpr)
-	ui.my = round(ev.clientY * dpr)
+	ui.mouse.mx = round(ev.clientX * dpr)
+	ui.mouse.my = round(ev.clientY * dpr)
+	ui.mouse.changed = true
 }
 
 canvas.addEventListener('pointerdown', function(ev) {
 	update_mouse(ev)
-	if (ev.which == 1) {
-		ui.click = true
-		ui.pressed = true
+	if (ev.button == 0) {
+		ui.mouse.click = true
+		ui.mouse.pressed = true
 		this.setPointerCapture(ev.pointerId)
-		animate()
+		ui.mouse.captured = true
 	}
+	ui.mouse.activate()
+	animate()
 })
 
 canvas.addEventListener('pointerup', function(ev) {
 	update_mouse(ev)
-	if (ev.which == 1) {
-		ui.pressed = false
-		ui.clickup = true
+	if (ev.button == 0) {
+		ui.mouse.pressed = false
+		ui.mouse.clickup = true
 		this.releasePointerCapture(ev.pointerId)
-		animate()
+		ui.mouse.captured = false
 	}
+	ui.mouse.activate()
+	animate()
 })
 
 canvas.addEventListener('pointermove', function(ev) {
 	update_mouse(ev)
+	ui.mouse.activate()
 	animate()
 })
 
 canvas.addEventListener('pointerenter', function(ev) {
 	update_mouse(ev)
-	if (!ui.captured_id)
-		ui.mouseenter = true
+	ui.mouse.activate()
+	animate()
 })
 
 canvas.addEventListener('pointerleave', function(ev) {
-	if (!ui.captured_id) {
-		ui.mx = null
-		ui.my = null
-		ui.mouseleave = true
+	if (!(ui.pointer == ui.mouse && ui.pointer.captured)) {
+		ui.mouse.mx = null
+		ui.mouse.my = null
 	}
+	ui.mouse.activate()
 	ui.set_cursor()
 	animate()
 })
 
 canvas.addEventListener('wheel', function(ev) {
-	ui.wheel_dy = ev.wheelDeltaY
-	if (!ui.wheel_dy)
+	ui.mouse.wheel_dy = ev.wheelDeltaY
+	if (!ui.mouse.wheel_dy)
 		return
-	ui.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
+	ui.mouse.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
 	update_mouse(ev)
+	ui.mouse.activate()
 	animate()
 })
 
@@ -616,7 +686,7 @@ let capture_state = map()
 ui.capture = function(id) {
 	if (!id)
 		return
-	if (ui.captured_id)
+	if (ui.captured_id != null)
 		return
 	if (!ui.pressed)
 		return
@@ -849,6 +919,8 @@ function state_update(id, m) {
 
 ui.state = function(id, k) {
 	if (!id)
+		return
+	if (ss_id && id != ss_id)
 		return
 	let m = id_state_maps.get(id)
 	if (!m) {
@@ -1235,7 +1307,7 @@ ui._hit_state_maps = hit_state_maps
 
 function hit(id, k) {
 	if (!id) return
-	if (ui.captured_id) // unavailable while captured
+	if (ui.pointer_id != null) // unavailable while captured
 		return
 	let m = hit_state_maps.get(id)
 	return k ? m?.get(k) : m
@@ -1325,8 +1397,8 @@ async function pack_frame_json() {
 		v: ui.VERSION,
 		w: screen_w,
 		h: screen_h,
-		mx: ui.mx,
-		my: ui.my,
+		mx: ui.mouse.mx,
+		my: ui.mouse.my,
 		recs: recs,
 		layers: layers,
 	})
@@ -1441,6 +1513,14 @@ function frame_end_check() {
 
 ui.frame_changed = noop
 
+function draw_pointer(p, x0, y0) {
+	if (p.mx == null)
+		return
+	cx.beginPath()
+	cx.fillStyle = 'red'
+	cx.fillRect(x0 + p.mx, y0 + p.my, 5, 5)
+}
+
 function redraw_all() {
 
 	let redraw_count = 0
@@ -1449,7 +1529,7 @@ function redraw_all() {
 
 		want_redraw = false
 
-		if (ui.captured_id) {
+		if (ui.captured_id != null) {
 			ui.hit_for = 'captured'
 			hit_frame(recs, layers)
 			if (ui.dragging) {
@@ -1498,6 +1578,10 @@ function redraw_all() {
 
 			draw_frame(recs, layers)
 
+			for (let p of ui.pointers)
+				if (p != ui.mouse)
+					draw_pointer(p, 0, 0)
+
 			t1 = clock_ms()
 			frame_graph_push('frame_draw_time', t1 - t0)
 
@@ -1507,12 +1591,11 @@ function redraw_all() {
 
 		if (ui.clickup)
 			ui.captured_id = null
-		ui.click = false
-		ui.clickup = false
-		ui.wheel_dy = 0
-		ui.trackpad = false
-		ui.mouseenter = false
-		ui.mouseleave = false
+
+		for (let p of ui.pointers)
+			reset_pointer_state(p)
+		reset_pointer_state(ui)
+
 		key_state_now.clear()
 		event_state.clear()
 		focusing_id = null
@@ -1789,6 +1872,7 @@ function hit_rect(x, y, w, h) {
 		(ui.my >= y && ui.my < y + h)
 	)
 }
+ui.hit_rect = hit_rect
 
 function hit_box(a, i) {
 	let px1 = a[i+PX1+0]
@@ -3672,20 +3756,39 @@ function input_keydown(ev) {
 
 function input_create(id, input_type) {
 	let input = ui.state(id, 'input')
-	if (input)
-		return
-	input = document.createElement('input')
-	input._ui_id = id
-	if (input_type)
-		input.setAttribute('type', input_type)
-	input.classList.add('ui-input')
-	input.addEventListener('focus', input_focus)
-	input.addEventListener('blur' , input_blur)
-	input.addEventListener('input', input_input)
-	input.addEventListener('keydown', input_keydown)
-	screen.appendChild(input)
-	ui.state(id).set('input', input)
-	ui.on_free(id, input_free)
+	if (!input) {
+		input = document.createElement('input')
+		input._ui_id = id
+		if (input_type)
+			input.setAttribute('type', input_type)
+		input.classList.add('ui-input')
+		input.addEventListener('focus'  , input_focus)
+		input.addEventListener('blur'   , input_blur)
+		input.addEventListener('input'  , input_input)
+		input.addEventListener('keydown', input_keydown)
+		screen.appendChild(input)
+		ui.state(id).set('input', input)
+		ui.on_free(id, input_free)
+	}
+	return input
+}
+
+function remote_input_create(id, input_type) {
+	let inputs = ui.state(ss_id, 'inputs')
+	let input = inputs.get(id)
+	if (!input) {
+		input = document.createElement('input')
+		input._ui_id = id
+		if (input_type)
+			input.setAttribute('type', input_type)
+		input.classList.add('ui-input')
+		input.addEventListener('focus'  , remote_input_focus)
+		input.addEventListener('blur'   , remote_input_blur)
+		input.addEventListener('input'  , remote_input_input)
+		input.addEventListener('keydown', remote_input_keydown)
+		screen.appendChild(input)
+		inputs.set(id, input)
+	}
 	return input
 }
 
@@ -3709,6 +3812,9 @@ draw[CMD_TEXT] = function(a, i) {
 
 	if (editable) {
 		let input = ui.state(id, 'input')
+
+		if (!input && ss_id)
+			input = remote_input_create(id, input_type)
 
 		input.value = s
 		input.style.fontFamily = font
@@ -3897,6 +4003,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 			answer_con.frame = await unpack_frame(cb)
 			ui.animate()
 		}
+		answer_con.pointer = obj()
 	}
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
@@ -3913,24 +4020,74 @@ ss.measure = function(a, i, axis) {
 	add_ct_min_wh(a, axis, min_w)
 }
 
-let in_ss
+function ss_free_inputs(s) {
+	for (let input of s.get('inputs').values())
+		input.remove()
+}
+
+let ss_id
 ss.draw = function(a, i) {
 	let id = a[i+SS_ID]
-	if (in_ss == id)
+	if (ss_id == id)
 		return
-	let t = ui.state(id, 'con')?.frame
-	//let t = a[i+SS_ID]
-	if (!t) return
+	let con = ui.state(id, 'con')
+	let frame = con?.frame
+	//let frame = a[i+SS_ID]
+	if (!frame) return
 	let x = a[i+0]
 	let y = a[i+1]
 	let w = a[i+2]
 	let h = a[i+3]
-	in_ss = id
+	ss_id = id
+	if (!ui.state(id, 'inputs')) {
+		ui.state(id).set('inputs', map()) // {id->input}
+		ui.on_free(id, ss_free_inputs)
+	}
 	cx.save()
 	cx.translate(x, y)
-	draw_frame(t.recs, t.layers)
+	draw_frame(frame.recs, frame.layers)
 	cx.restore()
-	in_ss = null
+	draw_pointer(frame, x, y)
+	ss_id = null
+
+	// send mouse state to the remote peer.
+	// make sure not to leak mouse state when ouside the shared screen viewport.
+	if (ui.mouse.changed) {
+		let m = ui.mouse
+		let p = con.pointer
+
+		let mx = m.mx
+		let my = m.my
+		if (mx != null) {
+			mx -= x
+			my -= y
+			if (!m.captured)
+				if (mx < 0 || my < 0 || mx >= w || my >= h) {
+					mx = null
+					my = null
+				}
+		}
+
+		if (
+			mx         != p.mx       ||
+			my         != p.my       ||
+			m.pressed  != p.pressed  ||
+			m.wheel_dy != p.wheel_dy ||
+			m.trackpad != p.trackpad
+		) {
+			p.mx       = mx
+			p.my       = my
+			p.pressed  = m.pressed
+			p.click    = m.click
+			p.clickup  = m.clickup
+			p.wheel_dy = m.wheel_dy
+			p.trackpad = m.trackpad
+
+			con.send(json(p))
+		}
+
+	}
+
 }
 
 ui.box_widget('shared_screen', ss)
@@ -4671,7 +4828,7 @@ ui.drag = function(id, move, dx0, dy0) {
 	let dx = dx0 ?? 0
 	let dy = dy0 ?? 0
 	let cs = captured(id)
-	let state
+	let state = null
 	if (cs) {
 		if (move_x) { dx = cs.get('drag_x0') + (ui.mx - ui.mx0) }
 		if (move_y) { dy = cs.get('drag_y0') + (ui.my - ui.my0) }
@@ -5864,19 +6021,16 @@ ui.widget('bg_dots', {
 ui.frame_graphs = {}
 function frame_graph(name, unit, decimals, min, max, duration) {
 	let n = 60 * (duration ?? 10)
-	let g = {n: n, unit: unit, min: min, max: max, decimals: decimals}
 	let va = []
-	let i = 0
+	let mf = 10**decimals
+	let g = {i: 0, n: n, unit: unit, min: min, max: max, decimals: decimals, mf: mf,
+		values: va}
 	for (let i = 0; i < n; i++)
 		va[i] = min
 	g.push = function(v) {
-		va[i] = v
-		i = (i + 1) % n
+		va[g.i] = round(v * mf)
+		g.i = (g.i + 1) % n
 	}
-	g.at = function(j) {
-		return va[(i+j) % n]
-	}
-	g.i = () => i
 	ui.frame_graphs[name] = g
 }
 function frame_graph_push(name, v) {
@@ -5895,7 +6049,8 @@ frame_graph('frame_unpack_time', 'ms'  , 1, 0,    10)
 
 ui.box_widget('frame_graph', {
 	create: function(cmd, name, fr, align, valign, min_w, min_h) {
-		ui_cmd_box(cmd, fr, align, valign, min_w, min_h, name)
+		ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			name, ui.frame_graphs[name])
 		//ui.animate()
 	},
 	draw: function(a, i) {
@@ -5904,7 +6059,7 @@ ui.box_widget('frame_graph', {
 		let w  = a[i+2]
 		let h  = a[i+3]
 		let name = a[i+S-1]
-		let g = ui.frame_graphs[name]
+		let g    = a[i+S+0]
 		if (!g) return
 
 		cx.save()
@@ -5914,13 +6069,13 @@ ui.box_widget('frame_graph', {
 
 		cx.beginPath()
 		let step = round((g.n / w) * 2)
-		let i0 = step - g.i() % step
+		let i0 = step - g.i % step
 		let min =  1/0
 		let max = -1/0
 		let sum = 0
 		let n = 0
 		for (let i = 0; i < g.n; i += step) {
-			let v = g.at(i0+i)
+			let v = g.values[(g.i+i0+i) % g.n] / g.mf
 			min = Math.min(min, v)
 			max = Math.max(max, v)
 			sum += v

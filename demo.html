@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html theme=dark>
-<head>
+<body>
 <base href="www/">
 <link rel="preload" href="fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
@@ -18,6 +18,7 @@ ui.DEBUG = 1
 const {
 	isnum, isobject, isfunc, isstr,
 	assert,
+	assign,
 	str, dec, format_kbytes, json, json_arg,
 	runevery, runafter,
 	listen,
@@ -58,7 +59,17 @@ let signal_server, offer_con
 
 function demo_share_screen_init() {
 	signal_server = signal_server || rtc.demo_signal_server()
-	offer_con = offer_con || rtc.offer({signal_server: signal_server})
+	if (!offer_con) {
+		offer_con = rtc.offer({signal_server: signal_server})
+		let p = ui.add_pointer()
+		offer_con.pointer = p
+		offer_con.recv = function(s) {
+			let t = json_arg(s)
+			assign(p, t)
+			p.activate()
+			ui.animate()
+		}
+	}
 }
 
 demos.share_screen = `
@@ -707,9 +718,8 @@ ui.main = function() {
 
 		ui.h()
 
-			ui.stack('', .2, 's', 's', ui.em(8))
+			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.bb('', null, null, 'r', 'light')
-				ui.pr(1)
 				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
@@ -857,7 +867,5 @@ ui.main = function() {
 }
 
 </script>
-</head>
-<body>
 </body>
 </html>
