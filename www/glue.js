@@ -400,6 +400,7 @@ function wrap(inherited, func) {
 }
 
 function do_before(inherited, func) {
+	if (!func) return inherited
 	return repl(inherited, noop) && function(...args) {
 		func.call(this, ...args)
 		inherited.call(this, ...args)
@@ -407,6 +408,7 @@ function do_before(inherited, func) {
 }
 
 function do_after(inherited, func) {
+	if (!func) return inherited
 	return repl(inherited, noop) && function(...args) {
 		inherited.call(this, ...args)
 		func.call(this, ...args)

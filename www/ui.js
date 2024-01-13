@@ -5,6 +5,7 @@
 
 LOADING
 
+	<script src=glue.js [global]>
 	<script src=ui.js [global]>
 
 	global flag:   dump the `ui` namespace into `window`.
@@ -161,11 +162,11 @@ function hsl(h, s, L, a) {
 }
 
 function hsl_adjust(c, h, s, L, a) {
-	return hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * a)
+	return hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * (a ?? 1))
 }
 
 ui.hsl = hsl
-ui.hsl_adjust
+ui.hsl_adjust = hsl_adjust
 
 // themes --------------------------------------------------------------------
 
@@ -582,6 +583,8 @@ ui.add_pointer = function() {
 
 		ui.mx         = p.mx
 		ui.my         = p.my
+		ui.mx_notrans = p.mx
+		ui.my_notrans = p.my
 		ui.pressed    = p.pressed
 		ui.click      = p.click
 		ui.clickup    = p.clickup
@@ -678,6 +681,19 @@ canvas.addEventListener('wheel', function(ev) {
 	ui.mouse.activate()
 	animate()
 })
+
+// mouse pointer on current transform ----------------------------------------
+
+let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
+let transform_point_y = (m, x, y) => x * m.b + y * m.d + m.f
+
+ui.update_mouse = function() {
+	let m = cx.getTransform().invertSelf()
+	let mx = ui.mx_notrans
+	let my = ui.my_notrans
+	ui.mx = transform_point_x(m, mx, my)
+	ui.my = transform_point_y(m, mx, my)
+}
 
 // mouse capture state -------------------------------------------------------
 
@@ -1900,9 +1916,9 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		}
 	}
 	return ui.widget(cmd_name, assign({
-		measure   : box_measure,
-		position  : box_position,
-		translate : box_translate,
+		measure   : do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
+		position  : do_after(do_before(box_position  , t.before_position ), t.after_position ),
+		translate : do_after(do_before(box_translate , t.before_translate), t.after_translate),
 		hit       : ID != null && box_hit,
 		is_flex_child: true,
 	}, t), is_ct)
@@ -5886,6 +5902,7 @@ ui.color_picker = function(id, hue, sat, lum) {
 }
 
 // bg_dots -------------------------------------------------------------------
+// background animation with randomly connected dots.
 
 {
 let dot_density = 2 // per 100px^2 surface
