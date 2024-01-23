@@ -73,7 +73,7 @@ const {
 	dec, num, str, json, json_arg,
 	obj, set, map, array,
 	assign, insert, map_assign, remove_value,
-	noop, return_true, do_after,
+	noop, return_true, do_after, do_before,
 	runafter,
 	memoize,
 	freelist,
@@ -81,6 +81,7 @@ const {
 	hsl_to_rgb_hex,
 	PI,
 	runevery,
+
 } = glue
 
 let clock_ms = () => performance.now()

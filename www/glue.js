@@ -55,7 +55,7 @@ MATH
 NUMBER FORMATTING
 
 	dec(x, [decimals])
-	format_base(x, [base], [digits])
+	format_base(x, [base], [digits], [leading_digit])
 
 CALLBACKS
 
@@ -107,7 +107,7 @@ ARRAYS
 	remove(a, i) -> v
 	remove_value(a, v) -> i
 	remove_values(a, cond) -> a
-	array_move(a, i1, n, insert_i)
+	array_move(a, i1, n, insert_i, [before])
 	array_equals(a1, a2, [i1], [i2]) -> t|f
 	binsearch(a, v, cmp, i1, i2)
 	uniq_sorted(a) -> a
@@ -188,7 +188,8 @@ DATE/TIME PARSING
 
 FILE SIZE FORMATTING
 
-	format_kbytes(x, [dec], [mag], [mul = 1024]) -> s
+	format_kbytes(x, [dec], [mag]) -> s
+	format_kcount(x, [dec], [mag]) -> s
 
 COLORS
 
@@ -354,10 +355,9 @@ function lerp(x, x0, x1, y0, y1) {
 	return y0 + (x-x0) * ((y1-y0) / ((x1 - x0) ? (x1 - x0) : x1))
 }
 
-// % that works with negative numbers.
+// branchless % that works with negative numbers and never returns -0.
 function mod(a, b) {
-	let r = a % b
-	return r < 0 ? r+b : r
+	return a - (b * floor(a / b))
 }
 
 function nextpow2(x) {
@@ -376,10 +376,10 @@ let acos  = Math.acos
 let atan  = Math.atan
 let atan2 = Math.atan2
 
-function format_base(x, base, digits) {
+function format_base(x, base, digits, leading) {
 	let s = x.toString(base)
 	if (digits != null)
-		s = s.padStart(digits, '0')
+		s = s.padStart(digits, leading ?? '0')
 	return s
 }
 
@@ -674,9 +674,13 @@ function remove_values(a, cond) {
 }
 
 // move the n elements at i1 to a new position which is an index in the
-// array as it stands after the removal of the elements to be moved.
-function array_move(a, i1, n, insert_i) {
+// array as it stands after the removal of the elements to be moved,
+// or, if using `before` flag, before the removal of the elements to be moved.
+function array_move(a, i1, n, insert_i, before) {
+	if (before && insert_i > i1)
+		insert_i--
 	a.splice(insert_i, 0, ...a.splice(i1, n))
+	return insert_i
 }
 
 function array_equals(a0, a, i0, i1) {
@@ -711,8 +715,9 @@ function binsearch(a, v, cmp, i1, i2) {
 	return hi
 }
 
-function uniq_sorted() {
-	return a.remove_values(function(v, i, a) {
+// NOTE: equal values need to clumped together, otherwise sorting is irrelevant.
+function uniq_sorted(a) {
+	return remove_values(a, function(v, i, a) {
 		return i && v == a[i-1]
 	})
 }
@@ -1557,9 +1562,9 @@ let format_kcount
 {
 let suffixes = ['', 'K', 'M', 'G', 'T', 'P', 'E']
 let magnitudes = {K: 1, M: 2, G: 3, T: 4, P: 5, E: 6}
-format_kcount = function(d, mag, mul) {
-	let i = mag ? magnitudes[mag] : clamp(floor(logbase(this, 1000)), 0, suffixes.length-1)
-	let z = this / 1000**i
+format_kcount = function(x, d, mag) {
+	let i = mag ? magnitudes[mag] : clamp(floor(logbase(x, 1000)), 0, suffixes.length-1)
+	let z = x / 1000**i
 	return dec(z, d) + suffixes[i]
 }
 }
@@ -2409,37 +2414,35 @@ function m(f) {
 
 // String extensions ---------------------------------------------------------
 
-let sm = m
 let s = String.prototype
 
-s.subst            = sm(subst           )
-s.display_name     = sm(display_name    )
-s.lower_ai_ci      = sm(lower_ai_ci     )
-s.find_ai_ci       = sm(find_ai_ci      )
-s.catany           = sm(catany          )
-s.esc              = sm(esc             )
-s.words            = sm(words           )
-s.wordset          = sm(wordset         )
-s.captures         = sm(captures        )
-s.parse_timeofday  = sm(parse_timeofday )
-s.parse_date       = sm(parse_date      )
-s.parse_duration   = sm(parse_duration  )
+s.subst            = m(subst           )
+s.display_name     = m(display_name    )
+s.lower_ai_ci      = m(lower_ai_ci     )
+s.find_ai_ci       = m(find_ai_ci      )
+s.catany           = m(catany          )
+s.esc              = m(esc             )
+s.words            = m(words           )
+s.wordset          = m(wordset         )
+s.captures         = m(captures        )
+s.parse_timeofday  = m(parse_timeofday )
+s.parse_date       = m(parse_date      )
+s.parse_duration   = m(parse_duration  )
 
 alias(s, 'starts', 'startsWith')
 alias(s, 'ends'  , 'endsWith'  )
 
 // Number extensions ---------------------------------------------------------
 
-let nm = m
 let n = Number.prototype
 
-n.timeofday  = nm(format_timeofday)
-n.date       = nm(format_date)
-n.duration   = nm(format_duration)
-n.timeago    = nm(format_timeago)
-n.kbytes     = nm(format_kbytes)
-n.kcount     = nm(format_kcount)
-n.base       = nm(format_base)
+n.timeofday  = m(format_timeofday)
+n.date       = m(format_date)
+n.duration   = m(format_duration)
+n.timeago    = m(format_timeago)
+n.kbytes     = m(format_kbytes)
+n.kcount     = m(format_kcount)
+n.base       = m(format_base)
 
 // Array extensions ----------------------------------------------------------
 
