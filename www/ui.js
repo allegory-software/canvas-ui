@@ -10,47 +10,292 @@ LOADING
 
 	global flag:   dump the `ui` namespace into `window`.
 
-WIDGETS
+GLOBLAS
 
-	h|v(fr, )
+	scrollbar_thickness         = 6
+	scrollbar_thickness_active  = 12
+	font_size_normal            = 14
 
-	color(c, cs)
-	font(fs)
-	font_size(fs)
-	font_weight(fw)
-	line_gap(lg)
-	text()
+THEME DEFINITIONS
+
+	default_theme   = 'dark'
+	default_font    = 'Arial'
+
+	* = fg | border | bg
+   *_style         (theme, name, state, h, s, L, a, is_dark)      define a color
+	shadow_style    (theme, name, x, y, blur, spread, inset, h, s, L, a)  define a shadow
+
+BUILT-IN STYLES
+
+	fg              : text label link button-danger
+	bg              : bg bg0 bg1 bg2 bg3 item toggle row
+	border          : light intense
+	shadow          : button menu modal picker thumb tooltip
+
+BUILT-IN STATES
+
+	general         : normal hover active focused
+	list item       : item-selected item-focused item-error
+	grid cell       : new modified
+
+THEME API
+
+	* = fg | border | bg
+	*_color         (name, state, theme) -> color                  get a color
+	*_color_hsl     (name, state, theme) -> [color, h, s, L, a]    get a color with HSL components
+	bg_is_dark      (bg_color) -> t|f
+	get_theme       () -> dark|light
+	dark            () -> t|f
+	hsl             (h, s, L, a) -> color
+	hsl_adjust      (c, h, s, L, a) -> color
+
+	set_shadow      (name)  use in draw callback to set a shadow
+
+RENDERING
+
+	cx              = access to canvas context for drawing
+	screen          = access to canvas container div
+	animate         ()  request another animation frame
+	redraw          ()  request another redraw pass in this frame
+	resize          ()  resize canvas and request another animation frame
+
+MOUSE STATE
+
+	pointers        [p1, ...]
+	add_pointer     () -> pointer
+
+	mouse           = default pointer that tracks the local mouse
+	mx0 my0         = mouse position when started dragging
+	update_mouse    ()   update mouse coords to current transform
+	hit_rect        (x, y, w, h) -> t|f
+
+	captured_id     = id of widget that captured the mouse
+	capture         (id) -> captured_state_map         capture the mouse
+	captured        (id) -> captured_state_map | null  get captured state if mouse is captured
+
+	hover           (id) -> hit_state_map          declare that mouse hovers widget
+	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget
+
+	drag            (id, move, dx0, dy0) -> [state, dx, dy]
+
+	set_cursor      (cursor)   set cursor for this frame
+
+KEYBOARD STATE
+
+	keydown         (key) -> t|f     check if a key was just pressed
+	keyup           (key) -> t|f     check if a key was just depressed
+	key             (key) -> t|f     check if a key is pressed
+
+LAYERS
+
+	built-in layers : base handle window tooltip open
+	layer           (name, index)   define a new layer
+
+SCOPES
+
+	scope           ()
+	end_scope       ()
+
+WIDGET STATE
+
+	keepalive       (id)                 keep another widget alive this frame
+	state           (id) -> state_map    get widget state map
+	state_init      (id, k, v)           set widget state var if widget is alive
+	on_free         (id, free_fn)        add a widget gc hook
+
+FOCUS STATE
+
+	focused_id      = id of focused widget
+	focus           (id)
+	focused         (id) -> t|f
+	focusing        (id) -> t|f
+
+PADDINGS & MARGINS
+
+	rem             (rem) -> x   rem units to pixels
+	em              (em) -> x    em units to pixels
+
+	sp025           () -> rem( .125)
+	sp05            () -> rem( .25)
+	sp075           () -> rem( .375)
+	sp              () -> rem( .5)
+	sp1             () -> rem( .5)
+	sp2             () => rem( .75)
+	sp4             () => rem(1)
+	sp8             () => rem(2)
+
+	p[adding]           ([px1], [py1], [px2], [py2])
+	p[adding_]l[eft]    (p)
+	p[adding_]r[ight]   (p)
+	p[adding_]t[op]     (p)
+	p[adding_]b[ottom]  (p)
+
+	m[argin]            ([mx1], [my1], [mx2], [my2])
+	m[argin_]l[eft]     (m)
+	m[argin_]r[ight]    (m)
+	m[argin_]t[op]      (m)
+	m[argin_]b[ottom]   (m)
+
+COMMAND RECORDING
+
+	record          ()
+	end_record      () -> a1
+	record_play     (a1)
+
+WIDGET DEFINITIONS
+
+	cmd             (cmd_id, ...args) -> i0
+
+	widget          (cmd_name, t, is_ct)
+	t.measure       : f(a, i, axis)    measure widget on axis (0 for x, 1 for y)
+	t.measure_end   : f(a, i, axis)    measure widget on axis at widget's end() call
+	t.position      : f(a, i, axis, x, w, ct_i)   position widget on axis
+	t.translate     : f(a, i, x, y)               translate widget
+	t.draw          : f(a, i, recs)     draw widget
+	t.draw_end      : f(a, i)           draw widget at widget's end() call
+	t.hit           : f(a, i, recs)     hit-test widget
+	t.reindex       : f(a, i, offset)   update widget's internal indices in a
+	t.is_flex_child : t|f   has fr at a[i+FR] so it can be a child of a flex container
+
+	measure         (id)        request that widget be measured; puts x,y,w,h in its state map
+
+BOX WIDGET DEFINITIONS
+
+	cmd_box         (cmd, fr, align, valign, min_w, min_h, ...args) -> i0
+	box_widget      (cmd_name, t, is_ct)   define a box widget
+	box_ct_widget   (cmd_name, t)          define a container box widget
+
+	PX1             = index offset in a for x1 padding; y1 padding at PX1+1
+	PX2             = index offset in a for x2 padding; y1 padding at PX2+1
+	MX1             = index offset in a for x1 margin; y1 margin at MX1+1
+	MX2             = index offset in a for x2 margin; y2 margin at MX2+1
+	FR              = index offset in a for fr
+	ALIGN           = index offset in a for align
+	S               = index offset in a for arg#1 after box args
+
+	add_ct_min_wh   (a, axis, w)   use in measure callback to declare min width/height
+
+	align_x         (a, i, axis, sx, sw)  use in position callback
+	align_w         (a, i, axis, sx, sw)  use in position callback
+	inner_x         (a, i, axis, ct_x)    use in position callback
+	inner_w         (a, i, axis, ct_x)    use in position callback
+
+	force_scroll    (a, i, sx, sy)  use in translate callback to force-scroll another widget
+
+	ct_i            () -> ct_i    get container index in a; use in widget creation and in measure callback
+
+	popup_target_rect (a, i)  use in draw callback to find a popup's target rect
+
+SCREEN SHARING
+
+	frame           (on_measure, on_frame, fr, align, valign, min_w, min_h)
+	shared_screen   (id, answer_con, fr, align, valign, min_w, min_h)
+
+	pack_frame      () -> s     pack current frame for sending over the network
+	frame_changed   = noop      hook this for sending frames out
+
+CONTAINERS
+
+	hv              ('h'|'v', fr, gap, align, valign, min_w, min_h)
+	h | v           (fr, gap, align, valign, min_w, min_h)
+	stack           (id, fr, align, valign, min_w, min_h)
+	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy)
+	popup           (id, layer_name, target_i, side, align, min_w, min_h, flags)
+	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
+	splitter        ()
+	toolbox         (id, title, align, x0, y0, target_i)
+	end             ()
+
+BORDER & BACKGROUND
+
+	bb              (id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius)
+	bb_tooltip      (id, bg_color, bg_color_state,        border_color, border_color_state, border_radius)
+	shadow          (x, y, blur, spread, inset, color)
+
+	bg_dots         (id, speed)
+
+TEXT
+
+	color           (color, color_state)
+	font            (font)
+	fs | font_size  (size)
+	font_weight     (weight)
+	bold            ()
+	lh | line_gap   (gap)
+	xsmall          ()   font_size_normal * .72      // 10/14
+	small           ()   font_size_normal * .8125    // 12/14
+	smaller         ()   font_size_normal * .875     // 13/14
+	large           ()   font_size_normal * 1.125    // 16/14
+	xlarge          ()   font_size_normal * 1.5
+
+	get_font_size   () -> font_size
+
+	text            (id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type)
+	text_editable   (id, s, fr, align, valign, max_min_w, min_w, min_h, input_type)
+	text_lines      (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
+	text_wrapped    (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
+
+INPUT
+
+	button          (id, s, fr, align, valign, min_w, min_h, style)
+	input           (id, s, fr, min_w, min_h)
+	label           (for_id, s, fr, align, valign)
+	radio_label     (for_id, for_group_id, s, fr, align, valign)
+	dropdown        (id, items, fr, max_min_w, min_w, min_h)
+	toggle          (id, fr, align, valign, min_w, min_h)
+	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
+
+COLOR PICKER
+
+	color_picker    (id, hue, sat, lum)
+	sat_lum_square  (id, hue, sat, lum)
+	hue_bar         (id, hue)
+
+UI TEMPLATE EDITOR
+
+	template        (id, t, ...stack_args)
+
+LIST
+
+	[h|v|hv]list    (id, items, fr, align, valign, item_align, item_valign, item_fr, max_min_w, min_w)
+
+OTHER
+
+	drag_point      (id, x, y, color)
+	polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
+	resizer         (ct_id, id)
+
 
 TODO
 
-	<tooltip>         text  target  align  side  kind  icon_visible
-	<toaster>         side  align  timeout  spacing
-	<checklist>
-	<menu>
-	<tabs>            tabs_side  auto_focus  selected_item_id
-	<action-band>
-	<dialog>
-	<slides>
-	<md>
-	<pagenav>
-	<info>
-	<erors>
-	<range-slider>
-	<input-group>
-	<textarea>
-	<[v]select-button>
-	<textarea-input>
-	<pass-input>
-	<num-input>
-	<tags-box>
-	<tags-input>
-	<check-dropdown>
-	<range-calendar>
-	<ranges-calendar>
-	<date-input>
-	<timeofday-input>
-	<datetime-input>
-	<date-range-input>
+	tooltip         text  target  align  side  kind  icon_visible
+	toaster         side  align  timeout  spacing
+	checklist
+	menu
+	tabs            tabs_side  auto_focus  selected_item_id
+	action-band
+	dialog
+	slides
+	md
+	pagenav
+	info
+	erors
+	range-slider
+	input-group
+	textarea
+	[v]select-button
+	textarea-input
+	pass-input
+	num-input
+	tags-box
+	tags-input
+	check-dropdown
+	range-calendar
+	ranges-calendar
+	date-input
+	timeofday-input
+	datetime-input
+	date-range-input
 
 */
 
@@ -194,6 +439,7 @@ function theme_make(name, is_dark) {
 	}
 }
 let themes = obj()
+ui.themes = themes
 theme_make('light', false)
 theme_make('dark' , true)
 
@@ -683,6 +929,14 @@ canvas.addEventListener('wheel', function(ev) {
 	animate()
 })
 
+function hit_rect(x, y, w, h) {
+	return (
+		(ui.mx >= x && ui.mx < x + w) &&
+		(ui.my >= y && ui.my < y + h)
+	)
+}
+ui.hit_rect = hit_rect
+
 // mouse pointer on current transform ----------------------------------------
 
 let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
@@ -721,6 +975,40 @@ function captured(id) {
 	return id && ui.captured_id == id && capture_state || null
 }
 ui.captured = captured
+
+// drag & drop ---------------------------------------------------------------
+
+{
+let out = [null, 0, 0]
+ui.drag = function(id, move, dx0, dy0) {
+	let move_x = !move || move == 'x' || move == 'xy'
+	let move_y = !move || move == 'y' || move == 'xy'
+	let dx = dx0 ?? 0
+	let dy = dy0 ?? 0
+	let cs = captured(id)
+	let state = null
+	if (cs) {
+		if (move_x) { dx = cs.get('drag_x0') + (ui.mx - ui.mx0) }
+		if (move_y) { dy = cs.get('drag_y0') + (ui.my - ui.my0) }
+		state = ui.clickup ? 'drop' : 'dragging'
+		cs.set('drag_state', state)
+	} else if (hit(id)) {
+		if (ui.click) {
+			let cs = ui.capture(id)
+			if (cs) {
+				if (move_x) cs.set('drag_x0', dx)
+				if (move_y) cs.set('drag_y0', dy)
+				state = 'drag'
+			}
+		} else
+			state = 'hover'
+	}
+	out[0] = state
+	out[1] = dx
+	out[2] = dy
+	return out
+}
+}
 
 // keyboard state ------------------------------------------------------------
 
@@ -1882,14 +2170,6 @@ function box_translate(a, i, dx, dy) {
 }
 
 // box hit phase
-
-function hit_rect(x, y, w, h) {
-	return (
-		(ui.mx >= x && ui.mx < x + w) &&
-		(ui.my >= y && ui.my < y + h)
-	)
-}
-ui.hit_rect = hit_rect
 
 function hit_box(a, i) {
 	let px1 = a[i+PX1+0]
@@ -3315,11 +3595,11 @@ ui.font = function(s) {
 	force_font(s)
 }
 
-let xsmall  = () => ui.font_size_normal * .72      // 10/14
-let small   = () => ui.font_size_normal * .8125    // 12/14
-let smaller = () => ui.font_size_normal * .875     // 13/14
-let large   = () => ui.font_size_normal * 1.125    // 16/14
-let xlarge  = () => ui.font_size_normal * 1.5
+ui.xsmall  = () => ui.font_size_normal * .72      // 10/14
+ui.small   = () => ui.font_size_normal * .8125    // 12/14
+ui.smaller = () => ui.font_size_normal * .875     // 13/14
+ui.large   = () => ui.font_size_normal * 1.125    // 16/14
+ui.xlarge  = () => ui.font_size_normal * 1.5
 
 const CMD_FONT_SIZE = cmd('font_size')
 
@@ -4835,40 +5115,6 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 	ui.end_stack()
 }
 
-// drag & drop ---------------------------------------------------------------
-
-{
-let out = [null, 0, 0]
-ui.drag = function(id, move, dx0, dy0) {
-	let move_x = !move || move == 'x' || move == 'xy'
-	let move_y = !move || move == 'y' || move == 'xy'
-	let dx = dx0 ?? 0
-	let dy = dy0 ?? 0
-	let cs = captured(id)
-	let state = null
-	if (cs) {
-		if (move_x) { dx = cs.get('drag_x0') + (ui.mx - ui.mx0) }
-		if (move_y) { dy = cs.get('drag_y0') + (ui.my - ui.my0) }
-		state = ui.clickup ? 'drop' : 'dragging'
-		cs.set('drag_state', state)
-	} else if (hit(id)) {
-		if (ui.click) {
-			let cs = ui.capture(id)
-			if (cs) {
-				if (move_x) cs.set('drag_x0', dx)
-				if (move_y) cs.set('drag_y0', dy)
-				state = 'drag'
-			}
-		} else
-			state = 'hover'
-	}
-	out[0] = state
-	out[1] = dx
-	out[2] = dy
-	return out
-}
-}
-
 // toolbox widget ------------------------------------------------------------
 
 ui.toolbox = function(id, title, align, x0, y0, target_i) {
@@ -5042,7 +5288,7 @@ ui.widget('resizer', {
 
 }
 
-// toggle & checkbox ---------------------------------------------------------
+// toggle --------------------------------------------------------------------
 
 ui.bg_style('*', 'toggle'      , '*', 'bg2')
 ui.bg_style('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
