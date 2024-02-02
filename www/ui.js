@@ -32,7 +32,7 @@ BUILT-IN STYLES
 	border          : light intense
 	shadow          : button menu modal picker thumb tooltip
 
-BUILT-IN STATES
+BUILT-IN STYLE STATES
 
 	general         : normal hover active focused
 	list item       : item-selected item-focused item-error
@@ -68,6 +68,8 @@ MOUSE STATE
 	mx0 my0         = mouse position when started dragging
 	update_mouse    ()   update mouse coords to current transform
 	hit_rect        (x, y, w, h) -> t|f
+	hit_bb          (x1, y1, x2, y2) -> t|f
+	hit_box         (a, i) -> t|f
 
 	captured_id     = id of widget that captured the mouse
 	capture         (id) -> captured_state_map         capture the mouse
@@ -76,7 +78,7 @@ MOUSE STATE
 	hover           (id) -> hit_state_map          declare that mouse hovers widget
 	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget
 
-	drag            (id, move, dx0, dy0) -> [state, dx, dy]
+	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
 
 	set_cursor      (cursor)   set cursor for this frame
 
@@ -171,7 +173,7 @@ BOX WIDGET DEFINITIONS
 	MX2             = index offset in a for x2 margin; y2 margin at MX2+1
 	FR              = index offset in a for fr
 	ALIGN           = index offset in a for align
-	S               = index offset in a for arg#1 after box args
+	S               = index offset in a for arg#1 after ui_cmd_box_ct args
 
 	add_ct_min_wh   (a, axis, w)   use in measure callback to declare min width/height
 
@@ -929,11 +931,15 @@ canvas.addEventListener('wheel', function(ev) {
 	animate()
 })
 
-function hit_rect(x, y, w, h) {
+function hit_bb(x1, y1, x2, y2) {
 	return (
-		(ui.mx >= x && ui.mx < x + w) &&
-		(ui.my >= y && ui.my < y + h)
+		(ui.mx >= x1 && ui.mx < x2) &&
+		(ui.my >= y1 && ui.my < y2)
 	)
+}
+ui.hit_bb = hit_bb
+function hit_rect(x, y, w, h) {
+	return hit_bb(x, y, x+w, y+h)
 }
 ui.hit_rect = hit_rect
 
@@ -965,6 +971,7 @@ ui.capture = function(id) {
 	if (!hs)
 		return
 	ui.captured_id = id
+	capture_state.clear()
 	map_assign(capture_state, hs)
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
@@ -2182,6 +2189,7 @@ function hit_box(a, i) {
 	let h = a[i+3] + py1 + py2
 	return hit_rect(x, y, w, h)
 }
+ui.hit_box = hit_box
 
 ui.box_widget = function(cmd_name, t, is_ct) {
 	let ID = t.ID
@@ -5903,7 +5911,7 @@ ui.widget('sat_lum_square', {
 		}
 
 		// doesn't look too good...
-		// if (ui.hit(id))
+		// if (hit(id))
 		// 	ui.set_cursor('crosshair')
 
 		if (ui.focused(id)) {

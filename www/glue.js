@@ -253,6 +253,11 @@ MULTI-LANGUAGE STUBS
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
 
+GZIP (DE)COMPRESSION
+
+	await compress(s) -> s
+	await decompress(s) -> s
+
 AJAX REQUESTS
 
 	ajax(opt) -> req
@@ -1938,6 +1943,35 @@ let locale = memoize(function() { return lang() + '-' + country() })
 // stub for rewriting links to current language.
 let href = g.href || return_arg
 
+// gzip (de)compression with API from Hell -----------------------------------
+
+async function concatUint8Arrays(chunks) {
+	let blob = new Blob(chunks)
+	let buffer = await blob.arrayBuffer()
+	return new Uint8Array(buffer)
+}
+
+let tenc = new TextEncoder()
+let tdec = new TextDecoder()
+function compress(s) {
+	let cs = new CompressionStream('gzip')
+	let writer = cs.writable.getWriter()
+	let b = tenc.encode(s)
+	writer.write(b)
+	writer.close()
+	return new Response(cs.readable).arrayBuffer()
+}
+
+function decompress(byteArray, encoding) {
+	let cs = new DecompressionStream(encoding)
+	let writer = cs.writable.getWriter()
+	writer.write(byteArray)
+	writer.close()
+	return new Response(cs.readable).arrayBuffer().then(function(arrayBuffer) {
+		return tdec.decode(arrayBuffer)
+	})
+}
+
 /* AJAX requests -------------------------------------------------------------
 
 	ajax(opt) -> req
@@ -2392,6 +2426,8 @@ g.Sf                           = Sf
 g.lang                         = lang
 g.country                      = country
 g.href                         = href
+g.compress                     = compress
+g.decompress                   = decompress
 g.ajax                         = ajax
 g.get                          = get
 g.post                         = post
