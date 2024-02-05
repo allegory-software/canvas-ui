@@ -48,6 +48,7 @@ THEME API
 	dark            () -> t|f
 	hsl             (h, s, L, a) -> color
 	hsl_adjust      (c, h, s, L, a) -> color
+	alpha_adjust    (c, a) -> color
 
 	set_shadow      (name)  use in draw callback to set a shadow
 
@@ -413,8 +414,13 @@ function hsl_adjust(c, h, s, L, a) {
 	return hsl(c[1] * h, c[2] * s, c[3] * L, (c[4] ?? 1) * (a ?? 1))
 }
 
+function alpha_adjust(c, a) {
+	return hsl(c[1], c[2], c[3], (c[4] ?? 1) * a)
+}
+
 ui.hsl = hsl
 ui.hsl_adjust = hsl_adjust
+ui.alpha_adjust = alpha_adjust
 
 // themes --------------------------------------------------------------------
 
@@ -971,7 +977,6 @@ ui.capture = function(id) {
 	if (!hs)
 		return
 	ui.captured_id = id
-	capture_state.clear()
 	map_assign(capture_state, hs)
 	ui.mx0 = ui.mx
 	ui.my0 = ui.my
@@ -1901,8 +1906,10 @@ function redraw_all() {
 		}
 		reset_canvas()
 
-		if (ui.clickup)
+		if (ui.clickup) {
 			ui.captured_id = null
+			capture_state.clear()
+		}
 
 		for (let p of ui.pointers)
 			reset_pointer_state(p)
