@@ -99,6 +99,8 @@ SCOPES
 
 	scope           ()
 	end_scope       ()
+	scope_set       (k, v)
+	scope_get       (k) -> v
 
 WIDGET STATE
 
@@ -237,12 +239,12 @@ TEXT
 
 	get_font_size   () -> font_size
 
-	text            (id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type)
+	text            (id, s, fr, align, valign, max_min_w, min_w, min_h, 'line'|'word'|0, editable, input_type)
 	text_editable   (id, s, fr, align, valign, max_min_w, min_w, min_h, input_type)
 	text_lines      (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
 	text_wrapped    (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
 
-	measure_text    (cx, s, [font]) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+	measure_text    (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
 
 INPUT
 
@@ -368,6 +370,10 @@ style.innerHTML = `
 
 @font-face { font-family: 'far'    ; src: url('icons/fa-regular-400.woff2'); }
 @font-face { font-family: 'fas'    ; src: url('icons/fa-solid-900.woff2'); }
+@font-face { font-family: 'fab'    ; src: url('icons/fa-brands-400.woff2'); }
+@font-face { font-family: 'lar'    ; src: url('icons/la-regular-400.woff2'); }
+@font-face { font-family: 'las'    ; src: url('icons/la-solid-900.woff2'); }
+@font-face { font-family: 'lab'    ; src: url('icons/la-brands-400.woff2'); }
 @font-face { font-family: 'remix'  ; src: url('icons/remixicon.woff2'); }
 @font-face { font-family: 'mio'    ; src: url('icons/material-icons-outlined.woff2'); }
 
@@ -1176,11 +1182,13 @@ function scope_get(k) {
 		}
 	}
 }
+ui.scope_get = scope_get
 
 function scope_set(k, v) {
 	scope = scope ?? scope_freelist.alloc()
 	scope.set(k, v)
 }
+ui.scope_set = scope_set
 
 function scope_prev_diff_var(ended_scope, k) {
 	let v = ended_scope.get(k)
@@ -3808,33 +3816,19 @@ function see(m) {
 let measure_text; {
 let tm = map()
 let TSM = obj()
-measure_text = function(cx, s, font) {
-	font ??= cx.font
-	let fm = tm.get(font)
-	if (!fm) { fm = map(); tm.set(font, fm); fm.set(TSM, map()) }
+measure_text = function(cx, s) {
+	let fm = tm.get(cx.font)
+	if (!fm) { fm = map(); tm.set(cx.font, fm); fm.set(TSM, map()) }
 	let tsm = fm.get(TSM)
 	tsm.set(s, performance.now())
 	let m = fm.get(s)
 	if (!m) {
-		cx.font = font
 		m = cx.measureText(s)
 		fm.set(s, m)
 		if (m.fontBoundingBoxAscent == null) { // Firefox < 116
 			m.fontBoundingBoxAscent  = 1.3 * m.actualBoundingBoxAscent
 			m.fontBoundingBoxDescent = 1.3 * m.actualBoundingBoxDescent
 		}
-		m.w = m.width
-		m.asc = m.fontBoundingBoxAscent
-		m.dsc = m.fontBoundingBoxDescent
-
-		// fix dumb icon fonts
-		if (font.ends(' fas') || font.ends(' far')) {
-			let fs = num(font.match(/[0-9]+/)[0])
-			m.asc = fs
-			m.dsc = fs / 3
-			m.w = fs
-		}
-
 	}
 	return m
 }
@@ -3898,11 +3892,11 @@ let word_wrapper_freelist = freelist(function() {
 		if (cx.font == last_font)
 			return
 		last_font = cx.font
-		let m = measure_text(cx, ' ', last_font)
-		sp_w = m.w
+		let m = measure_text(cx, ' ')
+		sp_w = m.width
 		ww.sp_w = sp_w
-		ww.asc = m.asc
-		ww.dsc = m.dsc
+		ww.asc = m.fontBoundingBoxAscent
+		ww.dsc = m.fontBoundingBoxDescent
 		if (!s) {
 			ww.w = 0
 			ww.h = ceil(ww.asc + ww.dsc)
@@ -3917,9 +3911,9 @@ let word_wrapper_freelist = freelist(function() {
 		}
 		ww.min_w = 0
 		for (let s of words) {
-			let m = measure_text(cx, s, last_font)
-			widths.push(m.w)
-			ww.min_w = max(ww.min_w, m.w)
+			let m = measure_text(cx, s)
+			widths.push(m.width)
+			ww.min_w = max(ww.min_w, m.width)
 		}
 	}
 
@@ -4020,18 +4014,18 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let text_h
 		if (isstr(s)) { // single-line
 			let m = measure_text(cx, s)
-			asc = m.asc
-			dsc = m.dsc
-			text_w = ceil(m.w)
+			asc = m.fontBoundingBoxAscent
+			dsc = m.fontBoundingBoxDescent
+			text_w = ceil(m.width)
 			text_h = ceil(asc+dsc)
 		} else { // multi-line, pre-wrapped
 			text_w = 0
 			text_h = 0
 			for (let ss of s) {
 				let m = measure_text(cx, ss)
-				asc = m.asc
-				dsc = m.dsc
-				text_w = max(text_w, ceil(m.w))
+				asc = m.fontBoundingBoxAscent
+				dsc = m.fontBoundingBoxDescent
+				text_w = max(text_w, ceil(m.width))
 				text_h += ceil(asc+dsc)
 			}
 			text_h += (s.length-1) * round(line_gap * font_size)
@@ -4753,26 +4747,67 @@ ui.widget('drag_point', {
 
 // button --------------------------------------------------------------------
 
-// NOTE: the button is activated only when the mouse button released while
-// over the button, and only if it was pressed while over the button.
-ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
-	let cs = ui.capture(id)
-	let hs = hit(id) || (cs && hovers(id))
-	let state = cs && hs ? 'active' : hs ? 'hover' : null
-	style = style ?? 'button'
+// NOTE: the button is activated only if the mouse button was released while
+// over the button, and only if it was pressed while over the button, even
+// though the mouse _is_ captured.
+
+ui.button_stack = function(id, fr, align, valign, min_w, min_h, style) {
 	ui.p(ui.sp2(), ui.sp())
 	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h)
-		ui.shadow('button')
-		ui.bb('', style, state, 1, 'intense', state, ui.sp05())
-		ui.bold()
-		ui.color('text', state)
-		ui.text('', s, 0, 'c', 'c')
-	ui.end_stack()
-	return cs && hs && ui.clickup || false
 }
+
+ui.button_state = function(id) {
+	let cs = ui.capture(id)
+	let hs = hit(id) || (cs && hovers(id))
+	return cs && hs ? 'active' : hs ? 'hover' : null
+}
+
+ui.button_bb = function(style, state) {
+	style = style ?? 'button'
+	ui.shadow('button')
+	ui.bb('', style, state, 1, 'intense', state, ui.sp05())
+}
+
+ui.button_text = function(s, state) {
+	ui.bold()
+	ui.color('text', state)
+	ui.text('', s, 0, 'c', 'c')
+}
+
+ui.button_icon = function(font, icon, state, min_w, min_h) {
+	min_w ??= ui.em(1)
+	min_h ??= ui.em(1)
+	ui.font(font)
+	//ui.font_size(ui.xlarge())
+	ui.color('text', state)
+	ui.text('', icon, 0, 's', 'c', min_w, min_w, min_h)
+}
+
+ui.end_button_stack = function(state) {
+	ui.end_stack()
+	return state == 'active' && ui.clickup || false
+}
+
+ui.icon_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
+	ui.button_stack(id, fr, align, valign, min_w, min_h)
+	let state = ui.button_state()
+	ui.button_bb(style, state)
+	ui.button_icon(font, icon, state)
+	return ui.end_button_stack(state)
+}
+
+ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
+	ui.button_stack(id, fr, align, valign, min_w, min_h)
+	let state = ui.button_state()
+	ui.button_bb(style, state)
+	ui.button_text(s, state)
+	return ui.end_button_stack(state)
+}
+
 ui.button_primary = function(id, s, fr, align, valign, min_w, min_h) {
 	return ui.button(id, s, fr, align, valign, min_w, min_h, 'button-primary')
 }
+
 ui.btn = ui.button
 ui.btn_pri = ui.button_primary
 
@@ -4999,21 +5034,24 @@ ui.list = ui.vlist
 
 // polyline ------------------------------------------------------------------
 
-function set_points(cx, x0, y0, a, pi1, pi2, closed) {
+function set_points(cx, x0, y0, a, pi1, pi2, closed, offset) {
 	cx.beginPath()
-	let x = a[pi1+0]
-	let y = a[pi1+1]
+	let x = a[pi1+0] + offset
+	let y = a[pi1+1] + offset
 	cx.moveTo(x0 + x, y0 + y)
 	for (let i = pi1 + 2; i < pi2; i += 2) {
-		let x = a[i+0]
-		let y = a[i+1]
+		let x = a[i+0] + offset
+		let y = a[i+1] + offset
 		cx.lineTo(x0 + x, y0 + y)
 	}
 	if (closed)
 		cx.closePath()
 }
 
-let POLYLINE_POINTS = 8
+let POLYLINE_STROKE_COLOR       = 5
+let POLYLINE_STROKE_COLOR_STATE = 6
+let POLYLINE_LINE_WIDTH         = 7
+let POLYLINE_POINTS             = 8
 
 ui.widget('polyline', {
 	create: function(cmd,
@@ -5034,6 +5072,8 @@ ui.widget('polyline', {
 	},
 	measure: function(a, i, axis) {
 		if (!axis) {
+			let stroke_color = a[i+POLYLINE_STROKE_COLOR]
+			let line_width   = a[i+POLYLINE_LINE_WIDTH]
 			let pi1 = i+POLYLINE_POINTS
 			let pi2 = cmd_arg_end_i(a, i)
 			let x1 =  1/0
@@ -5048,6 +5088,13 @@ ui.widget('polyline', {
 				x2 = max(x2, x)
 				y2 = max(y2, y)
 			}
+			if (stroke_color) {
+				let hlw = line_width / 2
+				x1 -= hlw
+				y1 -= hlw
+				x2 += hlw
+				y2 += hlw
+			}
 			add_ct_min_wh(a, 0, x2-x1)
 			add_ct_min_wh(a, 1, y2-y1)
 		}
@@ -5061,16 +5108,16 @@ ui.widget('polyline', {
 		let closed             = a[i+2]
 		let fill_color         = a[i+3]
 		let fill_color_state   = a[i+4]
-		let stroke_color       = a[i+5]
-		let stroke_color_state = a[i+6]
-		let line_width         = a[i+7]
+		let stroke_color       = a[i+POLYLINE_STROKE_COLOR]
+		let stroke_color_state = a[i+POLYLINE_STROKE_COLOR_STATE]
+		let line_width         = a[i+POLYLINE_LINE_WIDTH]
 		if (fill_color) {
-			set_points(cx, x0, y0, a, pi1, pi2, closed)
+			set_points(cx, x0, y0, a, pi1, pi2, closed, 0)
 			cx.fillStyle = bg_color(fill_color, fill_color_state)
 			cx.fill()
 		}
 		if (stroke_color) {
-			set_points(cx, x0, y0, a, pi1, pi2, closed)
+			set_points(cx, x0, y0, a, pi1, pi2, closed, line_width / 2)
 			cx.strokeStyle = fg_color(stroke_color, stroke_color_state)
 			cx.lineWidth = line_width
 			cx.stroke()
@@ -5855,8 +5902,8 @@ ui.box_widget('slider', {
 			cx.textAlign = 'center'
 			cx.lineWidth = 1
 			let m = measure_text(cx, ' ')
-			let asc = m.asc
-			let dsc = m.dsc
+			let asc = m.fontBoundingBoxAscent
+			let dsc = m.fontBoundingBoxDescent
 			let x0 = x
 
 			let v = ui.slider_value(id, from, to)
