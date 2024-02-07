@@ -1348,6 +1348,8 @@ ui.focusing = function(id) {
 window.addEventListener('blur', function(ev) {
 	ui.window_unfocusing = true
 	ui.window_focused = false
+	key_state.clear()
+	key_state_now.clear()
 	animate()
 })
 
