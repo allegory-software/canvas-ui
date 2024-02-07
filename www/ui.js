@@ -3851,6 +3851,22 @@ runevery(120, function() {
 		debug('gc text measure ', n)
 })
 
+document.fonts.addEventListener('loadingdone', function(ev) {
+
+	// page was already rendered with missing fonts even though we preloaded all fonts.
+	for (let font of ev.target) {
+		let suffix = ' '+font.family
+		for (let [font_spec, fm] of tm) {
+			if (font_spec.endsWith(suffix))
+				tm.delete(font_spec)
+		}
+	}
+
+	// this is needed for when the debugger is open in Chrome and Firefox,
+	// whether you preload fonts or not.
+	animate()
+})
+
 }
 
 let word_wrapper_freelist = freelist(function() {
@@ -4759,38 +4775,48 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h, style) {
 ui.button_state = function(id) {
 	let cs = ui.capture(id)
 	let hs = hit(id) || (cs && hovers(id))
-	return cs && hs ? 'active' : hs ? 'hover' : null
+	return cs && hs ? ui.clickup ? 'click' : 'active' : hs ? 'hover' : null
 }
 
 ui.button_bb = function(style, state) {
+	state = repl(state, 'click', 'hover')
 	style = style ?? 'button'
 	ui.shadow('button')
 	ui.bb('', style, state, 1, 'intense', state, ui.sp05())
 }
 
-ui.button_text = function(s, state) {
+ui.button_text = function(s, state, min_w, min_h) {
+	state = repl(state, 'click', 'hover')
+	min_h ??= ui.em(1)
 	ui.bold()
 	ui.color('text', state)
-	ui.text('', s, 0, 'c', 'c')
+	ui.text('', s, 0, 'c', 'c', null, min_w, min_h)
 }
 
 ui.button_icon = function(font, icon, state, min_w, min_h) {
-	min_w ??= ui.em(1)
+	state = repl(state, 'click', 'hover')
 	min_h ??= ui.em(1)
 	ui.font(font)
-	//ui.font_size(ui.xlarge())
 	ui.color('text', state)
 	ui.text('', icon, 0, 's', 'c', min_w, min_w, min_h)
 }
 
 ui.end_button_stack = function(state) {
 	ui.end_stack()
-	return state == 'active' && ui.clickup || false
+	return state == 'click'
 }
 
 ui.icon_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
-	let state = ui.button_state()
+	let state = ui.button_state(id)
+	ui.button_bb(style, state)
+	ui.button_icon(font, icon, state)
+	return ui.end_button_stack(state)
+}
+
+ui.tool_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
+	ui.button_stack(id, fr, align, valign, min_w, min_h)
+	let state = ui.button_state(id)
 	ui.button_bb(style, state)
 	ui.button_icon(font, icon, state)
 	return ui.end_button_stack(state)
@@ -4798,7 +4824,7 @@ ui.icon_button = function(id, font, icon, fr, align, valign, min_w, min_h, style
 
 ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
-	let state = ui.button_state()
+	let state = ui.button_state(id)
 	ui.button_bb(style, state)
 	ui.button_text(s, state)
 	return ui.end_button_stack(state)
