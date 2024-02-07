@@ -76,8 +76,9 @@ MOUSE STATE
 	capture         (id) -> captured_state_map         capture the mouse
 	captured        (id) -> captured_state_map | null  get captured state if mouse is captured
 
+	hit             (id[, k) -> hit_state_map | v | null    get hit state map if mouse hovers widget and not captured
+	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget incl. if mouse captured
 	hover           (id) -> hit_state_map          declare that mouse hovers widget
-	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget
 
 	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
 
@@ -108,10 +109,13 @@ WIDGET STATE
 
 FOCUS STATE
 
-	focused_id      = id of focused widget
-	focus           (id)
-	focused         (id) -> t|f
-	focusing        (id) -> t|f
+	focused_id      = id                 id of focused widget
+	focus           (id)                 focus widget
+	focused         (id) -> t|f          check if widget is currently focused
+	focusing        (id) -> t|f          widget is focusing this frame
+	window_focusing   = t                window is focusing this frame
+	window_unfocusing = t                window is unfocusing this frame
+	window_focused    = t|f              check if window is currently focused
 
 PADDINGS & MARGINS
 
@@ -238,6 +242,8 @@ TEXT
 	text_lines      (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
 	text_wrapped    (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
 
+	measure_text    (cx, s, [font]) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
+
 INPUT
 
 	button          (id, s, fr, align, valign, min_w, min_h, style)
@@ -328,8 +334,9 @@ const {
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
 	PI,
+	transform_point_x,
+	transform_point_y,
 	runevery,
-
 } = glue
 
 let clock_ms = () => performance.now()
@@ -359,14 +366,10 @@ style.innerHTML = `
 
 * { box-sizing: border-box; }
 
-@font-face {
-	font-family: 'far';
-	src: url('fa-regular-400.woff2');
-}
-@font-face {
-	font-family: 'fas';
-	src: url('fa-solid-900.woff2');
-}
+@font-face { font-family: 'far'    ; src: url('icons/fa-regular-400.woff2'); }
+@font-face { font-family: 'fas'    ; src: url('icons/fa-solid-900.woff2'); }
+@font-face { font-family: 'remix'  ; src: url('icons/remixicon.woff2'); }
+@font-face { font-family: 'mio'    ; src: url('icons/material-icons-outlined.woff2'); }
 
 html, body {
 	width: 100%;
@@ -794,6 +797,7 @@ document.addEventListener('DOMContentLoaded', function() {
 	document.body.appendChild(ui.screen)
 	reset_canvas()
 	resize_canvas()
+	canvas.focus()
 })
 
 // mouse state ---------------------------------------------------------------
@@ -927,8 +931,9 @@ canvas.addEventListener('pointerleave', function(ev) {
 	animate()
 })
 
+// NOTE: wheelDeltaY is 150 in chrome and 120 if FF. Browser developers...
 canvas.addEventListener('wheel', function(ev) {
-	ui.mouse.wheel_dy = ev.wheelDeltaY
+	ui.mouse.wheel_dy = ev.deltaY
 	if (!ui.mouse.wheel_dy)
 		return
 	ui.mouse.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
@@ -951,9 +956,6 @@ ui.hit_rect = hit_rect
 
 // mouse pointer on current transform ----------------------------------------
 
-let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
-let transform_point_y = (m, x, y) => x * m.b + y * m.d + m.f
-
 ui.update_mouse = function() {
 	let m = cx.getTransform().invertSelf()
 	let mx = ui.mx_notrans
@@ -970,8 +972,11 @@ ui.capture = function(id) {
 	if (!id)
 		return
 	if (ui.captured_id != null)
-		return
-	if (!ui.pressed)
+		if (ui.captured_id == id)
+			return capture_state
+		else
+			return
+	if (!ui.click)
 		return
 	let hs = hovers(id)
 	if (!hs)
@@ -1332,6 +1337,20 @@ ui.focusing = function(id) {
 	return id && focusing_id == id
 }
 
+window.addEventListener('blur', function(ev) {
+	ui.window_unfocusing = true
+	ui.window_focused = false
+	animate()
+})
+
+ui.window_focused = document.hasFocus()
+
+window.addEventListener('focus', function(ev) {
+	ui.window_focusing = true
+	ui.window_focused = true
+	animate()
+})
+
 // container stack -----------------------------------------------------------
 
 // used in both frame creation and measuring stages.
@@ -1631,6 +1650,13 @@ function hit(id, k) {
 }
 ui.hit = hit
 
+function hovers(id, k) {
+	if (!id) return
+	let m = hit_state_maps.get(id)
+	return k ? m?.get(k) : m
+}
+ui.hovers = hovers
+
 function hover(id) {
 	if (!id) return
 	let m = hit_state_maps.get(id)
@@ -1641,13 +1667,6 @@ function hover(id) {
 	return m
 }
 ui.hover = hover
-
-function hovers(id, k) {
-	if (!id) return
-	let m = hit_state_maps.get(id)
-	return k ? m?.get(k) : m
-}
-ui.hovers = hovers
 
 function hit_frame(recs, layers) {
 
@@ -1918,6 +1937,8 @@ function redraw_all() {
 		key_state_now.clear()
 		event_state.clear()
 		focusing_id = null
+		ui.window_focusing = false
+		ui.window_unfocusing = false
 
 		if (!want_redraw)
 			break
@@ -3776,25 +3797,48 @@ ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, ed
 	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
 }
 
+function see(m) {
+	let t = {}
+	for (let k in m)
+		if (typeof(k) != 'function')
+			t[k] = m[k]
+	return t
+}
+
 let measure_text; {
 let tm = map()
 let TSM = obj()
-measure_text = function(cx, font, s) {
+measure_text = function(cx, s, font) {
+	font ??= cx.font
 	let fm = tm.get(font)
 	if (!fm) { fm = map(); tm.set(font, fm); fm.set(TSM, map()) }
 	let tsm = fm.get(TSM)
 	tsm.set(s, performance.now())
 	let m = fm.get(s)
 	if (!m) {
+		cx.font = font
 		m = cx.measureText(s)
 		fm.set(s, m)
 		if (m.fontBoundingBoxAscent == null) { // Firefox < 116
 			m.fontBoundingBoxAscent  = 1.3 * m.actualBoundingBoxAscent
 			m.fontBoundingBoxDescent = 1.3 * m.actualBoundingBoxDescent
 		}
+		m.w = m.width
+		m.asc = m.fontBoundingBoxAscent
+		m.dsc = m.fontBoundingBoxDescent
+
+		// fix dumb icon fonts
+		if (font.ends(' fas') || font.ends(' far')) {
+			let fs = num(font.match(/[0-9]+/)[0])
+			m.asc = fs
+			m.dsc = fs / 3
+			m.w = fs
+		}
+
 	}
 	return m
 }
+ui.measure_text = measure_text
 
 runevery(120, function() {
 	let t = performance.now()
@@ -3854,11 +3898,11 @@ let word_wrapper_freelist = freelist(function() {
 		if (cx.font == last_font)
 			return
 		last_font = cx.font
-		let m = measure_text(cx, last_font, ' ')
-		sp_w = m.width
+		let m = measure_text(cx, ' ', last_font)
+		sp_w = m.w
 		ww.sp_w = sp_w
-		ww.asc = m.fontBoundingBoxAscent
-		ww.dsc = m.fontBoundingBoxDescent
+		ww.asc = m.asc
+		ww.dsc = m.dsc
 		if (!s) {
 			ww.w = 0
 			ww.h = ceil(ww.asc + ww.dsc)
@@ -3873,9 +3917,9 @@ let word_wrapper_freelist = freelist(function() {
 		}
 		ww.min_w = 0
 		for (let s of words) {
-			let m = measure_text(cx, last_font, s)
-			widths.push(m.width)
-			ww.min_w = max(ww.min_w, m.width)
+			let m = measure_text(cx, s, last_font)
+			widths.push(m.w)
+			ww.min_w = max(ww.min_w, m.w)
 		}
 	}
 
@@ -3975,21 +4019,19 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let text_w
 		let text_h
 		if (isstr(s)) { // single-line
-			let cx_font = cx.font
-			let m = measure_text(cx, cx_font, s)
-			asc = m.fontBoundingBoxAscent
-			dsc = m.fontBoundingBoxDescent
-			text_w = ceil(m.width)
+			let m = measure_text(cx, s)
+			asc = m.asc
+			dsc = m.dsc
+			text_w = ceil(m.w)
 			text_h = ceil(asc+dsc)
 		} else { // multi-line, pre-wrapped
 			text_w = 0
 			text_h = 0
-			let cx_font = cx.font
 			for (let ss of s) {
-				let m = measure_text(cx, cx_font, ss)
-				asc = m.fontBoundingBoxAscent
-				dsc = m.fontBoundingBoxDescent
-				text_w = max(text_w, ceil(m.width))
+				let m = measure_text(cx, ss)
+				asc = m.asc
+				dsc = m.dsc
+				text_w = max(text_w, ceil(m.w))
 				text_h += ceil(asc+dsc)
 			}
 			text_h += (s.length-1) * round(line_gap * font_size)
@@ -4711,9 +4753,12 @@ ui.widget('drag_point', {
 
 // button --------------------------------------------------------------------
 
+// NOTE: the button is activated only when the mouse button released while
+// over the button, and only if it was pressed while over the button.
 ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
-	let hs = hit(id)
-	let state = hs ? ui.pressed ? 'active' : 'hover' : null
+	let cs = ui.capture(id)
+	let hs = hit(id) || (cs && hovers(id))
+	let state = cs && hs ? 'active' : hs ? 'hover' : null
 	style = style ?? 'button'
 	ui.p(ui.sp2(), ui.sp())
 	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h)
@@ -4723,7 +4768,7 @@ ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
 		ui.color('text', state)
 		ui.text('', s, 0, 'c', 'c')
 	ui.end_stack()
-	return hs && ui.clickup
+	return cs && hs && ui.clickup || false
 }
 ui.button_primary = function(id, s, fr, align, valign, min_w, min_h) {
 	return ui.button(id, s, fr, align, valign, min_w, min_h, 'button-primary')
@@ -4968,11 +5013,14 @@ function set_points(cx, x0, y0, a, pi1, pi2, closed) {
 		cx.closePath()
 }
 
+let POLYLINE_POINTS = 8
+
 ui.widget('polyline', {
 	create: function(cmd,
 			id, points, closed,
 			fill_color, fill_color_state,
 			stroke_color, stroke_color_state,
+			line_width,
 	) {
 		if (isstr(points))
 			points = points.split(/\s+/).map(num)
@@ -4981,12 +5029,12 @@ ui.widget('polyline', {
 			return
 		return ui_cmd(cmd, id, ui.ct_i(), (closed ?? 0) ? 1 : 0,
 			fill_color   ?? 0, parse_state(fill_color_state  ),
-			stroke_color ?? 0, parse_state(stroke_color_state)
-			, ...points)
+			stroke_color ?? 0, parse_state(stroke_color_state), line_width ?? 1,
+			...points)
 	},
 	measure: function(a, i, axis) {
 		if (!axis) {
-			let pi1 = i+7
+			let pi1 = i+POLYLINE_POINTS
 			let pi2 = cmd_arg_end_i(a, i)
 			let x1 =  1/0
 			let y1 =  1/0
@@ -5005,7 +5053,7 @@ ui.widget('polyline', {
 		}
 	},
 	draw: function(a, i) {
-		let pi1 = i+7
+		let pi1 = i+POLYLINE_POINTS
 		let pi2 = cmd_arg_end_i(a, i)
 		let ct_i = a[i+1]
 		let x0 = a[ct_i+0]
@@ -5015,6 +5063,7 @@ ui.widget('polyline', {
 		let fill_color_state   = a[i+4]
 		let stroke_color       = a[i+5]
 		let stroke_color_state = a[i+6]
+		let line_width         = a[i+7]
 		if (fill_color) {
 			set_points(cx, x0, y0, a, pi1, pi2, closed)
 			cx.fillStyle = bg_color(fill_color, fill_color_state)
@@ -5023,7 +5072,7 @@ ui.widget('polyline', {
 		if (stroke_color) {
 			set_points(cx, x0, y0, a, pi1, pi2, closed)
 			cx.strokeStyle = fg_color(stroke_color, stroke_color_state)
-			cx.lineWidth = 1
+			cx.lineWidth = line_width
 			cx.stroke()
 		}
 	},
@@ -5035,7 +5084,7 @@ ui.widget('polyline', {
 		let x0 = a[ct_i+0]
 		let y0 = a[ct_i+1]
 		let closed = a[i+2]
-		let pi1 = i+7
+		let pi1 = i+POLYLINE_POINTS
 		let pi2 = cmd_arg_end_i(a, i)
 		set_points(cx, x0, y0, a, pi1, pi2, closed)
 		if (cx.isPointInPath(mx, my)) {
@@ -5805,9 +5854,9 @@ ui.box_widget('slider', {
 			let hsl_color = fg_color_hsl('label')
 			cx.textAlign = 'center'
 			cx.lineWidth = 1
-			let m = measure_text(cx, cx.font, ' ')
-			let asc = m.fontBoundingBoxAscent
-			let dsc = m.fontBoundingBoxDescent
+			let m = measure_text(cx, ' ')
+			let asc = m.asc
+			let dsc = m.dsc
 			let x0 = x
 
 			let v = ui.slider_value(id, from, to)

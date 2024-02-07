@@ -106,7 +106,7 @@ ARRAYS
 	insert(a, i, v) -> a
 	remove(a, i) -> v
 	remove_value(a, v) -> i
-	remove_values(a, cond) -> a
+	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
 	array_move(a, i1, n, insert_i, [before])
 	array_equals(a1, a2, [i1], [i2]) -> t|f
 	binsearch(a, v, cmp, i1, i2)
@@ -198,9 +198,11 @@ COLORS
 
 GEOMETRY
 
-	point_around(cx, cy, r, angle) -> [x, y]
+	point_around(cx, cy, r, angle, [out]) -> [x, y]
 	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, [out]) -> [x, y, w, h]
 	rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
+	transform_point_x(m, x, y) => x1
+	transform_point_y(m, x, y) => y1
 
 TIMERS
 
@@ -666,11 +668,14 @@ function remove_value(a, v) {
 	return i
 }
 
+// NOTE: inside cond(), a[0..j-1] are kept values so far, a[j..i-1] are some
+// but *not all* of the removed values, a[i..a.length-1] are untested values,
+// so be very careful how you read the array inside cond().
 function remove_values(a, cond) {
 	let i = 0, j = 0
 	while (i < a.length) {
 		let v = a[i]
-		if (!cond(v, i, a))
+		if (!cond(v, i, a, j))
 			a[j++] = v
 		i++
 	}
@@ -736,7 +741,7 @@ function remove_duplicates(a) {
 		return a
 	}
 	return remove_values(a, function(v, i, a) {
-		return a.indexOf(v) != i
+		return a.indexOf(v, i+1) != -1
 	})
 }
 
@@ -1618,11 +1623,11 @@ hsl_to_rgb_hex = function(h, s, L, a) {
 // geometry ------------------------------------------------------------------
 
 // point at a specified angle on a circle.
-function point_around(cx, cy, r, angle) {
-	return [
-		cx + cos(rad * angle) * r,
-		cy + sin(rad * angle) * r
-	]
+function point_around(cx, cy, r, angle, out) {
+	out ??= []
+	out[0] = cx + cos(angle) * r
+	out[1] = cy + sin(angle) * r
+	return out
 }
 
 function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
@@ -1657,6 +1662,9 @@ function rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) {
 		segs_overlap(y1, y1+h1, y2, y2+h2)
 	)
 }
+
+let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
+let transform_point_y = (m, x, y) => x * m.b + y * m.d + m.f
 
 // timers --------------------------------------------------------------------
 
@@ -2402,6 +2410,8 @@ g.hsl_to_rgb_hex               = hsl_to_rgb_hex
 g.point_around                 = point_around
 g.clip_rect                    = clip_rect
 g.rect_intersects              = rect_intersects
+g.transform_point_x            = transform_point_x
+g.transform_point_y            = transform_point_y
 g.runafter                     = runafter
 g.runevery                     = runevery
 g.runagainevery                = runagainevery
