@@ -3377,11 +3377,11 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 		reset_shadow()
 	if (border_color) {
 		cx.strokeStyle = ui_border_color(border_color, border_color_state)
-		cx.lineWidth = 1
 		cx.lineCap = 'square'
 		tooltip_path(cx, x + .5, y + .5, x + w - .5, y + h - .5,
 			side, tx, ty, b1x, b1y, b2x, b2y, r, d)
 		cx.stroke()
+		cx.lineCap = 'butt'
 	}
 
 }
@@ -3578,10 +3578,10 @@ draw[CMD_BB] = function(a, i) {
 		reset_shadow()
 	if (border_sides && border_color) {
 		cx.strokeStyle = ui_border_color(border_color, border_color_state)
-		cx.lineWidth = 1
 		cx.lineCap = 'square'
 		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
 		cx.stroke()
+		cx.lineCap = 'butt'
 	}
 }
 
@@ -4618,7 +4618,6 @@ ui.box_widget('template_overlay', {
 			let w = a[i+2]
 			let h = a[i+3]
 			cx.strokeStyle = 'magenta'
-			cx.lineWidth = 1
 			cx.beginPath()
 			cx.rect(
 				x + .5,
@@ -4627,7 +4626,6 @@ ui.box_widget('template_overlay', {
 				h - .5,
 			)
 			cx.stroke()
-
 		}
 	},
 })
@@ -5149,6 +5147,7 @@ ui.widget('polyline', {
 			cx.strokeStyle = fg_color(stroke_color, stroke_color_state)
 			cx.lineWidth = line_width
 			cx.stroke()
+			cx.lineWidth = 1
 		}
 	},
 	hit: function(a, i) {
@@ -5894,7 +5893,6 @@ ui.box_widget('slider', {
 
 		bg_path(cx, x + .5 - r, y + .5, x + w - .5 + r, y + 2*r - .5, BORDER_SIDE_ALL, 1000)
 		cx.strokeStyle = border_color('light', null)
-		cx.lineWidth = 1
 		cx.stroke()
 
 		// draw focus ring under thumb
@@ -5928,7 +5926,6 @@ ui.box_widget('slider', {
 
 			let hsl_color = fg_color_hsl('label')
 			cx.textAlign = 'center'
-			cx.lineWidth = 1
 			let m = measure_text(cx, ' ')
 			let asc = m.fontBoundingBoxAscent
 			let dsc = m.fontBoundingBoxDescent
@@ -6008,7 +6005,6 @@ function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	let y = round(y0 + lerp(lum, 1, 0, 0, h-1)) + .5
 	let d = 10.5
 	cx.strokeStyle = hsl(360-hue, sat, lum > .5 ? 0 : 1, alpha)
-	cx.lineWidth = 1
 	cx.beginPath()
 	cx.moveTo(x, y); cx.lineTo(x+d, y)
 	cx.moveTo(x, y); cx.lineTo(x-d, y)
@@ -6132,7 +6128,6 @@ ui.widget('sat_lum_square', {
 function draw_hue_line(x, y, h, w, hue, alpha) {
 	if (hue == null) return
 	cx.strokeStyle = hsl(0, 0, 0, alpha)
-	cx.lineWidth = 1
 	cx.beginPath()
 	let hue_y = round(lerp(hue, 0, 360, 0, h-1))
 	cx.moveTo(x    , y + hue_y + .5)
@@ -6387,6 +6382,7 @@ ui.widget('bg_dots', {
 					cx.moveTo(t1.x, t1.y)
 					cx.lineTo(t2.x, t2.y)
 					cx.stroke()
+					cx.lineWidth = 1
 				}
 			}
 		}
