@@ -928,7 +928,7 @@ canvas.addEventListener('pointerenter', function(ev) {
 })
 
 canvas.addEventListener('pointerleave', function(ev) {
-	if (!(ui.pointer == ui.mouse && ui.pointer.captured)) {
+	if (ui.pointer != ui.mouse || ui.captured_id == null) {
 		ui.mouse.mx = null
 		ui.mouse.my = null
 	}
