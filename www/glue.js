@@ -109,8 +109,9 @@ ARRAYS
 	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
 	array_move(a, i1, n, insert_i, [before])
 	array_equals(a1, a2, [i1], [i2]) -> t|f
-	binsearch(a, v, cmp, i1, i2)
+	binsearch(a, v, cmp, [i1, i2])
 	uniq_sorted(a) -> a
+	group_sorted(a, eq_cond, [i1, i2]) -> iter() -> [i1, i2]
 	remove_duplicates(a) -> a
 
 HASH MAPS
@@ -198,11 +199,14 @@ COLORS
 
 GEOMETRY
 
-	point_around(cx, cy, r, angle, [out]) -> [x, y]
-	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, [out]) -> [x, y, w, h]
+	point_around(cx, cy, r, angle) -> [x, y]
+	rotate_point(x, y, cx, cy, angle) -> [x, y]
+	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
 	rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
 	transform_point_x(m, x, y) => x1
 	transform_point_y(m, x, y) => y1
+	hypot(a, b) -> d
+	distance(x1, y1, x2, y2) -> d
 
 TIMERS
 
@@ -250,7 +254,7 @@ INTER-WINDOW COMMUNICATION
 
 MULTI-LANGUAGE STUBS
 
-	S(id, default)                         get labeled string in current language
+	S(id, default, ...args)                get labeled string in current language
 	lang()                                 get current language
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
@@ -273,6 +277,10 @@ AJAX REQUESTS
 let G = window
 let g = {}
 G.glue = g
+
+// global array for returning multiple values from functions that do so.
+// watch out and always unpack the return value from such functions.
+let out = []
 
 function DEBUG(k, dv) {
 	dv = dv ?? false
@@ -743,6 +751,25 @@ function remove_duplicates(a) {
 	return remove_values(a, function(v, i, a) {
 		return a.indexOf(v, i+1) != -1
 	})
+}
+
+// iterate a sorted array (or part of it) in chunks of items that are equal
+// per eq_cond(). use i1, i2 to iterate nested groupings. i2 is exclusive!
+function *group_sorted(a, eq_cond, i1, i2) {
+	i1 ??= 0
+	i2 ??= a.length
+	let i0 = i1
+	let i = i0 + 1
+	if (i1 >= i2)
+		return
+	while (i < i2) {
+		if (!eq_cond(a[i], a[i-1])) {
+			yield [i0, i]
+			i0 = i
+		}
+		i++
+	}
+	yield [i0, i2]
 }
 
 // hash maps -----------------------------------------------------------------
@@ -1609,7 +1636,6 @@ function hsl_to_rgb_out(out, i, h, s, L, a) {
 let hsl_to_rgb_hex
 {
 let hex = x => format_base(round(x), 16, 2)
-let out = []
 hsl_to_rgb_hex = function(h, s, L, a) {
 	hsl_to_rgb_out(out, 0, h, s, L)
 	return '#' +
@@ -1623,14 +1649,23 @@ hsl_to_rgb_hex = function(h, s, L, a) {
 // geometry ------------------------------------------------------------------
 
 // point at a specified angle on a circle.
-function point_around(cx, cy, r, angle, out) {
-	out ??= []
+function point_around(cx, cy, r, angle) {
 	out[0] = cx + cos(angle) * r
 	out[1] = cy + sin(angle) * r
 	return out
 }
 
-function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
+function rotate_point(px, py, cx, cy, angle) {
+	let s = sin(angle)
+	let c = cos(angle)
+	let x = px - cx
+	let y = py - cy
+	out[0] = cx + (x * c - y * s)
+	out[1] = cy + (x * s + y * c)
+	return out
+}
+
+function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) {
 	// intersect on one dimension
 	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
 	// intersect_segs(x1, x1+w1, x2, x2+w2)
@@ -1642,15 +1677,11 @@ function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2, out) {
 	// clamp size
 	let _w = max(_x2-_x1, 0)
 	let _h = max(_y2-_y1, 0)
-	if (out) {
-		out[0] = _x1
-		out[1] = _y1
-		out[2] = _w
-		out[3] = _h
-		return out
-	} else {
-		return [_x1, _y1, _w, _h]
-	}
+	out[0] = _x1
+	out[1] = _y1
+	out[2] = _w
+	out[3] = _h
+	return out
 }
 
 function segs_overlap(ax1, ax2, bx1, bx2) { // check if two 1D segments overlap
@@ -1665,6 +1696,21 @@ function rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) {
 
 let transform_point_x = (m, x, y) => x * m.a + y * m.c + m.e
 let transform_point_y = (m, x, y) => x * m.b + y * m.d + m.f
+
+// hypotenuse function: computes sqrt(a^2 + b^2) without underflow / overflow problems.
+function hypot(a, b) {
+	if (a == 0 && b == 0) return 0
+	a = abs(a)
+	b = abs(b)
+	let M = max(a, b)
+	let m = min(a, b)
+	return M * sqrt(1 + (m / M)**2)
+}
+
+// distance between two points. avoids underflow and overflow.
+function distance(x1, y1, x2, y2) {
+	return hypot(x2-x1, y2-y1)
+}
 
 // timers --------------------------------------------------------------------
 
@@ -2332,6 +2378,7 @@ g.array_move                   = array_move
 g.array_equals                 = array_equals
 g.binsearch                    = binsearch
 g.uniq_sorted                  = uniq_sorted
+g.group_sorted                 = group_sorted
 g.remove_duplicates            = remove_duplicates
 g.obj                          = obj
 g.set                          = set
@@ -2408,8 +2455,11 @@ g.format_kcount                = format_kcount
 g.hsl_to_rgb_out               = hsl_to_rgb_out
 g.hsl_to_rgb_hex               = hsl_to_rgb_hex
 g.point_around                 = point_around
+g.rotate_point                 = rotate_point
 g.clip_rect                    = clip_rect
 g.rect_intersects              = rect_intersects
+g.hypot                        = hypot
+g.distance                     = distance
 g.transform_point_x            = transform_point_x
 g.transform_point_y            = transform_point_y
 g.runafter                     = runafter
@@ -2527,6 +2577,13 @@ S.add_set = m(set_addset)
 S.set     = m(set_set)
 S.toarray = m(set_toarray)
 S.equals  = m(set_equals)
+
+// Matrix extennsions --------------------------------------------------------
+
+let DM = DOMMatrix.prototype
+
+DM.x = transform_point_x
+DM.y = transform_point_y
 
 }
 

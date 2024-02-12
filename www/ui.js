@@ -230,12 +230,13 @@ TEXT
 	fs | font_size  (size)
 	font_weight     (weight)
 	bold            ()
+	nobold          ()
 	lh | line_gap   (gap)
-	xsmall          ()   font_size_normal * .72      // 10/14
-	small           ()   font_size_normal * .8125    // 12/14
-	smaller         ()   font_size_normal * .875     // 13/14
-	large           ()   font_size_normal * 1.125    // 16/14
-	xlarge          ()   font_size_normal * 1.5
+	xsmall          ()      ui.font_size(font_size_normal * .72   )   // 10/14
+	small           ()      ui.font_size(font_size_normal * .8125 )   // 12/14
+	smaller         ()      ui.font_size(font_size_normal * .875  )   // 13/14
+	large           ()      ui.font_size(font_size_normal * 1.125 )   // 16/14
+	xlarge          ()      ui.font_size(font_size_normal * 1.5   )   // 21/14
 
 	get_font_size   () -> font_size
 
@@ -853,6 +854,7 @@ ui.add_pointer = function() {
 		ui.pressed    = p.pressed
 		ui.click      = p.click
 		ui.clickup    = p.clickup
+		ui.dblclick   = p.dblclick
 		ui.wheel_dy   = p.wheel_dy
 		ui.trackpad   = p.trackpad
 
@@ -873,6 +875,7 @@ ui.mouse.activate()
 function reset_pointer_state(p) {
 	p.click = false
 	p.clickup = false
+	p.dblclick = false
 	p.wheel_dy = 0
 	p.trackpad = false
 	p.mouseenter = false
@@ -910,6 +913,15 @@ canvas.addEventListener('pointerup', function(ev) {
 		ui.mouse.clickup = true
 		this.releasePointerCapture(ev.pointerId)
 		ui.mouse.captured = false
+	}
+	ui.mouse.activate()
+	animate()
+})
+
+canvas.addEventListener('dblclick', function(ev) {
+	update_mouse(ev)
+	if (ev.button == 0) {
+		ui.mouse.dblclick = true
 	}
 	ui.mouse.activate()
 	animate()
@@ -3641,11 +3653,11 @@ ui.font = function(s) {
 	force_font(s)
 }
 
-ui.xsmall  = () => ui.font_size_normal * .72      // 10/14
-ui.small   = () => ui.font_size_normal * .8125    // 12/14
-ui.smaller = () => ui.font_size_normal * .875     // 13/14
-ui.large   = () => ui.font_size_normal * 1.125    // 16/14
-ui.xlarge  = () => ui.font_size_normal * 1.5
+ui.xsmall  = function() { ui.font_size(ui.font_size_normal * .72   ) } // 10/14
+ui.small   = function() { ui.font_size(ui.font_size_normal * .8125 ) } // 12/14
+ui.smaller = function() { ui.font_size(ui.font_size_normal * .875  ) } // 13/14
+ui.large   = function() { ui.font_size(ui.font_size_normal * 1.125 ) } // 16/14
+ui.xlarge  = function() { ui.font_size(ui.font_size_normal * 1.5   ) }
 
 const CMD_FONT_SIZE = cmd('font_size')
 
@@ -3683,9 +3695,8 @@ ui.font_weight = function(s) {
 	if (font_weight == s) return
 	force_font_weight(s)
 }
-ui.bold = function() {
-	ui.font_weight('bold')
-}
+ui.bold   = function() { ui.font_weight('bold') }
+ui.nobold = function() { ui.font_weight('normal') }
 
 const CMD_LINE_GAP = cmd('line_gap')
 
@@ -4446,6 +4457,7 @@ ss.draw = function(a, i) {
 			p.pressed  = m.pressed
 			p.click    = m.click
 			p.clickup  = m.clickup
+			p.dblclick = m.dblclick
 			p.wheel_dy = m.wheel_dy
 			p.trackpad = m.trackpad
 
@@ -4798,7 +4810,7 @@ ui.button_icon = function(font, icon, state, min_w, min_h) {
 	min_h ??= ui.em(1)
 	ui.font(font)
 	ui.color('text', state)
-	ui.text('', icon, 0, 's', 'c', min_w, min_w, min_h)
+	ui.text('', icon, 0, 'c', 'c', min_w, min_w, min_h)
 }
 
 ui.end_button_stack = function(state) {
