@@ -75,6 +75,9 @@ ERRORS
 	trace(...)
 	trace_if(cond, ...)
 	assert(v, err, ...) -> v
+	push_log(err, ...args)
+	pop_log(err, ...args)
+	log(err, ...args)
 
 EXTENDING BUILT-IN OBJECTS
 
@@ -434,7 +437,7 @@ function do_after(inherited, func) {
 
 let pr    = console.log
 let warn  = console.warn
-let debug = console.log // console.debug makes everything blue wtf.
+let debug = console.debug
 let trace = console.trace
 
 function trace_if(cond, ...args) {
@@ -446,6 +449,35 @@ function assert(ret, ...args) {
 	if (!ret)
 		throw (args.length ? args.join('') : 'assertion failed')
 	return ret
+}
+
+// indented logging with subst formatting.
+let log_level = 0
+let log_on = false
+function log(err, ...args) {
+	if (!log_on) return
+	if (!err) return
+	let indent = ('  ').repeat(log_level)
+	pr(indent, err, ...args)
+}
+function push_log(...args) {
+	let [err, a1, a2, a3] = args
+	if (log_level == 1 && err == 'FACE PLAN' && a1 == 1)
+		log_on = true
+	if (log_on)
+		log(...args)
+	log_level++
+}
+function pop_log(...args) {
+	if (log_on)
+		log(...args)
+	log_level--
+	if (log_on && log_level == 1)
+		log_on = false
+}
+function check(v, ...args) {
+	if (!v) log(...args)
+	return v
 }
 
 /* extending built-in objects ------------------------------------------------
@@ -2349,6 +2381,9 @@ g.debug                        = debug
 g.trace                        = trace
 g.trace_if                     = trace_if
 g.assert                       = assert
+g.push_log                     = push_log
+g.pop_log                      = pop_log
+g.log                          = log
 g.property                     = property
 g.method                       = method
 g.override                     = override
