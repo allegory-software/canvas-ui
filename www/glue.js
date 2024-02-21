@@ -78,6 +78,7 @@ ERRORS
 	push_log(err, ...args)
 	pop_log(err, ...args)
 	log(err, ...args)
+	check(v, err, ...args) -> v
 
 EXTENDING BUILT-IN OBJECTS
 
@@ -109,6 +110,7 @@ ARRAYS
 	insert(a, i, v) -> a
 	remove(a, i) -> v
 	remove_value(a, v) -> i
+	replace_value(a, v0, v1) -> i
 	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
 	array_move(a, i1, n, insert_i, [before])
 	array_equals(a1, a2, [i1], [i2]) -> t|f
@@ -121,13 +123,13 @@ HASH MAPS
 
 	obj() -> o                      create a native map, string keys only
 	set(iter) -> m                  create a set, holds all types
-	s.addset(s2) -> s               dump set into set
-	s.set(s2) -> s                  set elements to s'
-	s.toarray() -> [v1,...]         array of elements in insert order
-	s.equals(s2[, same_order]) -> t|f    compare sets
+	set_addset(s, s2) -> s          dump set into set
+	set_set(s, s2) -> s             set elements to s'
+	set_toarray(s) -> [v1,...]      array of elements in insert order
+	set_equals(s, s2[, same_order]) -> t|f    compare sets
 	map(iter) -> m                  create a map, keys and values can be of any type
-	m.first_key
-	m.assign                        like assign but for a map
+	map_first_key(m) -> k           get the first key out of a map
+	map_assign(m, m1) -> m          like assign() but for a map
 	empty -> {}                     global empty object, inherits Object
 	empty_obj -> obj()              global empty object, does not inherit Object
 	empty_set -> set()              global empty set, read-only!
@@ -135,9 +137,9 @@ HASH MAPS
 	assign(dt, t1, ...)             dump t1, ... into dt
 	assign_opt(dt, t1, ...)         dump t1, ... into dt, skips undefined values
 	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
-	memoize(f)
+	memoize(f) -> mf                memoize single-arg function
 	count_keys(t, [max_n]) -> n     count keys in t up-to max_n
-	first_key(t) -> k
+	first_key(t) -> k               get the first key out of an object
 
 TYPED ARRAYS
 
@@ -462,8 +464,6 @@ function log(err, ...args) {
 }
 function push_log(...args) {
 	let [err, a1, a2, a3] = args
-	if (log_level == 1 && err == 'FACE PLAN' && a1 == 1)
-		log_on = true
 	if (log_on)
 		log(...args)
 	log_level++
@@ -472,8 +472,6 @@ function pop_log(...args) {
 	if (log_on)
 		log(...args)
 	log_level--
-	if (log_on && log_level == 1)
-		log_on = false
 }
 function check(v, ...args) {
 	if (!v) log(...args)
@@ -705,6 +703,13 @@ function remove_value(a, v) {
 	let i = a.indexOf(v)
 	if (i != -1)
 		a.splice(i, 1)
+	return i
+}
+
+function replace_value(a, v0, v1) {
+	let i = a.indexOf(v0)
+	if (i >= 0)
+		a[i] = v1
 	return i
 }
 
@@ -2384,6 +2389,7 @@ g.assert                       = assert
 g.push_log                     = push_log
 g.pop_log                      = pop_log
 g.log                          = log
+g.check                        = check
 g.property                     = property
 g.method                       = method
 g.override                     = override
@@ -2408,6 +2414,7 @@ g.array_set                    = array_set
 g.insert                       = insert
 g.remove                       = remove
 g.remove_value                 = remove_value
+g.replace_value                = replace_value
 g.remove_values                = remove_values
 g.array_move                   = array_move
 g.array_equals                 = array_equals
