@@ -148,7 +148,9 @@ TYPED ARRAYS
 		.invalidate([offset=0], [len])
 		.grow(cap, [preserve_contents=true], [pow2=true])
 		.grow_type(arr_type|max_index|[...]|arr, [preserve_contents=true])
-		.setlen(len)
+		.setlen(len), also .len[gth] = new_len
+		.capacity -> capacity
+		.len[gth] -> length
 
 DATA STRUCTURES
 
@@ -288,7 +290,7 @@ G.glue = g
 let out = []
 
 function DEBUG(k, dv) {
-	dv = dv ?? false
+	dv ??= false
 	if (!(k in G))
 		G[k] = dv
 	if (G[k] !== dv)
@@ -491,6 +493,7 @@ enumerables into it (which changes Object.keys() and `for in` loops).
 // extend an object with a property, checking for upstream name clashes.
 // NOTE: shadows both instance and prototype fields.
 function property(cls, prop, get, set) {
+	prop = prop.trim()
 	let proto = cls.prototype || cls
 	if (prop in proto)
 		assert(false, cls.constructor.name, '.', prop,
@@ -660,7 +663,7 @@ let array = (...args) => new Array(...args)
 let empty_array = []
 
 function range(i1, j, step, f) {
-	step = step ?? 1
+	step ??= 1
 	f = f || return_arg
 	let a = []
 	for (let i = i1; i < j; i += step)
@@ -998,7 +1001,7 @@ class dyn_arr_class {
 				cap = nextpow2(cap)
 			let array = new this.arr_type(cap * this.nc)
 			array.nc = this.nc
-			array.len = this.length
+			array.len = this.len
 			if (preserve_contents !== false && this.array)
 				array.set(this.array)
 			this.array = array
@@ -1011,7 +1014,7 @@ class dyn_arr_class {
 		if (arr_type1.BYTES_PER_ELEMENT <= this.arr_type.BYTES_PER_ELEMENT)
 			return
 		if (this.array) {
-			let this_len = this.length
+			let this_len = this.len
 			let array1 = new arr_type1(this.capacity)
 			if (preserve_contents !== false)
 				for (let i = 0, n = this_len * this.nc; i < n; i++)
@@ -1031,7 +1034,7 @@ class dyn_arr_class {
 		let data_len
 		if (data.nc != null) {
 			assert(data.nc == this.nc, 'source array nc is ', data.nc, ' expected ', this.nc)
-			data_len = data.length ?? data.length
+			data_len = data.len ?? data.length
 		} else {
 			data_len = data.length * this.inv_nc
 			assert(data_len == floor(data_len), 'source array length not multiple of ', this.nc)
@@ -1043,7 +1046,7 @@ class dyn_arr_class {
 
 		assert(offset >= 0, 'offset out of range')
 
-		this.setlen(max(this.length, offset + len))
+		this.setlen(max(this.len, offset + len))
 		this.array.set(data, offset * this.nc)
 		this.invalidate(offset, len)
 
@@ -1052,7 +1055,7 @@ class dyn_arr_class {
 
 	remove(offset, len) {
 		assert(offset >= 0, 'offset out of range')
-		len = max(0, min(len ?? 1, this.length - offset))
+		len = max(0, min(len ?? 1, this.len - offset))
 		if (len == 0)
 			return
 		for (let a = this.array, o1 = offset, o2 = offset + len, i = 0; i < len; i++)
@@ -1077,7 +1080,7 @@ class dyn_arr_class {
 	invalidate(offset, len) {
 		let o1 = max(0, offset || 0)
 		len = max(0, len ?? 1/0)
-		let o2 = min(o1 + len, this.length)
+		let o2 = min(o1 + len, this.len)
 		o1 = min(this.invalid_offset1 ??  1/0, o1)
 		o2 = max(this.invalid_offset2 ?? -1/0, o2)
 		this.invalid = true
@@ -1098,10 +1101,11 @@ property(dyn_arr_class, 'capacity',
 	function() { return this.array ? this.array.length * this.inv_nc : 0 },
 )
 
-property(dyn_arr_class, 'length',
+property(dyn_arr_class, 'len',
 	function() { return this.array ? this.array.len : 0 },
 	function(len) { this.setlen(len) }
 )
+alias(dyn_arr_class, 'length', 'len') // for familiarity
 
 function dyn_arr(arr_type, data_or_cap, nc) {
 	return new dyn_arr_class(arr_type, data_or_cap, nc)
@@ -1688,7 +1692,7 @@ hsl_to_rgb_hex = function(h, s, L, a) {
 // point at a specified angle on a circle.
 function point_around(cx, cy, r, angle) {
 	out[0] = cx + cos(angle) * r
-	out[1] = cy + sin(angle) * r
+	out[1] = cy - sin(angle) * r
 	return out
 }
 
@@ -2588,8 +2592,7 @@ let a = Array.prototype
 
 // NOTE: making these non-enumerable methods to avoid affecting Object.keys(array).
 
-// function array_last() { return this[this.length-1] }
-// method(a, 'last             ', m(array_last              ))
+property(a, 'last', function get_last() { return this[this.length-1] })
 
 method(a, 'extend           ', m(extend                  ))
 method(a, 'set              ', m(array_set               ))

@@ -570,10 +570,10 @@ G.chart = component('chart', 'Input', function(e) {
 					// compute the percent div's unscaled position inside the pie.
 					let center_angle = angle + arclen / 2
 					;[slice.percent_div_x, slice.percent_div_y] =
-						point_around(0, 0, .65, center_angle - 90)
+						point_around(0, 0, .65, -(center_angle - 90)*rad)
 
 					;[slice.center_x, slice.center_y] =
-						point_around(0, 0, .5, center_angle - 90)
+						point_around(0, 0, .5, -(center_angle - 90)*rad)
 
 					angle += arclen
 					i++
@@ -848,7 +848,7 @@ G.chart = component('chart', 'Input', function(e) {
 
 			if (rotate) {
 				cx.translate(w, 0)
-				cx.rotate(rad * 90)
+				cx.rotate(90*rad)
 				;[w, h] = [h, w]
 			}
 
@@ -946,7 +946,7 @@ G.chart = component('chart', 'Input', function(e) {
 					let x = round(xg_x + text_h / 2)
 					let y = h + m.width
 					cx.translate(x, y)
-					cx.rotate(rad * -90)
+					cx.rotate(-90*rad)
 				} else {
 					let x = is_first ? xg_x : is_last ? xg_x - m.width : xg_x - m.width / 2
 					let y = round(h)
@@ -999,7 +999,7 @@ G.chart = component('chart', 'Input', function(e) {
 						let px = -5
 						let py = round(y + m.width / 2)
 						cx.translate(px, py)
-						cx.rotate(rad * -90)
+						cx.rotate(-90*rad)
 					} else {
 						let px = -m.width - 10
 						let py = round(y + text_h / 2)

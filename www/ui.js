@@ -363,9 +363,13 @@ ui.set_cursor = function(cursor) {
 
 // styles --------------------------------------------------------------------
 
-{
-let style = document.createElement('style')
-style.innerHTML = `
+ui.css = function(s) {
+	let style = document.createElement('style')
+	style.innerHTML = s
+	document.head.appendChild(style)
+}
+
+ui.css(`
 
 * { box-sizing: border-box; }
 
@@ -401,6 +405,10 @@ body {
 	position: absolute;
 }
 
+.ui-canvas:focus {
+	outline: none;
+}
+
 .ui-input, .ui-input:focus {
 	position: absolute;
 	padding: 0;
@@ -410,9 +418,7 @@ body {
 	outline: none;
 }
 
-`
-document.head.appendChild(style)
-}
+`)
 
 // colors --------------------------------------------------------------------
 
@@ -744,6 +750,7 @@ ui.bg_style('dark' , 'row' , 'item-error item-focused'            ,   0, 1.00, 0
 
 let screen = document.createElement('div')
 screen.classList.add('ui-screen')
+ui.screen = screen
 
 let canvas = document.createElement('canvas')
 canvas.classList.add('ui-canvas')
@@ -792,10 +799,12 @@ ui.animate = animate
 
 ui.default_theme = document.documentElement.getAttribute('theme') ?? 'light'
 ui.default_font  = document.documentElement.getAttribute('font' ) ?? 'Arial'
+function set_screen_bg() {
+	theme = themes[ui.default_theme]
+	document.documentElement.style.background = bg_color('bg')
+}
 // prevent flicker on load by setting the screen's background color now.
-theme = themes[ui.default_theme]
-document.documentElement.style.background = bg_color('bg')
-ui.screen = screen
+set_screen_bg()
 
 document.addEventListener('DOMContentLoaded', function() {
 	ready = true
@@ -1632,12 +1641,16 @@ function draw_cmd(a, i, recs) {
 function draw_frame(recs, layers) {
 	let theme_stack_length0 = theme_stack.length
 	theme_stack.push(theme)
-	theme = themes[ui.default_theme] // cuz we call bg_color()
+	theme = themes[ui.default_theme]
+	set_screen_bg()
 
-	cx.beginPath()
-	cx.rect(0, 0, canvas.width, canvas.height)
-	cx.fillStyle = bg_color('bg')
-	cx.fill()
+	cx.clearRect(0, 0, canvas.width, canvas.height)
+	if (0) {
+		cx.beginPath()
+		cx.rect(0, 0, canvas.width, canvas.height)
+		cx.fillStyle = bg_color('bg')
+		cx.fill()
+	}
 
 	for (let layer of layers) {
 		/*global*/ layer_i = layer.i
@@ -4715,6 +4728,7 @@ let ID    = ARGS+1
 let out = [0, 0, null]
 ui.widget('drag_point', {
 	create: function(cmd, id, x, y, color) {
+		color ??= 'red'
 		keepalive(id)
 		ui.state_init(id, 'x', x)
 		ui.state_init(id, 'y', y)
