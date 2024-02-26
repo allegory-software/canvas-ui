@@ -203,11 +203,12 @@ COLORS
 
 	hsl_to_rgb_out(out, i, h, s, L, [a])
 	hsl_to_rgb_hex(h, s, L, [a]) -> '#rrggbb'
+	hsl_to_rgba_int(h, s, L, [a]) -> 0xRRGGBBAA
+	hsl_to_rgb_int(h, s, L) -> 0xRRGGBB
 
 GEOMETRY
 
 	point_around(cx, cy, r, angle) -> [x, y]
-	rotate_point(x, y, cx, cy, angle) -> [x, y]
 	clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) -> [x, y, w, h]
 	rect_intersects(x1, y1, w1, h1, x2, y2, w2, h2) -> t|f
 	transform_point_x(m, x, y) => x1
@@ -262,6 +263,7 @@ INTER-WINDOW COMMUNICATION
 MULTI-LANGUAGE STUBS
 
 	S(id, default, ...args)                get labeled string in current language
+	Sf(...args) -> f() -> S(...args)
 	lang()                                 get current language
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
@@ -282,8 +284,6 @@ AJAX REQUESTS
 (function () {
 "use strict"
 let G = window
-let g = {}
-G.glue = g
 
 // global array for returning multiple values from functions that do so.
 // watch out and always unpack the return value from such functions.
@@ -741,13 +741,13 @@ function array_move(a, i1, n, insert_i, before) {
 	return insert_i
 }
 
-function array_equals(a0, a, i0, i1) {
-	i0 = i0 || 0
-	i1 = i1 || max(a.length, a1.length)
-	if (i1 > min(a.length, a1.length))
+function array_equals(a1, a2, i1, i2) {
+	i1 = i1 ?? 0
+	i2 = i2 ?? max(a1.length, a2.length)
+	if (i2 > min(a1.length, a2.length))
 		return false
-	for (let i = i0; i < i1; i++)
-		if (a[i] !== a1[i])
+	for (let i = i1; i < i2; i++)
+		if (a1[i] !== a2[i])
 			return false
 	return true
 }
@@ -1078,7 +1078,7 @@ class dyn_arr_class {
 	}
 
 	invalidate(offset, len) {
-		let o1 = max(0, offset || 0)
+		let o1 = max(0, offset ?? 0)
 		len = max(0, len ?? 1/0)
 		let o2 = min(o1 + len, this.len)
 		o1 = min(this.invalid_offset1 ??  1/0, o1)
@@ -1670,7 +1670,7 @@ function hsl_to_rgb_out(out, i, h, s, L, a) {
 	out[i+0] = 255 * h2rgb(m1, m2, h+1/3)
 	out[i+1] = 255 * h2rgb(m1, m2, h)
 	out[i+2] = 255 * h2rgb(m1, m2, h-1/3)
-	out[i+3] = a ?? 255
+	out[i+3] = 255 * (a ?? 1)
 }
 
 // output: #rrggbb[aa]
@@ -1678,13 +1678,35 @@ let hsl_to_rgb_hex
 {
 let hex = x => format_base(round(x), 16, 2)
 hsl_to_rgb_hex = function(h, s, L, a) {
-	hsl_to_rgb_out(out, 0, h, s, L)
+	hsl_to_rgb_out(out, 0, h, s, L, a)
 	return '#' +
 		hex(out[0]) +
 		hex(out[1]) +
 		hex(out[2]) +
-		(a ? hex(a) : '')
+		(a ? hex(out[3]) : '')
 }
+}
+
+// output 0xRRGGBB
+function hsl_to_rgb_int(h, s, L) {
+	hsl_to_rgb_out(out, 0, h, s, L)
+	return (
+		(out[0] << 16) +
+		(out[1] <<  8) +
+		(out[2] <<  0)
+	)
+}
+
+
+// output 0xRRGGBBAA
+function hsl_to_rgba_int(h, s, L, a) {
+	hsl_to_rgb_out(out, 0, h, s, L, a)
+	return (
+		(out[0] << 24) +
+		(out[1] << 16) +
+		(out[2] <<  8) +
+		(out[3] <<  0)
+	)
 }
 
 // geometry ------------------------------------------------------------------
@@ -1693,16 +1715,6 @@ hsl_to_rgb_hex = function(h, s, L, a) {
 function point_around(cx, cy, r, angle) {
 	out[0] = cx + cos(angle) * r
 	out[1] = cy - sin(angle) * r
-	return out
-}
-
-function rotate_point(px, py, cx, cy, angle) {
-	let s = sin(angle)
-	let c = cos(angle)
-	let x = px - cx
-	let y = py - cy
-	out[0] = cx + (x * c - y * s)
-	out[1] = cy + (x * s + y * c)
 	return out
 }
 
@@ -2010,34 +2022,6 @@ listen('global_changed', function(k, v) {
 	window[k] = v
 })
 
-// multi-language stubs replaced in webb_spa.js ------------------------------
-
-// stub for getting message strings that can be translated multiple languages.
-let S = g.S || function(name, en_s, ...args) {
-	return subst(en_s, ...args)
-}
-
-function Sf(...args) {
-	return () => S(...args)
-}
-
-// stub for getting current language.
-let nav_lang = navigator.language.substring(0, 2)
-let lang = g.lang || function() {
-	return document.documentElement.lang || nav_lang
-}
-
-// stub for getting current country.
-let nav_country = navigator.language.substring(3, 5)
-let country = g.country || function() {
-	return document.documentElement.attr('country') || nav_country
-}
-
-let locale = memoize(function() { return lang() + '-' + country() })
-
-// stub for rewriting links to current language.
-let href = g.href || return_arg
-
 // gzip (de)compression with API from Hell -----------------------------------
 
 async function concatUint8Arrays(chunks) {
@@ -2328,221 +2312,66 @@ function post(url, upload, success, fail, opt) {
 
 // publishing ----------------------------------------------------------------
 
-g.DEBUG                        = DEBUG
-g.Firefox                      = Firefox
-g.Chrome                       = Chrome
-g.Safari                       = Safari
-g.Safari_maj                   = Safari_maj
-g.Safari_min                   = Safari_min
-g.isobject                     = isobject
-g.isarray                      = isarray
-g.isobj                        = isobj
-g.isstr                        = isstr
-g.isnum                        = isnum
-g.isbool                       = isbool
-g.isfunc                       = isfunc
-g.repl                         = repl
-g.num                          = num
-g.bool                         = bool
-g.str                          = str
-g.inf                          = inf
-g.floor                        = floor
-g.ceil                         = ceil
-g.round                        = round
-g.snap                         = snap
-g.trunc                        = trunc
-g.abs                          = abs
-g.min                          = min
-g.max                          = max
-g.sqrt                         = sqrt
-g.ln                           = ln
-g.log10                        = log10
-g.logbase                      = logbase
-g.random                       = random
-g.sign                         = sign
-g.clamp                        = clamp
-g.strict_sign                  = strict_sign
-g.lerp                         = lerp
-g.mod                          = mod
-g.nextpow2                     = nextpow2
-g.PI                           = PI
-g.sin                          = sin
-g.cos                          = cos
-g.tan                          = tan
-g.rad                          = rad
-g.deg                          = deg
-g.asin                         = asin
-g.acos                         = acos
-g.atan                         = atan
-g.atan2                        = atan2
-g.format_base                  = format_base
-g.dec                          = dec
-g.noop                         = noop
-g.return_true                  = return_true
-g.return_false                 = return_false
-g.return_arg                   = return_arg
-g.wrap                         = wrap
-g.do_before                    = do_before
-g.do_after                     = do_after
-g.pr                           = pr
-g.warn                         = warn
-g.debug                        = debug
-g.trace                        = trace
-g.trace_if                     = trace_if
-g.assert                       = assert
-g.push_log                     = push_log
-g.pop_log                      = pop_log
-g.log                          = log
-g.check                        = check
-g.property                     = property
-g.method                       = method
-g.override                     = override
-g.alias                        = alias
-g.override_property_setter     = override_property_setter
-g.override_property_getter     = override_property_getter
-g.subst                        = subst
-g.display_name                 = display_name
-g.lower_ai_ci                  = lower_ai_ci
-g.find_ai_ci                   = find_ai_ci
-g.catany                       = catany
-g.catall                       = catall
-g.esc                          = esc
-g.words                        = words
-g.wordset                      = wordset
-g.captures                     = captures
-g.array                        = array
-g.empty_array                  = empty_array
-g.range                        = range
-g.extend                       = extend
-g.array_set                    = array_set
-g.insert                       = insert
-g.remove                       = remove
-g.remove_value                 = remove_value
-g.replace_value                = replace_value
-g.remove_values                = remove_values
-g.array_move                   = array_move
-g.array_equals                 = array_equals
-g.binsearch                    = binsearch
-g.uniq_sorted                  = uniq_sorted
-g.group_sorted                 = group_sorted
-g.remove_duplicates            = remove_duplicates
-g.obj                          = obj
-g.set                          = set
-g.map                          = map
-g.map_first_key                = map_first_key
-g.map_assign                   = map_assign
-g.set_addset                   = set_addset
-g.set_set                      = set_set
-g.set_toarray                  = set_toarray
-g.set_equals                   = set_equals
-g.empty                        = empty
-g.empty_obj                    = empty_obj
-g.empty_set                    = empty_set
-g.keys                         = keys
-g.assign                       = assign
-g.assign_opt                   = assign_opt
-g.attr                         = attr
-g.memoize                      = memoize
-g.count_keys                   = count_keys
-g.first_key                    = first_key
-g.f32arr                       = f32arr
-g.i8arr                        = i8arr
-g.u8arr                        = u8arr
-g.i16arr                       = i16arr
-g.u16arr                       = u16arr
-g.i32arr                       = i32arr
-g.u32arr                       = u32arr
-g.max_index_from_array         = max_index_from_array
-g.arr_type_from_max_index      = arr_type_from_max_index
-g.index_arr_type               = index_arr_type
-g.dyn_arr                      = dyn_arr
-g.dyn_f32arr                   = dyn_f32arr
-g.dyn_i8arr                    = dyn_i8arr
-g.dyn_u8arr                    = dyn_u8arr
-g.dyn_i16arr                   = dyn_i16arr
-g.dyn_u16arr                   = dyn_u16arr
-g.dyn_i32arr                   = dyn_i32arr
-g.dyn_u32arr                   = dyn_u32arr
-g.freelist                     = freelist
-g.hash32                       = hash32
-g._d                           = _d
-g.time                         = time
-g.day                          = day
-g.month                        = month
-g.year                         = year
-g.week                         = week
-g.days                         = days
-g.year_of                      = year_of
-g.month_of                     = month_of
-g.week_day_of                  = week_day_of
-g.month_day_of                 = month_day_of
-g.hours_of                     = hours_of
-g.minutes_of                   = minutes_of
-g.seconds_of                   = seconds_of
-g.set_year                     = set_year
-g.set_month                    = set_month
-g.set_month_day                = set_month_day
-g.set_hours                    = set_hours
-g.set_minutes                  = set_minutes
-g.set_seconds                  = set_seconds
-g.weekday_name                 = weekday_name
-g.month_name                   = month_name
-g.month_year                   = month_year
-g.week_start_offset            = week_start_offset
-g.parse_timeofday              = parse_timeofday
-g.parse_date                   = parse_date
-g.format_timeofday             = format_timeofday
-g.format_date                  = format_date
-g.date_placeholder_text        = date_placeholder_text
-g.parse_duration               = parse_duration
-g.format_timeago               = format_timeago
-g.format_kbytes                = format_kbytes
-g.format_kcount                = format_kcount
-g.hsl_to_rgb_out               = hsl_to_rgb_out
-g.hsl_to_rgb_hex               = hsl_to_rgb_hex
-g.point_around                 = point_around
-g.rotate_point                 = rotate_point
-g.clip_rect                    = clip_rect
-g.rect_intersects              = rect_intersects
-g.hypot                        = hypot
-g.distance                     = distance
-g.transform_point_x            = transform_point_x
-g.transform_point_y            = transform_point_y
-g.runafter                     = runafter
-g.runevery                     = runevery
-g.runagainevery                = runagainevery
-g.clock                        = clock
-g.timer                        = timer
-g.json_arg                     = json_arg
-g.try_json_arg                 = try_json_arg
-g.json                         = json
-g.copy_to_clipboard            = copy_to_clipboard
-g.save                         = save
-g.load                         = load
-g.url_parse                    = url_parse
-g.url_format                   = url_format
-g.custom_event                 = custom_event
-g.custom_event_up              = custom_event_up
-g.listen                       = listen
-g.announce                     = announce
-g.broadcast                    = broadcast
-g.setglobal                    = setglobal
-g.S                            = S
-g.Sf                           = Sf
-g.lang                         = lang
-g.country                      = country
-g.href                         = href
-g.compress                     = compress
-g.decompress                   = decompress
-g.ajax                         = ajax
-g.get                          = get
-g.post                         = post
+let glue = {
+DEBUG, Firefox, Chrome, Safari, Safari_maj, Safari_min,
+isobject, isarray, isobj, isstr, isnum, isbool, isfunc,
+repl,
+num, bool, str,
+inf,
+floor, ceil, round, snap, trunc, mod,
+abs, sign, strict_sign,
+min, max, clamp,
+lerp,
+sqrt, ln, log10, logbase, nextpow2,
+random,
+PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
+format_base, dec,
+noop, return_true, return_false, return_arg, wrap, do_before, do_after,
+pr, warn, debug, trace, trace_if, assert,
+push_log, pop_log, log, check,
+property, method, override, alias, override_property_setter, override_property_getter,
+subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
+array, empty_array, range, extend, array_set,
+insert, remove, remove_value, replace_value, remove_values, array_move, array_equals,
+binsearch, uniq_sorted, group_sorted, remove_duplicates,
+map, map_first_key, map_assign,
+set, set_addset, set_set, set_toarray, set_equals, empty_set,
+obj, empty, empty_obj,  keys, assign, assign_opt, count_keys, first_key, attr,
+memoize,
+f32arr, i8arr, u8arr, i16arr, u16arr, i32arr, u32arr,
+max_index_from_array, arr_type_from_max_index, index_arr_type,
+dyn_arr, dyn_f32arr, dyn_i8arr, dyn_u8arr, dyn_i16arr, dyn_u16arr, dyn_i32arr, dyn_u32arr,
+freelist,
+hash32,
+_d, time, day, month, year, week, days,
+year_of, month_of, week_day_of, month_day_of, hours_of, minutes_of, seconds_of,
+set_year, set_month, set_month_day, set_hours, set_minutes, set_seconds,
+weekday_name, month_name, month_year, week_start_offset,
+parse_timeofday, parse_date, parse_duration,
+format_timeofday, format_date, date_placeholder_text, format_timeago,
+format_kbytes, format_kcount,
+hsl_to_rgb_out, hsl_to_rgb_hex, hsl_to_rgba_int, hsl_to_rgb_int,
+point_around,
+clip_rect, rect_intersects,
+hypot, distance,
+transform_point_x, transform_point_y,
+runafter, runevery, runagainevery, clock, timer,
+json_arg, try_json_arg, json,
+copy_to_clipboard,
+save, load,
+url_parse, url_format,
+custom_event, custom_event_up, listen,
+announce, broadcast, setglobal,
+compress, decompress,
+ajax, get, post,
+}
 
+G.glue = glue
 
 if (document.currentScript.hasAttribute('global')) {
-	for (let k in g) {
+	for (let k in glue) {
 		assert(!(k in G), k, ' global already exists')
-		G[k] = g[k]
+		G[k] = glue[k]
 	}
 }
 
@@ -2556,80 +2385,102 @@ function m(f) {
 
 // String extensions ---------------------------------------------------------
 
-let s = String.prototype
+String.prototype.subst            = m(subst           )
+String.prototype.display_name     = m(display_name    )
+String.prototype.lower_ai_ci      = m(lower_ai_ci     )
+String.prototype.find_ai_ci       = m(find_ai_ci      )
+String.prototype.catany           = m(catany          )
+String.prototype.esc              = m(esc             )
+String.prototype.words            = m(words           )
+String.prototype.wordset          = m(wordset         )
+String.prototype.captures         = m(captures        )
+String.prototype.parse_timeofday  = m(parse_timeofday )
+String.prototype.parse_date       = m(parse_date      )
+String.prototype.parse_duration   = m(parse_duration  )
 
-s.subst            = m(subst           )
-s.display_name     = m(display_name    )
-s.lower_ai_ci      = m(lower_ai_ci     )
-s.find_ai_ci       = m(find_ai_ci      )
-s.catany           = m(catany          )
-s.esc              = m(esc             )
-s.words            = m(words           )
-s.wordset          = m(wordset         )
-s.captures         = m(captures        )
-s.parse_timeofday  = m(parse_timeofday )
-s.parse_date       = m(parse_date      )
-s.parse_duration   = m(parse_duration  )
-
-alias(s, 'starts', 'startsWith')
-alias(s, 'ends'  , 'endsWith'  )
+alias(String.prototype, 'starts', 'startsWith')
+alias(String.prototype, 'ends'  , 'endsWith'  )
 
 // Number extensions ---------------------------------------------------------
 
-let n = Number.prototype
-
-n.timeofday  = m(format_timeofday)
-n.date       = m(format_date)
-n.duration   = m(format_duration)
-n.timeago    = m(format_timeago)
-n.kbytes     = m(format_kbytes)
-n.kcount     = m(format_kcount)
-n.base       = m(format_base)
+Number.prototype.timeofday  = m(format_timeofday)
+Number.prototype.date       = m(format_date)
+Number.prototype.duration   = m(format_duration)
+Number.prototype.timeago    = m(format_timeago)
+Number.prototype.kbytes     = m(format_kbytes)
+Number.prototype.kcount     = m(format_kcount)
+Number.prototype.base       = m(format_base)
 
 // Array extensions ----------------------------------------------------------
 
-let a = Array.prototype
-
 // NOTE: making these non-enumerable methods to avoid affecting Object.keys(array).
 
-property(a, 'last', function get_last() { return this[this.length-1] })
+property(Array.prototype, 'last', function get_last() { return this[this.length-1] })
 
-method(a, 'extend           ', m(extend                  ))
-method(a, 'set              ', m(array_set               ))
-method(a, 'insert           ', m(insert                  ))
-method(a, 'remove           ', m(remove                  ))
-method(a, 'remove_value     ', m(remove_value            ))
-method(a, 'remove_values    ', m(remove_values           ))
-method(a, 'move             ', m(array_move              ))
-method(a, 'equals           ', m(array_equals            ))
-method(a, 'binsearch        ', m(binsearch               ))
-method(a, 'uniq_sorted      ', m(uniq_sorted             ))
-method(a, 'remove_duplicates', m(remove_duplicates       ))
+method(Array.prototype, 'extend           ', m(extend                  ))
+method(Array.prototype, 'set              ', m(array_set               ))
+method(Array.prototype, 'insert           ', m(insert                  ))
+method(Array.prototype, 'remove           ', m(remove                  ))
+method(Array.prototype, 'remove_value     ', m(remove_value            ))
+method(Array.prototype, 'remove_values    ', m(remove_values           ))
+method(Array.prototype, 'move             ', m(array_move              ))
+method(Array.prototype, 'equals           ', m(array_equals            ))
+method(Array.prototype, 'binsearch        ', m(binsearch               ))
+method(Array.prototype, 'uniq_sorted      ', m(uniq_sorted             ))
+method(Array.prototype, 'remove_duplicates', m(remove_duplicates       ))
 
 // Map extensions ------------------------------------------------------------
 
 property(Map, 'first_key', m(map_first_key))
 
-let M = Map.prototype
-
-M.assign = m(map_assign)
+Map.prototype.assign = m(map_assign)
 
 // Set extensions ------------------------------------------------------------
 
-let S = Set.prototype
-
-S.add_set = m(set_addset)
-S.set     = m(set_set)
-S.toarray = m(set_toarray)
-S.equals  = m(set_equals)
+Set.prototype.add_set = m(set_addset)
+Set.prototype.set     = m(set_set)
+Set.prototype.toarray = m(set_toarray)
+Set.prototype.equals  = m(set_equals)
 
 // Matrix extennsions --------------------------------------------------------
 
-let DM = DOMMatrix.prototype
+DOMMatrix.prototype.x = transform_point_x
+DOMMatrix.prototype.y = transform_point_y
 
-DM.x = transform_point_x
-DM.y = transform_point_y
+// multi-language stubs replaced in webb_spa.js ------------------------------
 
+// stub for getting message strings that can be translated multiple languages.
+let S = glue.S || function(name, en_s, ...args) {
+	return subst(en_s, ...args)
 }
+glue.S = S
+
+function Sf(...args) {
+	return () => S(...args)
+}
+glue.Sf = Sf
+
+// stub for getting current language.
+let nav_lang = navigator.language.substring(0, 2)
+let lang = glue.lang || function() {
+	return document.documentElement.lang || nav_lang
+}
+glue.lang = lang
+
+// stub for getting current country.
+let nav_country = navigator.language.substring(3, 5)
+let country = glue.country || function() {
+	return document.documentElement.attr('country') || nav_country
+}
+glue.country = country
+
+let locale = memoize(function() { return lang() + '-' + country() })
+glue.locale = locale
+
+// stub for rewriting links to current language.
+let href = glue.href || return_arg
+glue.href = href
+
+} // if (extend)
 
 }()) // module function

@@ -1,4 +1,4 @@
-NOTE: This is in the works! Check out the [demo] to see how we're advancing.
+NOTE: This is in the works! Check out the [demo] to see how we're progressing.
 
 [demo]: https://allegory.ro/sdk/canvas-ui/demo.html
 

@@ -41,14 +41,16 @@ BUILT-IN STYLE STATES
 THEME API
 
 	* = fg | border | bg
-	*_color         (name, state, theme) -> color                  get a color
-	*_color_hsl     (name, state, theme) -> [color, h, s, L, a]    get a color with HSL components
-	bg_is_dark      (bg_color) -> t|f
+	*_color         (name, [state], [theme]) -> css_color                 get theme color for fillStyle/strokeStyle
+	*_color_hsl     (name, [state], [theme]) -> [css_color, h, s, L, a]   get theme color for hsl_adjust()
+	*_color_rgb     (name, [state], [theme]) -> 0xRRGGBB                  get theme color for WebGL, ignoring alpha
+	*_color_rgba    (name, [state], [theme]) -> 0xRRGGBBAA                get theme color for WebGL, with alpha
+	bg_is_dark      (bg_color) -> t|f                                     based on this, text is white or black
 	get_theme       () -> dark|light
 	dark            () -> t|f
-	hsl             (h, s, L, a) -> color
-	hsl_adjust      (c, h, s, L, a) -> color
-	alpha_adjust    (c, a) -> color
+	hsl             (h, s, L, a) -> css_color              make a CSS color from HSL components
+	hsl_adjust      (c, h, s, L, a) -> css_color           make a CSS color from a color_hsl() return value, with h, s, L adjusted
+	alpha_adjust    (c, a) -> css_color                    make a CSS color from a color_hsl() return value, with alpha adjusted
 
 	set_shadow      (name)  use in draw callback to set a shadow
 
@@ -89,6 +91,7 @@ KEYBOARD STATE
 	keydown         (key) -> t|f     check if a key was just pressed
 	keyup           (key) -> t|f     check if a key was just depressed
 	key             (key) -> t|f     check if a key is pressed
+	key_events      -> [['down'|'up', key], ...]
 
 LAYERS
 
@@ -336,6 +339,8 @@ const {
 	freelist,
 	hsl_to_rgb_out,
 	hsl_to_rgb_hex,
+	hsl_to_rgb_int,
+	hsl_to_rgba_int,
 	PI,
 	transform_point_x,
 	transform_point_y,
@@ -562,6 +567,20 @@ function lookup_color_func(hsl_color) {
 	}
 }
 
+function lookup_color_rgb_int_func(hsl_color) {
+	return function(name, state, theme) {
+		let c = hsl_color(name, state, theme)
+		return hsl_to_rgb_int(c[1], c[2], c[3])
+	}
+}
+
+function lookup_color_rgba_int_func(hsl_color) {
+	return function(name, state, theme) {
+		let c = hsl_color(name, state, theme)
+		return hsl_to_rgba_int(c[1], c[2], c[3], c[4])
+	}
+}
+
 function set_bg_color(color, state) {
 	let dark
 	assert(isstr(color))
@@ -585,6 +604,8 @@ let fg_color_hsl = lookup_color_hsl_func('fg')
 let fg_color = lookup_color_func(fg_color_hsl)
 ui.fg_color_hsl = fg_color_hsl
 ui.fg_color = fg_color
+ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
+ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
 //           theme    name     state       h     s     L    a
 // ---------------------------------------------------------------------------
@@ -614,9 +635,12 @@ ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.border_style = def_color_func('border')
 let border_color_hsl = lookup_color_hsl_func('border')
 let border_color = lookup_color_func(border_color_hsl)
+let border_color_int = lookup_color_rgb_int_func(fg_color_hsl)
 let ui_border_color = border_color
 ui.border_color_hsl = ui.border_color_hsl
 ui.border_color = border_color
+ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
+ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
 
 //               theme    name        state       h    s    L     a
 // ---------------------------------------------------------------------------
@@ -638,6 +662,8 @@ let bg_color = lookup_color_func(bg_color_hsl)
 let ui_bg_color = bg_color
 ui.bg_color = bg_color
 ui.bg_color_hsl = bg_color_hsl
+ui.bg_color_rgb  = lookup_color_rgb_int_func(bg_color_hsl)
+ui.bg_color_rgba = lookup_color_rgba_int_func(bg_color_hsl)
 
 function bg_is_dark(bg_color) {
 	return isarray(bg_color) ? (bg_color[5] ?? bg_color[3] < .5) : theme.is_dark
@@ -1059,9 +1085,12 @@ ui.drag = function(id, move, dx0, dy0) {
 let key_state_now = map()
 let key_state = set()
 
+ui.key_events = []
+
 canvas.addEventListener('keydown', function(ev) {
 	let key = ev.key.toLowerCase()
 	key_state_now.set(key, 'down')
+	ui.key_events.push(['down', key])
 	key_state.add(key)
 	animate()
 })
@@ -1069,6 +1098,7 @@ canvas.addEventListener('keydown', function(ev) {
 canvas.addEventListener('keyup', function(ev) {
 	let key = ev.key.toLowerCase()
 	key_state_now.set(key, 'up')
+	ui.key_events.push(['up', key])
 	key_state.delete(key)
 	animate()
 })
@@ -1371,6 +1401,7 @@ window.addEventListener('blur', function(ev) {
 	ui.window_focused = false
 	key_state.clear()
 	key_state_now.clear()
+	ui.key_events.length = 0
 	animate()
 })
 
@@ -1970,6 +2001,7 @@ function redraw_all() {
 		reset_pointer_state(ui)
 
 		key_state_now.clear()
+		ui.key_events.length = null
 		event_state.clear()
 		focusing_id = null
 		ui.window_focusing = false
@@ -4198,7 +4230,7 @@ draw[CMD_TEXT] = function(a, i) {
 	let editable = flags & TEXT_EDITABLE
 	let focused  = flags & TEXT_FOCUSED
 
-	let col = fg_color(color, color_state)
+	let col = ui.fg_color(color, color_state)
 
 	if (editable) {
 		let input = ui.state(id, 'input')
