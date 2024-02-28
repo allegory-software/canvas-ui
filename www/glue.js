@@ -80,6 +80,11 @@ ERRORS
 	log(err, ...args)
 	check(v, err, ...args) -> v
 
+CLASSES
+
+	callable_constructor(cons) -> f
+	inherit_properties(subclass, [superclass]) -> subclass
+
 EXTENDING BUILT-IN OBJECTS
 
 	property(class|instance, prop, descriptor | get,set)
@@ -102,7 +107,7 @@ STRINGS
 
 ARRAYS
 
-	array(...) -> a                        new Array(...)
+	array([N]) -> a                        new Array(N)
 	empty_array -> []                      global empty array, read-only!
 	range(i, j, step, f) -> a
 	array_set(a, a1) -> s
@@ -136,6 +141,7 @@ HASH MAPS
 	keys(t) -> [k1, ...]
 	assign(dt, t1, ...)             dump t1, ... into dt
 	assign_opt(dt, t1, ...)         dump t1, ... into dt, skips undefined values
+	clone(t) -> t1                  deep clone
 	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
 	memoize(f) -> mf                memoize single-arg function
 	count_keys(t, [max_n]) -> n     count keys in t up-to max_n
@@ -284,10 +290,6 @@ AJAX REQUESTS
 (function () {
 "use strict"
 let G = window
-
-// global array for returning multiple values from functions that do so.
-// watch out and always unpack the return value from such functions.
-let out = []
 
 function DEBUG(k, dv) {
 	dv ??= false
@@ -457,27 +459,51 @@ function assert(ret, ...args) {
 
 // indented logging with subst formatting.
 let log_level = 0
-let log_on = false
+let log_on = true
 function log(err, ...args) {
 	if (!log_on) return
 	if (!err) return
-	let indent = ('  ').repeat(log_level)
-	pr(indent, err, ...args)
+	pr(err, ...args)
 }
 function push_log(...args) {
 	let [err, a1, a2, a3] = args
-	if (log_on)
-		log(...args)
 	log_level++
+	if (log_on)
+		console.group(...args)
 }
 function pop_log(...args) {
-	if (log_on)
+	if (log_on) {
 		log(...args)
+		console.groupEnd()
+	}
 	log_level--
 }
 function check(v, ...args) {
 	if (!v) log(...args)
 	return v
+}
+
+// classes -------------------------------------------------------------------
+
+// TODO: is there a way to make a constructable also callable without wrapping it?
+function callable_constructor(cons) {
+	let name = cons.name
+	let f = {[name]: function(...args) { return new cons(...args) }}[name]
+	f.class = cons
+	return f
+}
+
+function inherit_properties(cons, super_cons) {
+	super_cons ??= Object.getPrototypeOf(cons)
+	let child_methods = cons.prototype
+	let super_methods = super_cons.prototype
+	// copy super's methods to child.
+	for (let k of Object.getOwnPropertyNames(super_methods))
+		if (!(k in child_methods)) { // not overridden
+			let desc = Object.getOwnPropertyDescriptor(super_methods, k)
+			Object.defineProperty(child_methods, k, desc)
+		}
+	return cons
 }
 
 /* extending built-in objects ------------------------------------------------
@@ -658,7 +684,9 @@ function captures(s, re) {
 
 // arrays --------------------------------------------------------------------
 
-let array = (...args) => new Array(...args)
+// NOTE: new Array(N) preallocates N elements while new Array(N, M) creates [N, M]
+// that's why we settle on the first form which doesn't have an alternative.
+let array = (N) => new Array(N ?? 0)
 
 let empty_array = []
 
@@ -873,6 +901,7 @@ let empty_set = set()
 let keys = Object.keys
 
 let assign = Object.assign
+let clone = structuredClone
 
 // like Object.assign() but skips assigning `undefined` values.
 function assign_opt(dt, ...ts) {
@@ -923,7 +952,6 @@ function count_keys(t, max_n) {
 	}
 	return n
 }
-
 
 function first_key(t) {
 	for (let k in t)
@@ -1675,7 +1703,10 @@ function hsl_to_rgb_out(out, i, h, s, L, a) {
 
 // output: #rrggbb[aa]
 let hsl_to_rgb_hex
+let hsl_to_rgb_int
+let hsl_to_rgba_int
 {
+let out = [0, 0, 0, 0]
 let hex = x => format_base(round(x), 16, 2)
 hsl_to_rgb_hex = function(h, s, L, a) {
 	hsl_to_rgb_out(out, 0, h, s, L, a)
@@ -1685,10 +1716,8 @@ hsl_to_rgb_hex = function(h, s, L, a) {
 		hex(out[2]) +
 		(a ? hex(out[3]) : '')
 }
-}
 
-// output 0xRRGGBB
-function hsl_to_rgb_int(h, s, L) {
+hsl_to_rgb_int = function(h, s, L) { // returns 0xRRGGBB
 	hsl_to_rgb_out(out, 0, h, s, L)
 	return (
 		(out[0] << 16) +
@@ -1697,9 +1726,7 @@ function hsl_to_rgb_int(h, s, L) {
 	)
 }
 
-
-// output 0xRRGGBBAA
-function hsl_to_rgba_int(h, s, L, a) {
+hsl_to_rgba_int = function(h, s, L, a) { // returns 0xRRGGBBAA
 	hsl_to_rgb_out(out, 0, h, s, L, a)
 	return (
 		(out[0] << 24) +
@@ -1708,17 +1735,25 @@ function hsl_to_rgba_int(h, s, L, a) {
 		(out[3] <<  0)
 	)
 }
+}
 
 // geometry ------------------------------------------------------------------
 
 // point at a specified angle on a circle.
-function point_around(cx, cy, r, angle) {
+let point_around
+{
+let out = [0, 0]
+point_around = function(cx, cy, r, angle) {
 	out[0] = cx + cos(angle) * r
 	out[1] = cy - sin(angle) * r
 	return out
 }
+}
 
-function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) {
+let clip_rect
+{
+let out = [0, 0, 0, 0]
+clip_rect = function(x1, y1, w1, h1, x2, y2, w2, h2) {
 	// intersect on one dimension
 	// intersect_segs(ax1, ax2, bx1, bx2) => [max(ax1, bx1), min(ax2, bx2)]
 	// intersect_segs(x1, x1+w1, x2, x2+w2)
@@ -1735,6 +1770,7 @@ function clip_rect(x1, y1, w1, h1, x2, y2, w2, h2) {
 	out[2] = _w
 	out[3] = _h
 	return out
+}
 }
 
 function segs_overlap(ax1, ax2, bx1, bx2) { // check if two 1D segments overlap
@@ -2329,6 +2365,7 @@ format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
 pr, warn, debug, trace, trace_if, assert,
 push_log, pop_log, log, check,
+callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
 subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
 array, empty_array, range, extend, array_set,
@@ -2336,7 +2373,7 @@ insert, remove, remove_value, replace_value, remove_values, array_move, array_eq
 binsearch, uniq_sorted, group_sorted, remove_duplicates,
 map, map_first_key, map_assign,
 set, set_addset, set_set, set_toarray, set_equals, empty_set,
-obj, empty, empty_obj,  keys, assign, assign_opt, count_keys, first_key, attr,
+obj, empty, empty_obj,  keys, assign, assign_opt, clone, count_keys, first_key, attr,
 memoize,
 f32arr, i8arr, u8arr, i16arr, u16arr, i32arr, u32arr,
 max_index_from_array, arr_type_from_max_index, index_arr_type,
