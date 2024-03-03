@@ -76,6 +76,7 @@ ERRORS
 	trace_if(cond, ...)
 	assert(v, err, ...) -> v
 	push_log(err, ...args)
+	push_log_if(cond, err, ...args)
 	pop_log(err, ...args)
 	log(err, ...args)
 	check(v, err, ...args) -> v
@@ -91,7 +92,8 @@ EXTENDING BUILT-IN OBJECTS
 	method(class|instance, method, func)
 	override(class|instance, method, func)
 	alias(class|instance, new_name, old_name)
-	override_property_setter(class|instance, prop, set)
+	override_property_getter(class|instance, prop, getter)
+	override_property_setter(class|instance, prop, setter)
 
 STRINGS
 
@@ -291,15 +293,7 @@ AJAX REQUESTS
 "use strict"
 let G = window
 
-function DEBUG(k, dv) {
-	dv ??= false
-	if (!(k in G))
-		G[k] = dv
-	if (G[k] !== dv)
-		console.log(k, G[k])
-}
-
-DEBUG('DEBUG_AJAX')
+G.DEBUG_AJAX = 0
 
 // browser detection ---------------------------------------------------------
 
@@ -446,6 +440,15 @@ let warn  = console.warn
 let debug = console.debug
 let trace = console.trace
 
+G.DEBUG_SNAP_NUMS = 1
+function snap_nums(a) {
+	if (!DEBUG_SNAP_NUMS) return a
+	return a.map(v => isnum(v) ? snap(v, 0.01) : isarray(v) ? snap_nums(v) : v)
+}
+pr = function(...args) {
+	console.log(...snap_nums(args))
+}
+
 function trace_if(cond, ...args) {
 	if (!cond) return
 	console.trace(...args)
@@ -459,7 +462,8 @@ function assert(ret, ...args) {
 
 // indented logging with subst formatting.
 let log_level = 0
-let log_on = true
+G.log_on = false
+let log_off_level
 function log(err, ...args) {
 	if (!log_on) return
 	if (!err) return
@@ -477,10 +481,21 @@ function pop_log(...args) {
 		console.groupEnd()
 	}
 	log_level--
+	if (log_off_level === log_level) {
+		log_off_level = null
+		log_on = true
+	}
 }
 function check(v, ...args) {
 	if (!v) log(...args)
 	return v
+}
+function push_log_if(cond, ...args) {
+	if (!cond && log_on) {
+		log_off_level = log_level
+		log_on = false
+	}
+	push_log(...args)
 }
 
 // classes -------------------------------------------------------------------
@@ -2349,7 +2364,7 @@ function post(url, upload, success, fail, opt) {
 // publishing ----------------------------------------------------------------
 
 let glue = {
-DEBUG, Firefox, Chrome, Safari, Safari_maj, Safari_min,
+Firefox, Chrome, Safari, Safari_maj, Safari_min,
 isobject, isarray, isobj, isstr, isnum, isbool, isfunc,
 repl,
 num, bool, str,
@@ -2364,7 +2379,7 @@ PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
 pr, warn, debug, trace, trace_if, assert,
-push_log, pop_log, log, check,
+push_log, push_log_if, pop_log, log, check,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
 subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
