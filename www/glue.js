@@ -67,19 +67,26 @@ CALLBACKS
 	do_before(inherited, f) -> f'
 	do_after(inherited, f) -> f'
 
-ERRORS
+DEBUGGING
 
+	assert(v, err, ...) -> v
+	trace(...)
+	trace_if(cond, ...)
 	pr(...)
 	warn(...)
 	debug(...)
-	trace(...)
-	trace_if(cond, ...)
-	assert(v, err, ...) -> v
-	push_log(err, ...args)
-	push_log_if(cond, err, ...args)
-	pop_log(err, ...args)
-	log(err, ...args)
-	check(v, err, ...args) -> v
+	log(...)
+	gen_id(prefix) -> id
+	check(v, ...) -> v
+	log_if(cond, ...)
+	push_log(...)
+	push_log_if(cond, ...)
+	pop_log(...)
+
+	DEBUG_LOG
+	DEBUG_SNAP_NUMS
+	DEBUG_GEN_ID
+	DEBUG_AJAX
 
 CLASSES
 
@@ -253,25 +260,25 @@ URL DECODING, ENCODING AND UPDATING
 
 NATIVE CUSTOM EVENTS
 
-	custom_event    (name, ...args)
-	custom_event_up (name, ...args)
+	custom_event    (name, ...)
+	custom_event_up (name, ...)
 
 FAST GLOBAL EVENTS
 
 	listen(event, f, [on])
-	announce(event, ...args)
+	announce(event, ...)
 
 INTER-WINDOW COMMUNICATION
 
-	broadcast(name, ...args)
+	broadcast(name, ...)
 	setglobal(name, val)
 	^window.global_changed(name, v, v0)
 	^window.NAME_changed(v, v0)
 
 MULTI-LANGUAGE STUBS
 
-	S(id, default, ...args)                get labeled string in current language
-	Sf(...args) -> f() -> S(...args)
+	S(id, default, ...)                    get labeled string in current language
+	Sf(...) -> f() -> S(...)
 	lang()                                 get current language
 	country()                              get current country
 	href(url, [lang])                      rewrite URL for (current) language
@@ -433,25 +440,37 @@ function do_after(inherited, func) {
 	} || func
 }
 
-// error handling ------------------------------------------------------------
+// logging and errors --------------------------------------------------------
 
 let pr    = console.log
 let warn  = console.warn
 let debug = console.debug
 let trace = console.trace
 
+let next_id = {}
+G.DEBUG_GEN_ID = 1
+function gen_id(k) {
+	if (!DEBUG_GEN_ID)
+		return null
+	if (!next_id[k])
+		next_id[k] = 1
+	else
+		next_id[k]++
+	return next_id[k]
+}
+
 G.DEBUG_SNAP_NUMS = 1
 function snap_nums(a) {
 	if (!DEBUG_SNAP_NUMS) return a
-	return a.map(v => isnum(v) ? snap(v, 0.01) : isarray(v) ? snap_nums(v) : v)
+	return a.map(v => isnum(v) ? snap(v, 0.01) : v)
 }
-pr = function(...args) {
-	console.log(...snap_nums(args))
+function log(...args) {
+	pr(snap_nums(args))
 }
 
 function trace_if(cond, ...args) {
 	if (!cond) return
-	console.trace(...args)
+	trace(...args)
 }
 
 function assert(ret, ...args) {
@@ -460,40 +479,44 @@ function assert(ret, ...args) {
 	return ret
 }
 
-// indented logging with subst formatting.
+function check(v, ...args) {
+	if (!v) log(...args)
+	return v
+}
+
+function log_if(cond, ...args) {
+	if (!cond) return
+	log(...args)
+}
+
+G.DEBUG_LOG = 1
+
 let log_level = 0
-G.log_on = false
 let log_off_level
-function log(err, ...args) {
-	if (!log_on) return
-	if (!err) return
-	pr(err, ...args)
+function log(...args) {
+	if (!DEBUG_LOG) return
+	console.log(...snap_nums(args))
 }
 function push_log(...args) {
-	let [err, a1, a2, a3] = args
 	log_level++
-	if (log_on)
-		console.group(...args)
+	if (DEBUG_LOG)
+		console.groupCollapsed(...args)
 }
 function pop_log(...args) {
-	if (log_on) {
+	if (DEBUG_LOG) {
 		log(...args)
 		console.groupEnd()
 	}
 	log_level--
 	if (log_off_level === log_level) {
 		log_off_level = null
-		log_on = true
+		DEBUG_LOG = true
 	}
 }
-function check(v, ...args) {
-	if (!v) log(...args)
-	return v
-}
 function push_log_if(cond, ...args) {
-	if (!cond && log_on) {
+	if (!cond && DEBUG_LOG) {
 		log_off_level = log_level
-		log_on = false
+		DEBUG_LOG = false
 	}
 	push_log(...args)
 }
@@ -2265,12 +2288,12 @@ function ajax(req) {
 				res = json_arg(res)
 		req.response = res
 		if (status == 200) {
-			if (DEBUG_AJAX) debug('$', method, url)
+			if (DEBUG_AJAX) log('$', method, url)
 			fire('done', 'success', res)
 		} else {
 			req.failtype = 'http'
 			let status_message = xhr.statusText
-			if (DEBUG_AJAX) debug('!', method, url)
+			if (DEBUG_AJAX) log('!', method, url)
 			fire('done', 'fail',
 				req.error_message('http', status, status_message, res),
 				'http', status, status_message, res)
@@ -2379,7 +2402,7 @@ PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
 pr, warn, debug, trace, trace_if, assert,
-push_log, push_log_if, pop_log, log, check,
+push_log, push_log_if, pop_log, log, log_if, check, gen_id,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
 subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
