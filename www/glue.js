@@ -442,7 +442,7 @@ function do_after(inherited, func) {
 
 // logging and errors --------------------------------------------------------
 
-let pr    = console.log
+let pr    = console.error
 let warn  = console.warn
 let debug = console.debug
 let trace = console.trace
@@ -465,7 +465,7 @@ function snap_nums(a) {
 	return a.map(v => isnum(v) ? snap(v, 0.01) : v)
 }
 function log(...args) {
-	pr(snap_nums(args))
+	console.log(snap_nums(args))
 }
 
 function trace_if(cond, ...args) {
@@ -499,7 +499,7 @@ function log(...args) {
 }
 function push_log(...args) {
 	log_level++
-	if (DEBUG_LOG)
+	if (DEBUG_LOG) // Collapsed
 		console.groupCollapsed(...args)
 }
 function pop_log(...args) {
@@ -1193,6 +1193,11 @@ let dyn_u32arr = dyn_arr_func(u32arr)
 
 // data structures -----------------------------------------------------------
 
+// NOTE: if you don't call free(), the garbage collector still works to free
+// the object (as long as the destructor doesn't involve clearing up external
+// references like calling removeEventListener()) because alloc() doesn't keep
+// a reference to the object. In this case a freelist is just an optimization
+// and doesn't create a leak hazard (it does create a "dirty object" hazard).
 function freelist(create) {
 	let fl = []
 	fl.alloc = function() {
