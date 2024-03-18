@@ -1197,7 +1197,8 @@ let dyn_u32arr = dyn_arr_func(u32arr)
 // the object (as long as the destructor doesn't involve clearing up external
 // references like calling removeEventListener()) because alloc() doesn't keep
 // a reference to the object. In this case a freelist is just an optimization
-// and doesn't create a leak hazard (it does create a "dirty object" hazard).
+// and doesn't create a leak hazard (it does create a "dirty object" hazard
+// though so always clean up the object before releasing it to the freelist).
 function freelist(create) {
 	let fl = []
 	fl.alloc = function() {
@@ -1783,6 +1784,7 @@ hsl_to_rgba_int = function(h, s, L, a) { // returns 0xRRGGBBAA
 // geometry ------------------------------------------------------------------
 
 // point at a specified angle on a circle.
+// the angle of a line (x1, y1, x2, y2) is: -atan2(y2 - y1, x2 - x1)
 let point_around
 {
 let out = [0, 0]
