@@ -2450,14 +2450,15 @@ ajax, get, post,
 
 G.glue = glue
 
-if (document.currentScript.hasAttribute('global')) {
+let script_attr = k => document.currentScript.hasAttribute(k)
+if (script_attr('global') || script_attr('glue-global')) {
 	for (let k in glue) {
 		assert(!(k in G), k, ' global already exists')
 		G[k] = glue[k]
 	}
 }
 
-if (document.currentScript.hasAttribute('extend')) {
+if (script_attr('extend') || script_attr('glue-extend')) {
 
 function m(f) {
 	return function(...args) {

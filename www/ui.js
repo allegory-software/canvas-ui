@@ -318,7 +318,8 @@ TODO
 "use strict"
 const G = window
 
-let ui = document.currentScript.hasAttribute('global') ? window : {}
+let script_attr = k => document.currentScript.hasAttribute(k)
+let ui = script_attr('global') || script_attr('ui-global') ? window : {}
 G.ui = ui
 
 ui.VERSION = 1
