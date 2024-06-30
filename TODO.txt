@@ -28,12 +28,12 @@ THINK
 
 GOALS
 
-- drag & drop UI designer
+* drag & drop UI designer
 	- templates with conditionals, repeats and sub-templates
 		- template-based widgets
 * IMGUI with popups and layouting
-- remote screen sharing
-	- with input routing
+* remote screen sharing
+	* with input routing
 	- with client-side themes
 
 IMGUI
@@ -68,7 +68,7 @@ IMGUI
 	* hit parents
 	* capturing
 	* capture state
-	- drag & drop
+	* drag & drop
 - keyboard
 	* focused state
 	- tab focusing
@@ -76,15 +76,15 @@ IMGUI
 - text selection
 	- drag-select with mouse
 - text(area) input
-	- put it behind the canvas with correct width & height
+	* put it behind the canvas with correct width & height
 		- route keyboard events to it
-		- redraw it on canvas with offset and selection
+		* redraw it on canvas with offset and selection
 
 CHALLENGES
 
 * input on a canvas
 - textarea on a canvas
-- webgl2 canvas on a 2d canvas
+* webgl2 canvas on a 2d canvas
 * word wrapping (our layout algo supports word-wrapping for horizontal text)
 - rich text on a canvas (inline box model)
 

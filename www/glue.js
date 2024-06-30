@@ -2391,6 +2391,28 @@ function post(url, upload, success, fail, opt) {
 	}, opt))
 }
 
+// multi-language stubs replaced in webb_spa.js ------------------------------
+
+// stub for getting message strings that can be translated multiple languages.
+function S(name, en_s, ...args) {
+	return subst(en_s, ...args)
+}
+
+// stub for getting current language.
+let nav_lang = navigator.language.substring(0, 2)
+function lang() {
+	return document.documentElement.lang || nav_lang
+}
+
+// stub for getting current country.
+let nav_country = navigator.language.substring(3, 5)
+function country() {
+	return document.documentElement.attr('country') || nav_country
+}
+
+// stub for rewriting links to current language.
+let href = return_arg
+
 // publishing ----------------------------------------------------------------
 
 let glue = {
@@ -2446,6 +2468,7 @@ custom_event, custom_event_up, listen,
 announce, broadcast, setglobal,
 compress, decompress,
 ajax, get, post,
+S, lang, country, href,
 }
 
 G.glue = glue
@@ -2530,40 +2553,14 @@ Set.prototype.equals  = m(set_equals)
 DOMMatrix.prototype.x = transform_point_x
 DOMMatrix.prototype.y = transform_point_y
 
-// multi-language stubs replaced in webb_spa.js ------------------------------
-
-// stub for getting message strings that can be translated multiple languages.
-let S = glue.S || function(name, en_s, ...args) {
-	return subst(en_s, ...args)
-}
-glue.S = S
-
-function Sf(...args) {
-	return () => S(...args)
-}
-glue.Sf = Sf
-
-// stub for getting current language.
-let nav_lang = navigator.language.substring(0, 2)
-let lang = glue.lang || function() {
-	return document.documentElement.lang || nav_lang
-}
-glue.lang = lang
-
-// stub for getting current country.
-let nav_country = navigator.language.substring(3, 5)
-let country = glue.country || function() {
-	return document.documentElement.attr('country') || nav_country
-}
-glue.country = country
-
-let locale = memoize(function() { return lang() + '-' + country() })
-glue.locale = locale
-
-// stub for rewriting links to current language.
-let href = glue.href || return_arg
-glue.href = href
-
 } // if (extend)
+
+// wrappers that use overridable glue functions ------------------------------
+
+glue.Sf = function(...args) {
+	return () => glue.S(...args)
+}
+
+glue.locale = memoize(function() { return glue.lang() + '-' + country() })
 
 }()) // module function

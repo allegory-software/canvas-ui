@@ -1104,16 +1104,22 @@ canvas.addEventListener('keyup', function(ev) {
 	animate()
 })
 
-ui.keydown = function(key) {
-	return key_state_now.get(key) == 'down'
+function capture_key(ret, key, capture) {
+	// if (ret && capture !== false)
+	// 	key_state_now.set(key, null)
+	return ret
 }
 
-ui.keyup = function(key) {
-	return key_state_now.get(key) == 'up'
+ui.keydown = function(key, capture) {
+	return capture_key(key_state_now.get(key) == 'down', key, capture)
 }
 
-ui.key = function(key) {
-	return key_state.has(key)
+ui.keyup = function(key, capture) {
+	return capture_key(key_state_now.get(key) == 'up', key, capture)
+}
+
+ui.key = function(key, capture) {
+	return capture_key(key_state.has(key), key, capture)
 }
 
 // custom events -------------------------------------------------------------
@@ -1286,7 +1292,6 @@ function keepalive(id, update_f) {
 	if (update_f) {
 		let m = ui.state(id)
 		m.set('update', update_f)
-		state_update(id, m)
 	}
 }
 ui.keepalive = keepalive
@@ -5076,7 +5081,7 @@ function list_update(id, m) {
 	}
 	m.set('focused_item_i', fi)
 	m.set('focused_item_changed', before_fi != fi ? fi_changed : false)
-	m.set('item_picked', fi_changed == 'click' || (fi != null && ui.key('enter')))
+	m.set('item_picked', fi_changed == 'click' || (fi != null && ui.focused(id) && ui.key('enter')))
 }
 function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_fr, max_min_w, min_w) {
 	let s = ui.state(id)
@@ -5239,14 +5244,14 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 	ui.state(id).set('i', sel_i)
 
 	let click = hit(id) && ui.click
+	let picked = ui.state(id+'.list', 'item_picked')
 	let toggle = click
 		|| (ui.focused(id) && ui.keydown('enter'))
-		|| (ui.focused(id+'.list') && ui.keydown('enter'))
-		|| ui.state(id+'.list', 'item_picked')
+		|| picked
 
 	if (toggle) {
 		open = !open
-	} else if (open && ui.click && !hit(id) && !(hit(id+'.list') || captured(id+'.list'))) {
+	} else if (open && ui.click && !hit(id) && !picked && !captured(id+'.list')) {
 		open = false
 	}
 
@@ -5333,7 +5338,7 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 		s.set('my2', my2)
 	}
 
-	keepalive('toolbox')
+	keepalive(id)
 	let ts = ui.state('toolboxes')
 	let layers = ts.get('layers')
 	if (!layers) {

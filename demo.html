@@ -210,6 +210,8 @@ ui.v(1, ui.sp(), 'c', 'c')
 		ui.label('dd1', 'Label of this thing')
 		ui.state_init('dd1', 'i', 1)
 		ui.dropdown('dd1', items)
+		ui.text('', 'or')
+		ui.dropdown('dd2', items)
 		ui.text('', 'and something after')
 	ui.end_h()
 ui.end_v()
@@ -722,6 +724,7 @@ ui.main = function() {
 
 			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.bb('', null, null, 'r', 'light')
+				ui.state_init('demos_list', 'focused_item_i', 4)
 				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
@@ -786,6 +789,8 @@ ui.main = function() {
 								ui.color('link')
 								ui.text('', id, 0, 'l')
 								for (let [k, v] of m) {
+									if (v === undefined)
+										continue
 									ui.ml(ui.sp2())
 									ui.h(0, ui.sp())
 										let s = isobject(v) || isfunc(v) ? typeof v : str(v)
