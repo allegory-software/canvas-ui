@@ -294,7 +294,7 @@ TODO
 	md
 	pagenav
 	info
-	erors
+	errors
 	range-slider
 	input-group
 	textarea
@@ -987,7 +987,7 @@ canvas.addEventListener('pointerleave', function(ev) {
 
 // NOTE: wheelDeltaY is 150 in chrome and 120 if FF. Browser developers...
 canvas.addEventListener('wheel', function(ev) {
-	ui.mouse.wheel_dy = ev.deltaY
+	ui.mouse.wheel_dy = -ev.deltaY
 	if (!ui.mouse.wheel_dy)
 		return
 	ui.mouse.trackpad = ev.wheelDeltaY === -ev.deltaY * 3

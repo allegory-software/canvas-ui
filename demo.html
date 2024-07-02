@@ -203,15 +203,15 @@ ui.v(0, 0, 'c', 'c', 400)
 ui.end_v()
 `
 
+dd_items = ['item 1', 'item 2 that is longer than others', 'item 3']
 demos.dropdown = `
-items = window.items || ['item 1', 'item 2 that is longer than others', 'item 3']
 ui.v(1, ui.sp(), 'c', 'c')
 	ui.h(1, ui.sp())
 		ui.label('dd1', 'Label of this thing')
 		ui.state_init('dd1', 'i', 1)
-		ui.dropdown('dd1', items)
+		ui.dropdown('dd1', dd_items)
 		ui.text('', 'or')
-		ui.dropdown('dd2', items)
+		ui.dropdown('dd2', dd_items)
 		ui.text('', 'and something after')
 	ui.end_h()
 ui.end_v()
@@ -248,6 +248,18 @@ ui.h(0, ui.sp(), 'c', 'c')
 	if (b !== undefined)
 		pr('toggled', b)
 	ui.label('cb1', 'Check me out!')
+ui.end_h()
+`
+
+li_items = []
+for (let i = 1; i <= 1000; i++)
+	li_items.push('Item '+i)
+demos.list = `
+ui.m(ui.em(20), ui.em(10))
+ui.h()
+	ui.sb('list_sb')
+		ui.list('list1', li_items)
+	ui.end_sb()
 ui.end_h()
 `
 
