@@ -18,12 +18,16 @@ const {
 	inner_w,
 	add_ct_min_wh,
 	FR,
+	S,
 	cx,
 } = ui
 
 // cell view -----------------------------------------------------------------
 
 let cellview = {}
+
+let _CELLVIEW_SB_I   = S+0
+let _CELLVIEW_H_SB_I = S+1
 
 let CELLVIEW_SB_I   = 4
 let CELLVIEW_H_SB_I = 5
@@ -110,12 +114,17 @@ function cellview_view(nav) {
 				for (let field of nav.fields) {
 					min_w += field.min_w
 				}
+				return min_w
 			} else {
-
+				return e.cells_h
 			}
 		} else {
-
+			return 0
 		}
+	}
+
+	e.on_frame_measure = function(axis) {
+		return !axis ? e.cells_w : e.cells_h
 	}
 
 	function field_has_indent(field) {
@@ -280,6 +289,11 @@ function cellview_view(nav) {
 
 		// drawing
 
+		ui.p(0, y, 0, 0)
+		nav.draw_val(row, field, input_val, cx)
+
+		/*
+
 		cx.save()
 		cx.translate(x, y)
 
@@ -332,6 +346,8 @@ function cellview_view(nav) {
 		}
 
 		cx.restore()
+
+		*/
 
 		// TODO:
 		//if (ri != null && focused)
@@ -456,7 +472,7 @@ function cellview_view(nav) {
 
 	let theme
 
-	e.draw = function(a, x, y, w, h, vx, vy, vw, vh) {
+	e.on_frame = function(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
 		let theme0 = theme
 		theme = ui.get_theme()
@@ -505,18 +521,35 @@ function cellview_view(nav) {
 		x += bx
 		y += by
 
+		ui.stack()
+
 		let hit_state
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
-			draw_cells_range(a, x, y, nav.rows, s.vri1,      s.vri2     , 0, nav.fields.length, 'non_moving_rows')
+			draw_cells_range(a, x, y, nav.rows, s.vri1, s.vri2, 0, nav.fields.length, 'non_moving_rows')
 			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, 0, nav.fields.length, 'moving_rows')
 		} else if (hit_state == 'col_moving') { // draw fixed cols first and moving cols above them.
-			draw_cells_range(a, x, y, nav.rows, ri1, ri2, 0     , nav.fields.length, 'non_moving_cols')
-			draw_cells_range(a, x, y, nav.rows, ri1, ri2, hit_fi, hit_fi + 1     , 'moving_cols')
+			draw_cells_range(a, x, y, nav.rows, ri1, ri2, 0, nav.fields.length, 'non_moving_cols')
+			draw_cells_range(a, x, y, nav.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
 		} else {
 			draw_cells_range(a, x, y, nav.rows, ri1, ri2, fi1, fi2, cell_h)
 		}
 
+		ui.end_stack()
+
+	}
+
+	e._on_frame = function(a, i, x, y, w, h, cx, cy, cw, ch) {
+
+		let sb_i   = a[i+_CELLVIEW_SB_I]
+		let h_sb_i = a[i+_CELLVIEW_H_SB_I]
+		let sx = ui.scroll_xy(a, sb_i, 0)
+		// ui.force_scroll(a, h_sb_i, sx, 0)
+		pr(sx)
+		// ui.m(cx-x, cy-y)
+		ui.stack('', 0, 'l', 't', 100, 100)
+			ui.bb('bb1', ui.hit('bb1') ? ':green' : ':red')
+		ui.end_stack()
 	}
 
 	return e
@@ -567,8 +600,8 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 		nav.view = cellview_view(nav)
 		nav.view.cell_border_v_width = 0
 		nav.view.cell_border_h_width = 1
-		G.nav = nav
-		G.view = nav.view
+		G.nav = nav // TODO: remove
+		G.view = nav.view // TODO: remove
 		s.set('nav', nav)
 	}
 	let view = nav.view
@@ -611,9 +644,8 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 
 			let overflow = auto_expand ? 'contain' : 'auto'
 			let sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
-				ui.stack('', 0, 'l', 't', cells_w, cells_h)
-					ui.grid_cellview(sb_i, h_sb_i, view)
-				ui.end_stack()
+				ui.frame(null, view.on_frame, 1, 's', 's', cells_w, cells_h, sb_i, h_sb_i)
+				//  ui.grid_cellview(sb_i, h_sb_i, view)
 			ui.end_scrollbox()
 
 		ui.end_v()

@@ -4,7 +4,7 @@
 <base href="www/">
 <link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
-<script src=glue.js></script>
+<script src=glue.js global></script>
 <script src=ui.js></script>
 <script src=ui_validation.js></script>
 <script src=ui_nav.js></script>
@@ -45,7 +45,7 @@ ui.scrollbox('sb1')
 	function on_measure(axis) {
 		return 9000
 	}
-	function on_frame(x, y, w, h, cx, cy, cw, ch) {
+	function on_frame(a, i, x, y, w, h, cx, cy, cw, ch) {
 		ui.m(cx-x, cy-y)
 		ui.stack('', 0, 'l', 't', 100, 100)
 			ui.bb('bb1', ui.hit('bb1') ? ':green' : ':red')
@@ -266,7 +266,7 @@ ui.end_h()
 // grid
 
 let rows = []
-for (let i = 1; i < 20; i++)
+for (let i = 1; i < 100; i++)
 	rows.push([i, 'Foo '+i, 'Le Foo'])
 let r1 = {
 	pk: 'id', can_change_rows: false,
@@ -277,7 +277,6 @@ let r1 = {
 	],
 	rows: rows,
 }
-if (0)
 demos.grid = `
 ui.stack('', 0, 'c', 'c', 200, 500)
 	ui.grid('grid1', r1)
@@ -736,7 +735,7 @@ ui.main = function() {
 
 			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.bb('', null, null, 'r', 'light')
-				ui.state_init('demos_list', 'focused_item_i', 4)
+				ui.state_init('demos_list', 'focused_item_i', 10)
 				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)

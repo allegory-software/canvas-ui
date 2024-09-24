@@ -216,6 +216,7 @@ CONTAINERS
 	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
 	splitter        ()
 	toolbox         (id, title, align, x0, y0, target_i)
+	frame           (id, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args)
 	end             ()
 
 BORDER & BACKGROUND
@@ -279,7 +280,6 @@ OTHER
 	drag_point      (id, x, y, color)
 	polyline        (id, points, closed, fill_color, fill_color_state, stroke_color, stroke_color_state)
 	resizer         (ct_id, id)
-
 
 TODO
 
@@ -638,7 +638,7 @@ let border_color_hsl = lookup_color_hsl_func('border')
 let border_color = lookup_color_func(border_color_hsl)
 let border_color_int = lookup_color_rgb_int_func(fg_color_hsl)
 let ui_border_color = border_color
-ui.border_color_hsl = ui.border_color_hsl
+ui.border_color_hsl = border_color_hsl
 ui.border_color = border_color
 ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
 ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
@@ -1679,14 +1679,14 @@ function draw_frame(recs, layers) {
 	let theme_stack_length0 = theme_stack.length
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
-	set_screen_bg()
 
-	cx.clearRect(0, 0, canvas.width, canvas.height)
-	if (0) {
+	if (1) {
 		cx.beginPath()
 		cx.rect(0, 0, canvas.width, canvas.height)
 		cx.fillStyle = bg_color('bg')
 		cx.fill()
+	} else {
+		cx.clearRect(0, 0, canvas.width, canvas.height)
 	}
 
 	for (let layer of layers) {
@@ -4337,7 +4337,7 @@ const FRAME_LAYER_I    = S+3
 
 let frame = {}
 
-frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min_h) {
+frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args) {
 
 	let ct_i = ui.ct_i()
 	assert(a[ct_i-1] == CMD_SCROLLBOX, 'frame is not inside a scrollbox')
@@ -4347,6 +4347,7 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 		ct_i,
 		0, // rec_i
 		layer_i,
+		...args
 	)
 
 }
@@ -4357,11 +4358,11 @@ frame.measure = function(a, i, axis) {
 	if (on_measure) {
 		let min_w = on_measure(axis)
 		if (min_w != null) {
-			a[i+2+axis] = max(a[i+2+axis], min_w)
 			add_ct_min_wh(a, axis, min_w)
 		}
+	} else {
+		box_measure(a, i, axis)
 	}
-
 }
 
 frame.translate = function(a, i, dx, dy) {
@@ -4387,7 +4388,7 @@ frame.translate = function(a, i, dx, dy) {
 		layer_i = a[i+FRAME_LAYER_I]
 		let layer_ct_i = ui.stack()
 			force_scope_vars()
-			on_frame(x, y, w, h, cx, cy, cw, ch)
+			on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_paddings()
 		ui.end_stack()
 		layer_i = layer_i0

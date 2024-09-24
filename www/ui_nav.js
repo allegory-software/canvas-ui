@@ -5463,6 +5463,8 @@ all_field_types.fixed_width = 0
 all_field_types.draw_text = function(s, cx) {
 	if (!cx)
 		return s
+	ui.text('', s) // , max_min_w, min_w, min_h, 'line'|'word'|0, editable, input_type)
+	/*
 	cx.font = cx.text_font
 	if (cx.measure) {
 		cx.measured_width = cx.measureText(s).width + this.fixed_width
@@ -5494,6 +5496,7 @@ all_field_types.draw_text = function(s, cx) {
 		cx.fillStyle = cx.fg_search
 		cx.fillText(s1, x, y)
 	}
+	*/
 	return true
 }
 
