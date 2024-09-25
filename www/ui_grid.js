@@ -289,7 +289,7 @@ function cellview_view(nav) {
 
 		// drawing
 
-		ui.p(0, y, 0, 0)
+		ui.p(x, y, 0, 0)
 		nav.draw_val(row, field, input_val, cx)
 
 		/*
@@ -432,7 +432,7 @@ function cellview_view(nav) {
 					continue
 
 				let field = nav.fields[fi]
-				let x = a[field.ct_i+0]
+				let x = a[field.ct_i+0] - x0
 				let y = ry
 				let w = a[field.ct_i+2]
 				let h = a[field.ct_i+3]
@@ -521,7 +521,8 @@ function cellview_view(nav) {
 		x += bx
 		y += by
 
-		ui.stack()
+		y = 0
+		x += sx
 
 		let hit_state
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
@@ -534,8 +535,6 @@ function cellview_view(nav) {
 		} else {
 			draw_cells_range(a, x, y, nav.rows, ri1, ri2, fi1, fi2, cell_h)
 		}
-
-		ui.end_stack()
 
 	}
 
@@ -644,7 +643,7 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 
 			let overflow = auto_expand ? 'contain' : 'auto'
 			let sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
-				ui.frame(null, view.on_frame, 1, 's', 's', cells_w, cells_h, sb_i, h_sb_i)
+				ui.frame(null, view.on_frame, 0, 'l', 't', cells_w, cells_h, sb_i, h_sb_i)
 				//  ui.grid_cellview(sb_i, h_sb_i, view)
 			ui.end_scrollbox()
 

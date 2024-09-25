@@ -1469,7 +1469,7 @@ function C(a, i) { return cmd_names[a[i-1]] }
 let max_cmd    =  0 // even numbers for non-containers (0 is reserved).
 let max_cmd_ct = -1 // odd numbers containers
 function unsparse(a, i) {
-	if (a[i] == undefined)
+	if (a[i] === undefined)
 		a[i] = null
 }
 function unsparse_all(i) {
@@ -2321,6 +2321,17 @@ function get_next_ext_i(a, i) {
 	if (cmd & 1) // container
 		return a[i+NEXT_EXT_I]
 	return a[i-2] // next_i
+}
+
+// NOTE: `ct` is short for container, which must end with ui.end().
+function ui_cmd_ct(cmd, ...args) {
+	begin_scope()
+	let i = ui_cmd(cmd, fr, align, valign, min_w, min_h,
+		0, // next_ext_i
+		...args
+	)
+	ct_stack.push(i)
+	return i
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
