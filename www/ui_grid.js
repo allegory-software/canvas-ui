@@ -290,7 +290,10 @@ function cellview_view(nav) {
 		// drawing
 
 		ui.p(x, y, 0, 0)
-		nav.draw_val(row, field, input_val, cx)
+		ui.stack('', 0, 'l', 't', w, h)
+			ui.p(ui.sp2(), ui.sp1())
+			nav.draw_val(row, field, input_val, cx)
+		ui.end_stack()
 
 		/*
 

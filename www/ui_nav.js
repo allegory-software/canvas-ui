@@ -5463,7 +5463,7 @@ all_field_types.fixed_width = 0
 all_field_types.draw_text = function(s, cx) {
 	if (!cx)
 		return s
-	ui.text('', s, 0, 'l', 't')
+	ui.text('', s, 0, 'l', 'c')
 	/*
 	cx.font = cx.text_font
 	if (cx.measure) {

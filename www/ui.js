@@ -2324,17 +2324,6 @@ function get_next_ext_i(a, i) {
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
-function ui_cmd_ct(cmd, ...args) {
-	begin_scope()
-	let i = ui_cmd(cmd, fr, align, valign, min_w, min_h,
-		0, // next_ext_i
-		...args
-	)
-	ct_stack.push(i)
-	return i
-}
-
-// NOTE: `ct` is short for container, which must end with ui.end().
 function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 	begin_scope()
 	let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
@@ -4353,7 +4342,7 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 	let ct_i = ui.ct_i()
 	assert(a[ct_i-1] == CMD_SCROLLBOX, 'frame is not inside a scrollbox')
 
-	ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		on_measure, on_frame,
 		ct_i,
 		0, // rec_i
@@ -4405,6 +4394,7 @@ frame.translate = function(a, i, dx, dy) {
 		layer_i = layer_i0
 		frame_end_check()
 	let a1 = end_rec(a0)
+	// pr(json(a1).length)
 
 	layout_rec(a1, x, y, w, h)
 

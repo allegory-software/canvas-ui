@@ -2,7 +2,6 @@
 BUGS
 ------------------------------------------------------------------------------
 - set_cursor() must be set in draw? hittest? where?
-- grid drawing is stateful (awaiting impl. of secondary cmd streams)
 - toolbox move by all sides, with all alignment combinations
 - toolbox dynamic z-index
 

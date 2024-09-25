@@ -265,20 +265,23 @@ ui.end_h()
 
 // grid
 
+let fields = [{name: 'id'}]
 let rows = []
 for (let i = 1; i < 100; i++)
-	rows.push([i, 'Foo '+i, 'Le Foo'])
+	fields.push({name: 'f'+i, })
+for (let j = 1; j < 1000; j++) {
+	let row = [j]
+	for (let i = 1; i <= fields.length; i++)
+		row.push('Cell '+j+','+i)
+	rows.push(row)
+}
 let r1 = {
 	pk: 'id', can_change_rows: false,
-	fields: [
-		{name: 'id'},
-		{name: 'name'},
-		{name: 'desc', w: 200},
-	],
+	fields: fields,
 	rows: rows,
 }
 demos.grid = `
-ui.stack('', 0, 'c', 'c', 200, 500)
+ui.stack('', 0, 's', 's', 200, 500)
 	ui.grid('grid1', r1)
 ui.end_stack()
 `
