@@ -508,11 +508,11 @@ function parse_state(s) {
 
 // styling colors ------------------------------------------------------------
 
-// Colors are defined in HSL so they can be adjusted if needed.
-// Colors are specified by (name, state) with state 0 (normal) as fallback.
-// Concrete colors can also be specified by prefixing them with a a colon,
-// eg. `:red`, `:#fff`, etc. but that throws away themes and the ability to
-// HSL-adjust the color.
+// Colors are defined in HSL so they can be adjusted if needed. Colors are
+// specified by (theme, name, state) with state 0 (normal) as fallback.
+// Concrete colors can also be specified by prefixing them with a `:` (for
+// light colors) or `*` (for dark colors), eg. `:#fff`, `*red`, etc. but that
+// throws away the ability to HSL-adjust the color.
 
 function def_color_func(k) {
 	function def_color(theme, name, state, h, s, L, a, is_dark) {
@@ -555,8 +555,8 @@ function lookup_color_hsl_func(k) {
 	}
 }
 
-let CC_COLON = ':'.charCodeAt(0)
-let CC_STAR  = '*'.charCodeAt(0)
+let CC_COLON = ':'.charCodeAt(0) // prefix for light colors
+let CC_STAR  = '*'.charCodeAt(0) // prefix for dark colors
 
 function lookup_color_func(hsl_color) {
 	return function(name, state, theme) {
@@ -703,7 +703,7 @@ ui.bg_style('dark' , 'bg2'   , 'hover'  , 216, 0.28, 0.25)
 ui.bg_style('dark' , 'bg3'   , 'normal' , 216, 0.28, 0.29)
 ui.bg_style('dark' , 'bg3'   , 'hover'  , 216, 0.28, 0.31)
 ui.bg_style('dark' , 'bg3'   , 'active' , 216, 0.28, 0.33)
-ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.11)
+ui.bg_style('dark' , 'alt'   , 'normal' , 260, 0.28, 0.13)
 ui.bg_style('dark' , 'smoke' , 'normal' ,   0, 0.00, 0.00, 0.70)
 ui.bg_style('dark' , 'input' , 'normal' , 216, 0.28, 0.17)
 ui.bg_style('dark' , 'input' , 'hover'  , 216, 0.28, 0.21)
@@ -3661,6 +3661,8 @@ hittest[CMD_BB] = function(a, i) {
 // text state ----------------------------------------------------------------
 
 const CMD_COLOR = cmd('color')
+
+ui._c = () => color // TODO: remove
 
 function force_color(s, state) {
 	if (color != s)

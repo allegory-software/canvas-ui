@@ -202,7 +202,7 @@ function cellview_view(nav) {
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = !!e.editor && cell_focused
 		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = !draw_stage && ((row_focused && field == nav.focused_field) || hovering)
+		let full_width = 0 && !draw_stage && ((row_focused && field == nav.focused_field) || hovering)
 
 		// geometry
 		if (full_width) {
@@ -235,84 +235,62 @@ function cellview_view(nav) {
 
 		// background & text color
 		// drawing a background is slow, so we avoid it when we can.
-		let bg = (draw_stage == 'moving_cols' || draw_stage == 'moving_rows')
-			&& e.bg_moving
+		let bg, bgs
 
-		if (editing)
-			bg = grid_focused ? e.bg_row_focused_focused : e.bg_row_focused
-		else if (cell_invalid)
-			if (grid_focused && cell_focused) {
-				bg = e.bg_error_focused
-			} else {
-				bg = e.bg_error
-			}
-		else if (cell_focused)
+		if (draw_stage == 'moving_cols' || draw_stage == 'moving_rows')
+			bg = 'bg2'
+		if (editing) {
+			bg = 'item'
+			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
+		} else if (cell_invalid) {
+			bg = 'item'
+			bgs = grid_focused && cell_focused ? 'item-error item-focused' : 'item-error'
+		} else if (cell_focused) {
+			bg = 'item'
 			if (selected)
-				if (grid_focused) {
-					bg = e.bg_focused_selected_focused
-				} else {
-					bg = e.bg_focused_selected
-				}
-			else if (grid_focused)
-				bg = e.bg_focused_focused
+				bgs = grid_focused
+					? 'item-focused item-selected focused'
+					: 'item-focused item-selected'
 			else
-				bg = e.bg_focused
-		else if (selected) {
-			if (grid_focused)
-				bg = e.bg_selected_focused
-			else
-				bg = e.bg_selected
-		} else if (is_new)
-			if (modified)
-				bg = e.bg_new_modified
-			else
-				bg = e.bg_new
-		else if (modified)
-			bg = e.bg_modified
-		else if (row_focused)
-			if (grid_focused)
-				bg = e.bg_row_focused_focused
-			else
-				bg = e.bg_row_focused
-
+				bgs = grid_focused
+					? 'item-focused focused'
+					: 'item-selected'
+		} else if (selected) {
+			bg = 'item'
+			bgs = grid_focused ? 'item-selected focused' : 'item-selected'
+		} else if (is_new) {
+			bg = 'item'
+			bgs = modified ? 'new modified' : 'new'
+		} else if (modified) {
+			bg = 'item'
+			bgs = 'modified'
+		} else if (row_focused) {
+			bg = 'row'
+			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
+		}
 		if (!bg)
 			if ((ri & 1) == 0)
-				bg = e.bg_alt
+				bg = 'alt'
 			else if (full_width)
-				bg = e.bg
+				bg = 'bg'
 
 		let fg
 		if (is_null || is_empty || disabled)
-			fg = ui.bg_is_dark(bg) ? e.fg_dim_dark : e.fg_dim_light
+			fg = 'label'
 		else
-			fg = ui.bg_is_dark(bg) ? e.fg_dark : e.fg_light
+			fg = 'text'
 
 		// drawing
 
-		ui.p(x, y, 0, 0)
+		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.p(ui.sp2(), ui.sp1())
-			nav.draw_val(row, field, input_val, cx)
+			ui.p(ui.sp2(), 0)
+			ui.bb('', bg, bgs, 't', 'light')
+			ui.color(fg)
+			nav.draw_val(row, field, input_val, true)
 		ui.end_stack()
 
 		/*
-
-		cx.save()
-		cx.translate(x, y)
-
-		// background
-		if (bg) {
-			cx.beginPath()
-			cx.fillStyle = bg
-			cx.rect(0, 0, w, h)
-			cx.fill()
-		}
-
-		// border
-		draw_cell_border(cx, w, h, bx, by,
-			e.cell_border_v_color,
-			e.cell_border_h_color,
-			draw_stage)
 
 		if (!editing) {
 
@@ -394,6 +372,7 @@ function cellview_view(nav) {
 	function draw_cells_range(a, x0, y0, rows, ri1, ri2, fi1, fi2, cell_h, draw_stage) {
 
 		let hit_cell, foc_cell, foc_ri, foc_fi
+
 		/*
 		if (!draw_stage) {
 
@@ -427,12 +406,12 @@ function cellview_view(nav) {
 			let hit_cell_now = hit_cell && hit_ri == ri
 
 			for (let fi = fi1; fi < fi2; fi++) {
-				if (skip_moving_col && hit_fi == fi)
-					continue
-				if (hit_cell_now && hit_fi == fi)
-					continue
-				if (foc_cell_now && foc_fi == fi)
-					continue
+				// if (skip_moving_col && hit_fi == fi)
+				// 	continue
+				// if (hit_cell_now && hit_fi == fi)
+				// 	continue
+				// if (foc_cell_now && foc_fi == fi)
+				// 	continue
 
 				let field = nav.fields[fi]
 				let x = a[field.ct_i+0] - x0
@@ -447,6 +426,7 @@ function cellview_view(nav) {
 				draw_row_strike_line(row, ri, rx, ry, rw, rh, draw_stage)
 		}
 
+		/*
 		if (foc_cell && foc_ri >= ri1 && foc_ri <= ri2 && foc_fi >= fi1 && foc_fi <= fi2)
 			draw_cell(foc_ri, foc_fi, draw_stage)
 
@@ -470,6 +450,7 @@ function cellview_view(nav) {
 			w = draw_cell_w
 			draw_hover_outline(x, y, w, h)
 		}
+		*/
 
 	}
 
@@ -529,9 +510,7 @@ function cellview_view(nav) {
 		cells_w = a[i+0] + a[i+2]
 
 		x += bx
-		y += by
-
-		y = 0
+		y = by
 
 		let hit_state
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
@@ -545,18 +524,6 @@ function cellview_view(nav) {
 			draw_cells_range(a, x, y, nav.rows, ri1, ri2, fi1, fi2, cell_h)
 		}
 
-	}
-
-	e._on_frame = function(a, i, x, y, w, h, cx, cy, cw, ch) {
-
-		let sb_i   = a[i+_CELLVIEW_SB_I]
-		let h_sb_i = a[i+_CELLVIEW_H_SB_I]
-		let sx = ui.scroll_xy(a, sb_i, 0)
-		// ui.force_scroll(a, h_sb_i, sx, 0)
-		// ui.m(cx-x, cy-y)
-		ui.stack('', 0, 'l', 't', 100, 100)
-			ui.bb('bb1', ui.hit('bb1') ? ':green' : ':red')
-		ui.end_stack()
 	}
 
 	return e
