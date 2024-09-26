@@ -26,8 +26,8 @@ const {
 
 let cellview = {}
 
-let _CELLVIEW_SB_I   = S+0
-let _CELLVIEW_H_SB_I = S+1
+let _CELLVIEW_SB_I   = ui.FRAME_ARGS_I+0
+let _CELLVIEW_H_SB_I = ui.FRAME_ARGS_I+1
 
 let CELLVIEW_SB_I   = 4
 let CELLVIEW_H_SB_I = 5
@@ -477,6 +477,13 @@ function cellview_view(nav) {
 
 	e.on_frame = function(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
+		{
+		let sb_i   = a[_i+_CELLVIEW_SB_I]
+		let h_sb_i = a[_i+_CELLVIEW_H_SB_I]
+		let sx = ui.scroll_xy(a, sb_i, 0)
+		ui.force_scroll(a, h_sb_i, sx, 0)
+		}
+
 		let theme0 = theme
 		theme = ui.get_theme()
 		if (theme != theme0)
@@ -547,7 +554,6 @@ function cellview_view(nav) {
 		let h_sb_i = a[i+_CELLVIEW_H_SB_I]
 		let sx = ui.scroll_xy(a, sb_i, 0)
 		// ui.force_scroll(a, h_sb_i, sx, 0)
-		pr(sx)
 		// ui.m(cx-x, cy-y)
 		ui.stack('', 0, 'l', 't', 100, 100)
 			ui.bb('bb1', ui.hit('bb1') ? ':green' : ':red')
@@ -647,7 +653,6 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 			let overflow = auto_expand ? 'contain' : 'auto'
 			let sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
 				ui.frame(null, view.on_frame, 0, 'l', 't', cells_w, cells_h, sb_i, h_sb_i)
-				//  ui.grid_cellview(sb_i, h_sb_i, view)
 			ui.end_scrollbox()
 
 		ui.end_v()

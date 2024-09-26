@@ -4334,6 +4334,9 @@ const FRAME_ON_FRAME   = S+0
 const FRAME_CT_I       = S+1
 const FRAME_REC_I      = S+2
 const FRAME_LAYER_I    = S+3
+const FRAME_ARGS_I     = S+4
+
+ui.FRAME_ARGS_I = FRAME_ARGS_I
 
 let frame = {}
 
