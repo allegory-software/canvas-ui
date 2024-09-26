@@ -419,7 +419,7 @@ function cellview_view(nav) {
 			let row = rows[ri]
 
 			let rx = x0
-			let ry = y0 + ri * e.cell_h
+			let ry = ri * e.cell_h
 			let rw = cells_w
 			let rh = e.cell_h
 
@@ -532,7 +532,6 @@ function cellview_view(nav) {
 		y += by
 
 		y = 0
-		x += sx
 
 		let hit_state
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
@@ -637,7 +636,7 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 						let ct_i = ui.stack('', 0, 'l', 't', min_w, header_h)
 							ui.bb('', null, 'r', 'intense')
 							ui.p(ui.sp2(), ui.sp1())
-							ui.text('', field.label, 0, 'l')
+							ui.text('', field.label, 0, field.align)
 							field.ct_i = ct_i
 						ui.end_stack()
 					}

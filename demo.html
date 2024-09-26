@@ -265,10 +265,10 @@ ui.end_h()
 
 // grid
 
-let fields = [{name: 'id'}]
+let fields = [{name: 'id', align: 'right'}]
 let rows = []
 for (let i = 1; i < 100; i++)
-	fields.push({name: 'f'+i, })
+	fields.push({name: 'f'+i})
 for (let j = 1; j < 1000; j++) {
 	let row = [j]
 	for (let i = 1; i <= fields.length; i++)
