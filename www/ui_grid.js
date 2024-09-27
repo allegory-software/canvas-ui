@@ -554,7 +554,6 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 							field.ct_i = ct_i
 						ui.end_stack()
 					}
-					// ui.grid_header(view)
 				ui.end_h()
 			ui.end_scrollbox()
 

@@ -836,7 +836,6 @@ set_screen_bg()
 document.addEventListener('DOMContentLoaded', function() {
 	ready = true
 	assert(ui.main, 'ui.main not set')
-	//document.body.innerHTML = ''
 	document.body.appendChild(ui.screen)
 	reset_canvas()
 	resize_canvas()
@@ -845,11 +844,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // mouse state ---------------------------------------------------------------
 
-// we support multiple pointers for screen sharing / remote control situations
-// but only one can be active at any one time. so two users can't hover two
+// We support multiple pointers for screen sharing / remote control situations
+// but only one can be active at any one time, so two users can't hover two
 // things at the same time and can't drag multiple things at the same time,
 // and other users can't use the mouse while one user is dragging something.
-
+//
 // "true" multiple pointer support may sound cool, but it would complicate
 // mouse handling *for every widget*, and it would be a nightmare to figure
 // out what ops are allowed in the UI while one user is dragging something.
@@ -3703,8 +3702,8 @@ ui.color = function(s, state) {
 	if (color == s && color_state == state) return
 	force_color(s, state)
 }
-function map_map(m, f) { let a = []; if (m) for (let [k,v] of m) a.push(f(k,v)); return a; }
 function end_color(ended_scope) {
+function map_map(m, f) { let a = []; if (m) for (let [k,v] of m) a.push(f(k,v)); return a; }
 	let s     = scope_prev_diff_var(ended_scope, 'color')
 	let state = scope_prev_diff_var(ended_scope, 'color_state')
 	if (s === undefined && state === undefined) return
