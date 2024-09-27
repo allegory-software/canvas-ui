@@ -1680,15 +1680,6 @@ function draw_frame(recs, layers) {
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
 
-	if (1) {
-		cx.beginPath()
-		cx.rect(0, 0, canvas.width, canvas.height)
-		cx.fillStyle = bg_color('bg')
-		cx.fill()
-	} else {
-		cx.clearRect(0, 0, canvas.width, canvas.height)
-	}
-
 	for (let layer of layers) {
 		/*global*/ layer_i = layer.i
 		let indexes = layer.indexes
@@ -1983,6 +1974,8 @@ function redraw_all() {
 
 		if (!want_redraw) {
 			t0 = clock_ms()
+
+			cx.clearRect(0, 0, canvas.width, canvas.height)
 
 			draw_frame(recs, layers)
 
@@ -2648,6 +2641,38 @@ hittest[CMD_STACK] = function(a, i, recs) {
 		hit_template(a, i)
 	}
 }
+
+/*
+// clip ----------------------------------------------------------------------
+
+const CMD_CLIP     = cmd('clip')
+const CMD_END_CLIP = cmd('end_clip')
+
+const CMD_CLIP_CT_I = 0
+
+ui.clip     = function() { return ui_cmd(CMD_CLIP, ui.ct_i()) }
+ui.end_clip = function() { return ui_cmd(CMD_END_CLIP) }
+
+reindex[CMD_CLIP] = function(a, i, offset) {
+	a[i+CMD_CLIP_CT_I] += offset
+}
+
+draw[CMD_CLIP] = function(a, i) {
+	let ct_i = a[i+CMD_CLIP_CT_I]
+	let x = a[ct_i+0]
+	let y = a[ct_i+1]
+	let w = a[ct_i+2]
+	let h = a[ct_i+3]
+	cx.save()
+	cx.beginPath()
+	cx.rect(x, y, w, h)
+	cx.clip()
+}
+
+draw[CMD_END_CLIP] = function() {
+	cx.restore()
+}
+*/
 
 // scrollbox -----------------------------------------------------------------
 
@@ -3536,8 +3561,8 @@ function parse_border_sides(s) {
 	return b
 }
 
-const BB_ID            = 0
-const BB_CT_I          = 1
+const BB_ID   = 0
+const BB_CT_I = 1
 
 const CMD_BB = cmd('bb') // border-background
 

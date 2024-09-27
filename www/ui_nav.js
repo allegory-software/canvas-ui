@@ -3498,7 +3498,7 @@ ui.nav = function(e) {
 	}
 	}
 
-	e.draw_val = function(row, field, v, cx) {
+	e.draw_val = function(row, field, v, cx, full_width) {
 
 		if (v == null) {
 			let s = draw_null_lookup_val(row, field, cx)
@@ -3523,7 +3523,7 @@ ui.nav = function(e) {
 		if (ln_row)
 			return field.lookup_nav.draw_cell(ln_row, field.display_field, cx)
 
-		return field.draw(v, cx, row)
+		return field.draw(v, cx, row, full_width)
 	}
 
 	e.draw_cell = function(row, field, cx) {
@@ -5460,10 +5460,10 @@ all_field_types.to_text = function(v) {
 
 all_field_types.fixed_width = 0
 
-all_field_types.draw_text = function(s, cx) {
+all_field_types.draw_text = function(s, cx, row, full_width) {
 	if (!cx)
 		return s
-	ui.text('', s, 0, this.align, 'c')
+	ui.text('', s, 0, this.align, 'c', full_width ? null : 0)
 	/*
 	cx.font = cx.text_font
 	if (cx.measure) {
@@ -5500,9 +5500,9 @@ all_field_types.draw_text = function(s, cx) {
 	return true
 }
 
-all_field_types.draw = function(v, cx) {
+all_field_types.draw = function(v, cx, row, full_width) {
 	let s = this.to_text(v)
-	return this.draw_text(s, cx)
+	return this.draw_text(s, cx, row, full_width)
 }
 
 all_field_types.editor = function(opt) {

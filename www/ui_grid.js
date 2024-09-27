@@ -26,43 +26,10 @@ const {
 
 let cellview = {}
 
-let _CELLVIEW_SB_I   = ui.FRAME_ARGS_I+0
-let _CELLVIEW_H_SB_I = ui.FRAME_ARGS_I+1
+let CELLVIEW_SB_I   = ui.FRAME_ARGS_I+0
+let CELLVIEW_H_SB_I = ui.FRAME_ARGS_I+1
 
-let CELLVIEW_SB_I   = 4
-let CELLVIEW_H_SB_I = 5
-let CELLVIEW_VIEW   = 6
-
-cellview.create = function(cmd, sb_i, h_sb_i, view) {
-	return ui.cmd(cmd, 0, 0, 0, 0, sb_i, h_sb_i, view)
-}
-
-cellview.reindex = function(a, i, offset) {
-	a[i+CELLVIEW_SB_I] += offset
-}
-
-cellview.measure = function(a, i, axis) {
-	let view = a[i+CELLVIEW_VIEW]
-	// let min_w = view.get_min_w(axis)
-	// add_ct_min_wh(a, axis, min_w, 0)
-}
-
-cellview.position = function(a, i, axis, sx, sw) {
-	a[i+0+axis] = sx
-	a[i+2+axis] = sw
-}
-
-cellview.translate = function(a, i, dx, dy) {
-	a[i+0] += dx
-	a[i+1] += dy
-
-	let sb_i   = a[i+CELLVIEW_SB_I]
-	let h_sb_i = a[i+CELLVIEW_H_SB_I]
-	let sx = ui.scroll_xy(a, sb_i, 0)
-	ui.force_scroll(a, h_sb_i, sx, 0)
-}
-
-function cellview_view(nav) {
+function cellview_view(id, nav) {
 
 	let e = {}
 
@@ -180,6 +147,13 @@ function cellview_view(nav) {
 	let draw_cell_w
 	function draw_cell_at(row, field, ri, fi, x, y, w, h, draw_stage) {
 
+		let cell_id = id+'r'+ri+'f'+fi
+		if (ui.hit(cell_id)) {
+			hit_state = 'cell'
+			hit_ri = ri
+			hit_fi = fi
+		}
+
 		let input_val = nav.cell_input_val(row, field)
 
 		// static geometry
@@ -202,17 +176,7 @@ function cellview_view(nav) {
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = !!e.editor && cell_focused
 		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = 0 && !draw_stage && ((row_focused && field == nav.focused_field) || hovering)
-
-		// geometry
-		if (full_width) {
-			let w1 = max(w, measure_cell_width(row, field) + 2*px)
-			if (field.align == 'right')
-				x -= (w1 - w)
-			else if (field.align == 'center')
-				x -= round((w1 - w) / 2)
-			w = w1
-		}
+		let full_width = !draw_stage && ((row_focused && field == nav.focused_field) || hovering)
 
 		let indent_x = 0
 		let collapsed
@@ -283,11 +247,11 @@ function cellview_view(nav) {
 		// drawing
 
 		ui.m(x, y, 0, 0)
-		ui.stack('', 0, 'l', 't', w, h)
+		ui.stack(cell_id, 0, 'l', 't', w, h)
 			ui.p(ui.sp2(), 0)
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
-			nav.draw_val(row, field, input_val, true)
+			nav.draw_val(row, field, input_val, true, full_width)
 		ui.end_stack()
 
 		/*
@@ -459,8 +423,8 @@ function cellview_view(nav) {
 	e.on_frame = function(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
 		{
-		let sb_i   = a[_i+_CELLVIEW_SB_I]
-		let h_sb_i = a[_i+_CELLVIEW_H_SB_I]
+		let sb_i   = a[_i+CELLVIEW_SB_I]
+		let h_sb_i = a[_i+CELLVIEW_H_SB_I]
 		let sx = ui.scroll_xy(a, sb_i, 0)
 		ui.force_scroll(a, h_sb_i, sx, 0)
 		}
@@ -512,7 +476,10 @@ function cellview_view(nav) {
 		x += bx
 		y = by
 
-		let hit_state
+		hit_state = null
+		hit_ri = null
+		hit_fi = null
+
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
 			draw_cells_range(a, x, y, nav.rows, s.vri1, s.vri2, 0, nav.fields.length, 'non_moving_rows')
@@ -529,26 +496,6 @@ function cellview_view(nav) {
 	return e
 
 }
-
-cellview.draw = function(a, i) {
-
-	let x = a[i+0]
-	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-
-	let sb_i = a[i+CELLVIEW_SB_I]
-	let vx = a[sb_i+0]
-	let vy = a[sb_i+1]
-	let vw = a[sb_i+2]
-	let vh = a[sb_i+3]
-
-	let view = a[i+CELLVIEW_VIEW]
-	view.draw(a, x, y, w, h, vx, vy, vw, vh)
-
-}
-
-ui.widget('grid_cellview', cellview)
 
 // grid ----------------------------------------------------------------------
 
@@ -571,7 +518,7 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 			rowset      : isobj(rowset) ? rowset : null,
 		})
 		ui.on_free(id, () => nav.free())
-		nav.view = cellview_view(nav)
+		nav.view = cellview_view(id, nav)
 		nav.view.cell_border_v_width = 0
 		nav.view.cell_border_h_width = 1
 		G.nav = nav // TODO: remove
@@ -603,7 +550,7 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 						let ct_i = ui.stack('', 0, 'l', 't', min_w, header_h)
 							ui.bb('', null, 'r', 'intense')
 							ui.p(ui.sp2(), ui.sp1())
-							ui.text('', field.label, 0, field.align)
+							ui.text('', field.label, 0, field.align, 'c', field.w)
 							field.ct_i = ct_i
 						ui.end_stack()
 					}
