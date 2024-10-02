@@ -268,7 +268,7 @@ ui.end_h()
 let fields = [{name: 'id', align: 'right', w: 40}]
 let rows = []
 for (let i = 1; i < 100; i++)
-	fields.push({name: 'f'+i, w: 60})
+	fields.push({name: 'Field No. '+i, w: 40})
 for (let j = 1; j < 100; j++) {
 	let row = [j]
 	for (let i = 1; i <= fields.length; i++)

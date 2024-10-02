@@ -1133,67 +1133,6 @@ ui.listen = function(ev) {
 	return event_state.get(ev)
 }
 
-// z-layers ------------------------------------------------------------------
-
-let layer_freelist = obj_freelist()
-let layer_map = obj() // {name->layer}
-let layer_arr = [] // [layer1,...]
-
-let layers = []
-
-function ui_layer(name, index) {
-	let layer = layer_map[name]
-	if (!layer) {
-		layer = layer_freelist.alloc() // [popup1_i,...]
-		layer.name = assert(name)
-		insert(layers, index, layer)
-		layer_map[name] = layer
-		layer_arr.push(layer)
-		layer.i = layer_arr.length-1
-		if (!layer.indexes)
-			layer.indexes = [] // [rec1_i, ct1_i, rec2_i, ct2_i, ...]
-	}
-	return layer
-}
-ui.layer = ui_layer
-
-function clear_layers() {
-	for (let layer of layers)
-		layer.indexes.length = 0
-}
-
-const layer_base =
-ui_layer('base'   , 0)
-ui_layer('handle' , 1)
-ui_layer('window' , 2)
-ui_layer('tooltip', 3)
-ui_layer('open'   , 4)
-
-let layer_stack = [] // [layer1_i, ...]
-let layer_i // current layer = layer_arr[layer_i]
-
-function begin_layer(layer, i) {
-	layer_stack.push(layer_i)
-	let layer_i0 = layer_i
-	layer_i = layer.i
-	// NOTE: adding the cmd on the same layer will just draw it twice but badly
-	// since it won't even have the right context!
-	if (layer_i != layer_i0)
-		layer.indexes.push(rec_i, i)
-}
-
-function end_layer() {
-	layer_i = layer_stack.pop()
-}
-
-function layer_stack_check() {
-	if (layer_stack.length) {
-		for (let layer_i of layer_stack)
-			debug('layer', layer_arr[layer_i].name, 'not closed')
-		assert(false)
-	}
-}
-
 // scopes --------------------------------------------------------------------
 
 let scope_freelist = map_freelist()
@@ -1584,6 +1523,67 @@ function free_recs() {
 	for (let a of recs)
 		rec_free(a)
 	recs.length = 0
+}
+
+// z-layers ------------------------------------------------------------------
+
+let layer_freelist = obj_freelist()
+let layer_map = obj() // {name->layer}
+let layer_arr = [] // [layer1,...]
+
+let layers = [] // [layer1,...]
+
+function ui_layer(name, index) {
+	let layer = layer_map[name]
+	if (!layer) {
+		layer = layer_freelist.alloc() // [popup1_i,...]
+		layer.name = assert(name)
+		insert(layers, index, layer)
+		layer_map[name] = layer
+		layer_arr.push(layer)
+		layer.i = layer_arr.length-1
+		if (!layer.indexes)
+			layer.indexes = [] // [rec1_i, ct1_i, rec2_i, ct2_i, ...]
+	}
+	return layer
+}
+ui.layer = ui_layer
+
+function clear_layers() {
+	for (let layer of layers)
+		layer.indexes.length = 0
+}
+
+const layer_base =
+ui_layer('base'   , 0)
+ui_layer('handle' , 1)
+ui_layer('window' , 2)
+ui_layer('tooltip', 3)
+ui_layer('open'   , 4)
+
+let layer_stack = [] // [layer1_i, ...]
+let layer_i // current layer = layer_arr[layer_i]
+
+function begin_layer(layer, i) {
+	layer_stack.push(layer_i)
+	let layer_i0 = layer_i
+	layer_i = layer.i
+	// NOTE: adding the cmd on the same layer will just draw it twice but badly
+	// since it won't even have the right context!
+	if (layer_i != layer_i0)
+		layer.indexes.push(rec_i, i)
+}
+
+function end_layer() {
+	layer_i = layer_stack.pop()
+}
+
+function layer_stack_check() {
+	if (layer_stack.length) {
+		for (let layer_i of layer_stack)
+			debug('layer', layer_arr[layer_i].name, 'not closed')
+		assert(false)
+	}
 }
 
 // rendering phases ----------------------------------------------------------
@@ -4381,17 +4381,15 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 
 }
 
-frame.measure = function(a, i, axis) {
+frame.reindex = function(a, i, offset) {
+	a[i+FRAME_CT_I] += offset
+}
 
+frame.before_measure = function(a, i, axis) {
 	let on_measure = a[i+FRAME_ON_MEASURE]
-	if (on_measure) {
-		let min_w = on_measure(axis)
-		if (min_w != null) {
-			add_ct_min_wh(a, axis, min_w)
-		}
-	} else {
-		box_measure(a, i, axis)
-	}
+	let min_w = on_measure(axis)
+	if (min_w != null)
+		add_ct_min_wh(a, axis, min_w)
 }
 
 frame.translate = function(a, i, dx, dy) {

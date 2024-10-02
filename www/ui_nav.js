@@ -1826,7 +1826,7 @@ ui.nav = function(e) {
 			}
 		}
 
-		e.selected_row = expand_selection ? e.rows[ri0] : null
+		e.selected_row   = expand_selection ? e.rows  [ri0] : null
 		e.selected_field = expand_selection ? e.fields[fi0] : null
 
 		if (row_changed) {
