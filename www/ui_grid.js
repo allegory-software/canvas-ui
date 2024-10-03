@@ -24,16 +24,10 @@ const {
 
 // cell view -----------------------------------------------------------------
 
-let cellview = {}
-
-let CELLVIEW_SB_I   = ui.FRAME_ARGS_I+0
-let CELLVIEW_H_SB_I = ui.FRAME_ARGS_I+1
-
-function cellview_view(id, nav) {
-
-	let e = {}
+function init_nav(id, e) {
 
 	let horiz = true
+	let line_height = 22
 
 	let cells_w
 
@@ -44,25 +38,27 @@ function cellview_view(id, nav) {
 	let hit_ri, hit_fi, hit_indent // the hit cell and whether the cell indent was hit.
 	let row_move_state // additional state when row moving
 
-	e.measure = function(axis) {
-		if (horiz) {
-			if (!axis) {
-				let min_w = 0
-				for (let field of nav.fields) {
-					min_w += field.min_w
-				}
-				return min_w
-			} else {
-				return e.cells_h
-			}
-		} else {
-			return 0
-		}
-	}
+	let padding_x = ui.spx_input()
+	let padding_y = ui.spy_input()
 
-	e.on_frame_measure = function(axis) {
-		return !axis ? e.cells_w : e.cells_h
-	}
+	e.cell_border_v_width = 0
+	e.cell_border_h_width = 1
+
+	let cell_h = round(line_height + 2 * padding_y + e.cell_border_h_width)
+	let header_h = cell_h
+
+	let col_resizing
+	let auto_expand
+
+	/*
+	cells_w = bx + col_x
+
+	// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
+	if (col_resizing && !e.auto_expand)
+		cells_w = max(cells_w, last_cells_w)
+
+	page_row_count = floor(cells_view_h / cell_h)
+	vrn = floor(cells_view_h / cell_h) + 2 // 2 is right, think it!
 
 	function field_has_indent(field) {
 		return horiz && field == e.tree_field
@@ -70,7 +66,7 @@ function cellview_view(id, nav) {
 
 	function measure_cell_width(row, field) {
 		cx.measure = true
-		nav.draw_cell(row, field, cx)
+		e.draw_cell(row, field, cx)
 		cx.measure = false
 		return cx.measured_width
 	}
@@ -112,12 +108,13 @@ function cellview_view(id, nav) {
 			cx.stroke()
 		}
 	}
+	*/
 
 	let draw_cell_x
 	let draw_cell_w
 	function draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage) {
 
-		let input_val = nav.cell_input_val(row, field)
+		let input_val = e.cell_input_val(row, field)
 
 		// static geometry
 		let bx  = e.cell_border_v_width
@@ -126,21 +123,22 @@ function cellview_view(id, nav) {
 		let py = e.padding_y + by
 
 		// state
-		let grid_focused = nav.focused
-		let row_focused = nav.focused_row == row
-		let cell_focused = row_focused && (!nav.can_focus_cells || field == nav.focused_field)
-		let disabled = nav.is_cell_disabled(row, field)
+		let grid_focused = e.focused
+		let row_focused = e.focused_row == row
+		let cell_focused = row_focused && (!e.can_focus_cells || field == e.focused_field)
+		let disabled = e.is_cell_disabled(row, field)
 		let is_new = row.is_new
-		let cell_invalid = nav.cell_has_errors(row, field)
-		let modified = nav.cell_modified(row, field)
+		let cell_invalid = e.cell_has_errors(row, field)
+		let modified = e.cell_modified(row, field)
 		let is_null = input_val == null
 		let is_empty = input_val === ''
-		let sel_fields = nav.selected_rows.get(row)
+		let sel_fields = e.selected_rows.get(row)
 		let selected = (isobject(sel_fields) ? sel_fields.has(field) : sel_fields) || false
 		let editing = !!e.editor && cell_focused
 		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
-		let full_width = !draw_stage && ((row_focused && field == nav.focused_field) || hovering)
+		let full_width = !draw_stage && ((row_focused && field == e.focused_field) || hovering)
 
+		/*
 		let indent_x = 0
 		let collapsed
 		if (field_has_indent(field)) {
@@ -159,6 +157,7 @@ function cellview_view(id, nav) {
 					indent_x += s.hit_indent_x - s.indent_x
 			}
 		}
+		*/
 
 		// background & text color
 		// drawing a background is slow, so we avoid it when we can.
@@ -214,7 +213,7 @@ function cellview_view(id, nav) {
 			ui.p(ui.sp2(), 0)
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
-			nav.draw_val(row, field, input_val, true, full_width)
+			e.draw_val(row, field, input_val, true, full_width)
 		ui.end_stack()
 
 		/*
@@ -247,8 +246,8 @@ function cellview_view(id, nav) {
 			// text
 			cx.translate(indent_x, 0)
 			cx.fg_text = fg
-			cx.quicksearch_len = cell_focused && nav.quicksearch_text.length || 0
-			nav.draw_val(row, field, input_val, cx)
+			cx.quicksearch_len = cell_focused && e.quicksearch_text.length || 0
+			e.draw_val(row, field, input_val, cx)
 
 			cx.restore()
 		}
@@ -270,14 +269,14 @@ function cellview_view(id, nav) {
 	let cell_rect
 	{
 	let r = [0, 0, 0, 0]
-	cell_rect = function(a, ri, fi, x0) {
+	cell_rect = function(ri, fi) {
 		let row   = rows[ri]
-		let field = nav.fields[fi]
+		let field = e.fields[fi]
 		let ry = ri * e.cell_h
-		let x = a[field.ct_i+0] - x0
+		let x = field._X
 		let y = ry
-		let w = a[field.ct_i+2]
-		let h = a[field.ct_i+3]
+		let w = field._w
+		let h = cell_h
 		r[0] = x
 		r[1] = y
 		r[2] = w
@@ -288,12 +287,9 @@ function cellview_view(id, nav) {
 
 	function draw_cell(a, ri, fi, x0, draw_stage) {
 		let row   = rows[ri]
-		let field = nav.fields[fi]
+		let field = e.fields[fi]
 		let ry = ri * e.cell_h
-		let x = a[field.ct_i+0] - x0
-		let y = ry
-		let w = a[field.ct_i+2]
-		let h = a[field.ct_i+3]
+		let [x, y, w, h] = cell_rect(ri, fi)
 		draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
 	}
 
@@ -332,8 +328,8 @@ function cellview_view(id, nav) {
 
 		if (!draw_stage) {
 
-			foc_ri = nav.focused_row_index
-			foc_fi = nav.focused_field_index
+			foc_ri = e.focused_row_index
+			foc_fi = e.focused_field_index
 
 			hit_cell = hit_state == 'cell'
 				&& hit_ri >= ri1 && hit_ri <= ri2
@@ -368,7 +364,7 @@ function cellview_view(id, nav) {
 				if (foc_cell_now && foc_fi == fi)
 					continue
 
-				let field = nav.fields[fi]
+				let field = e.fields[fi]
 				let x = field._x
 				let y = ry
 				let w = field._w
@@ -411,20 +407,16 @@ function cellview_view(id, nav) {
 
 	}
 
-	e.on_frame = function(a, _i, x, y, w, h, vx, vy, vw, vh) {
+	let h_sb_i // cmd record index of header scrollbox
+	let sb_i   // cmd record index of cellview scrollbox
 
-		// scroll the header to match the horizontal scroll of the cell view.
-		{
-		let sb_i   = a[_i+CELLVIEW_SB_I]
-		let h_sb_i = a[_i+CELLVIEW_H_SB_I]
-		let sx = ui.scroll_xy(a, sb_i, 0)
-		ui.force_scroll(a, h_sb_i, sx, 0)
-		}
-
-		let cell_h = e.cell_h
+	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
 		let sx = vx - x
 		let sy = vy - y
+
+		// scroll the header scrollbox to match the scroll offset of the cell view.
+		ui.force_scroll(a, h_sb_i, sx, 0)
 
 		// find the visible row range
 
@@ -437,27 +429,39 @@ function cellview_view(id, nav) {
 		}
 		rn = floor(vh / cell_h) + 2 // 2 is right, think it!
 		ri2 = ri1 + rn
-		ri1 = max(0, min(ri1, nav.rows.length - 1))
-		ri2 = max(0, min(ri2, nav.rows.length))
+		ri1 = max(0, min(ri1, e.rows.length - 1))
+		ri2 = max(0, min(ri2, e.rows.length))
+
+		// layout fields
+
+		if (0) {
+		let x = 0
+		for (let field of e.fields) {
+			let w = min(max(field.w, field.min_w), field.max_w)
+			let cw = w + 2 * ui.sp2()
+			field._x = x
+			field._w = cw
+			x += cw
+		}
+		}
 
 		// find the visible field range
 
 		let fi1, fi2 // visible field range.
-		for (let field of nav.fields) {
-			let i = field.ct_i
-			let fx = a[i+0]
-			let fw = a[i+2]
+		for (let field of e.fields) {
+			let fx = field._x
+			let fw = field._w
 			if (fi1 == null && fx + fw >= vx)
 				fi1 = field.index
 			if (fi2 == null && fx > vx + vw)
 				fi2 = field.index
 		}
-		fi2 = fi2 ?? nav.fields.length
+		fi2 = fi2 ?? e.fields.length
 
 		let bx = e.cell_border_v_width
 		let by = e.cell_border_h_width
 
-		let i = nav.fields.at(-1).ct_i
+		let i = e.fields.at(-1).ct_i
 		cells_w = a[i+0] + a[i+2]
 
 		hit_state = null
@@ -465,12 +469,12 @@ function cellview_view(id, nav) {
 		hit_fi = null
 		if (ui.hit(id+'.cells')) {
 			hit_ri = floor((ui.my - y) / cell_h)
-			for (let fi = 0; fi < nav.fields.length; fi++) {
+			for (let fi = 0; fi < e.fields.length; fi++) {
 				let [x1, y1, w, h] = cell_rect(a, hit_ri, fi, x)
 				let hit_dx = ui.mx - x1 - x
 				let hit_dy = ui.my - y1 - y
 				if (hit_dx >= 0 && hit_dx <= w) {
-					let field = nav.fields[fi]
+					let field = e.fields[fi]
 					hit_state = 'cell'
 					hit_fi = fi
 					/*
@@ -495,20 +499,82 @@ function cellview_view(id, nav) {
 
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
-			draw_cells_range(a, x, y, nav.rows, s.vri1, s.vri2, 0, nav.fields.length, 'non_moving_rows')
-			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, 0, nav.fields.length, 'moving_rows')
+			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, 0, e.fields.length, 'non_moving_rows')
+			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, 0, e.fields.length, 'moving_rows')
 		} else if (hit_state == 'col_moving') { // draw fixed cols first and moving cols above them.
-			draw_cells_range(a, x, y, nav.rows, ri1, ri2, 0, nav.fields.length, 'non_moving_cols')
-			draw_cells_range(a, x, y, nav.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, 0, e.fields.length, 'non_moving_cols')
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
 		} else {
-			draw_cells_range(a, x, y, nav.rows, ri1, ri2, fi1, fi2, cell_h)
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, cell_h)
 		}
 
 		ui.end_stack()
 
 	}
 
-	return e
+	e.render = function(fr, align, valign, min_w, min_h) {
+
+		ui.v(fr, 0, align, valign, min_w, min_h)
+
+			function draw_header_cell(field, w, cw, noclip) {
+				ui.m(field._x, 0, 0, 0)
+				let c_id = id+'.header_cell_'+field.index
+				ui.stack('', 0, 'l', 't', cw, header_h)
+					ui.bb('', noclip ? 'bg1' : null, 'r', 'intense')
+					ui.p(ui.sp2(), 0)
+					ui.text('', field.label, 0, field.align, 'c', noclip ? null : w)
+				ui.end_stack()
+			}
+
+			h_sb_i = ui.scrollbox(id+'.header_scrollbox', 0, auto_expand ? 'contain' : 'hide', 'contain')
+
+				let hit_h_fi
+				if (ui.hit(id+'.header_scrollbox')) {
+					for (let field of e.fields) {
+						let x = field._x
+						let w = field._w
+						if (ui.mx >= x && ui.mx <= w) {
+							hit_h_fi = field.index
+							break
+						}
+					}
+				}
+
+				ui.bb('', 'bg1')
+				let x = 0
+				for (let field of e.fields) {
+					let w = min(max(field.w, field.min_w), field.max_w)
+					let cw = w + 2 * ui.sp2()
+					field._x = x
+					field._w = cw
+					x += cw
+					if (hit_h_fi === field.index)
+						continue
+					draw_header_cell(field, w, cw)
+				}
+
+				if (hit_h_fi != null) {
+					let field = e.fields[hit_h_fi]
+					let w = min(max(field.w, field.min_w), field.max_w)
+					let cw = w + 2 * ui.sp2()
+					draw_header_cell(field, w, cw, true)
+				}
+
+			ui.end_scrollbox()
+
+			let cells_w = 0
+			for (let field of e.fields)
+				cells_w += min(max(field.w, field.min_w), field.max_w)
+			let cells_h = e.rows.length * cell_h
+
+			let overflow = auto_expand ? 'contain' : 'auto'
+			sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
+				ui.frame(noop, on_cellview_frame, 0, 'l', 't', cells_w, cells_h)
+			ui.end_scrollbox()
+
+		ui.end_v()
+
+	}
 
 }
 
@@ -533,86 +599,11 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 			rowset      : isobj(rowset) ? rowset : null,
 		})
 		ui.on_free(id, () => nav.free())
-		nav.view = cellview_view(id, nav)
-		nav.view.cell_border_v_width = 0
-		nav.view.cell_border_h_width = 1
-		G.nav = nav // TODO: remove
-		G.view = nav.view // TODO: remove
+		init_nav(id, nav)
 		s.set('nav', nav)
 	}
-	let view = nav.view
+	nav.render(fr, align, valign, min_w, min_h)
 
-	let line_height = 22
-
-	view.padding_x = ui.spx_input()
-	view.padding_y = ui.spy_input()
-
-	view.cell_h  = round(line_height + 2 * view.padding_y + view.cell_border_h_width)
-	let header_h = round(line_height + 2 * view.padding_y + view.cell_border_h_width)
-
-	let horiz = true
-	let auto_expand = false
-
-	if (horiz) {
-
-		ui.v(fr, 0, align, valign, min_w, min_h)
-
-			function draw_header_cell(field, w, cw, noclip) {
-				ui.m(field._x, 0, 0, 0)
-				let c_id = id+'.header_cell_'+field.index
-				let ct_i = ui.stack(id+'.header_cell_'+field.index, 0, 'l', 't', cw, header_h)
-					ui.bb('', noclip ? 'bg1' : null, 'r', 'intense')
-					ui.p(ui.sp2(), 0)
-					ui.text('', field.label, 0, field.align, 'c', noclip ? null : w)
-					field.ct_i = ct_i
-				ui.end_stack()
-			}
-
-			let hit_h_fi
-			for (let field of nav.fields) {
-				let c_id = id+'.header_cell_'+field.index
-				if (ui.hit(c_id))
-					hit_h_fi = field.index
-			}
-
-			let h_sb_i = ui.scrollbox(id+'.header_scrollbox', 0, auto_expand ? 'contain' : 'hide', 'contain')
-				ui.bb('', 'bg1')
-				let x = 0
-				for (let field of nav.fields) {
-					let w = min(max(field.w, field.min_w), field.max_w)
-					let cw = w + 2 * ui.sp2()
-					field._x = x
-					field._w = cw
-					x += cw
-					if (hit_h_fi === field.index)
-						continue
-					draw_header_cell(field, w, cw)
-				}
-
-				if (hit_h_fi != null) {
-					let field = nav.fields[hit_h_fi]
-					let w = min(max(field.w, field.min_w), field.max_w)
-					let cw = w + 2 * ui.sp2()
-					draw_header_cell(field, w, cw, true)
-				}
-
-			ui.end_scrollbox()
-
-			let cells_w = 0
-			for (let field of nav.fields)
-				cells_w += min(max(field.w, field.min_w), field.max_w)
-			let cells_h = nav.rows.length * view.cell_h
-
-			let overflow = auto_expand ? 'contain' : 'auto'
-			let sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
-				ui.frame(noop, view.on_frame, 0, 'l', 't', cells_w, cells_h, sb_i, h_sb_i)
-			ui.end_scrollbox()
-
-		ui.end_v()
-
-	} else {
-
-	}
 }
 
 }()) // module function

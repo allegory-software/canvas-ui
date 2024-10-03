@@ -2684,7 +2684,7 @@ const SB_STATE    = S+7
 const SB_OVERFLOW_AUTO    = 0
 const SB_OVERFLOW_HIDE    = 1
 const SB_OVERFLOW_SCROLL  = 2
-const SB_OVERFLOW_CONTAIN = 3
+const SB_OVERFLOW_CONTAIN = 3 // expand to fit content, like a stack.
 
 function parse_sb_overflow(s) {
 	if (s == null   || s == 'auto'   ) return SB_OVERFLOW_AUTO
