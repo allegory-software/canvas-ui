@@ -211,7 +211,7 @@ function cellview_view(id, nav) {
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.p(ui.sp2(), ui.sp1())
+			ui.p(ui.sp2(), 0)
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
 			nav.draw_val(row, field, input_val, true, full_width)
@@ -369,9 +369,9 @@ function cellview_view(id, nav) {
 					continue
 
 				let field = nav.fields[fi]
-				let x = a[field.ct_i+0] - x0
+				let x = field._x
 				let y = ry
-				let w = a[field.ct_i+2]
+				let w = field._w
 				let h = a[field.ct_i+3]
 
 				draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
@@ -557,20 +557,45 @@ ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
 
 		ui.v(fr, 0, align, valign, min_w, min_h)
 
+			function draw_header_cell(field, w, cw, noclip) {
+				ui.m(field._x, 0, 0, 0)
+				let c_id = id+'.header_cell_'+field.index
+				let ct_i = ui.stack(id+'.header_cell_'+field.index, 0, 'l', 't', cw, header_h)
+					ui.bb('', noclip ? 'bg1' : null, 'r', 'intense')
+					ui.p(ui.sp2(), 0)
+					ui.text('', field.label, 0, field.align, 'c', noclip ? null : w)
+					field.ct_i = ct_i
+				ui.end_stack()
+			}
+
+			let hit_h_fi
+			for (let field of nav.fields) {
+				let c_id = id+'.header_cell_'+field.index
+				if (ui.hit(c_id))
+					hit_h_fi = field.index
+			}
+
 			let h_sb_i = ui.scrollbox(id+'.header_scrollbox', 0, auto_expand ? 'contain' : 'hide', 'contain')
 				ui.bb('', 'bg1')
 				let x = 0
 				for (let field of nav.fields) {
-					let w = min(max(field.w, field.min_w), field.max_w) + 2 * ui.sp2()
-					ui.m(x, 0, 0, 0)
-					ui.p(ui.sp2(), ui.sp1())
-					let ct_i = ui.stack('', 0, 'l', 't', w, header_h)
-						ui.bb('', null, 'r', 'intense')
-						ui.text('', field.label, 0, field.align, 'c', w - 2 * ui.sp2())
-						field.ct_i = ct_i
-						x += w - 2 * ui.sp2()
-					ui.end_stack()
+					let w = min(max(field.w, field.min_w), field.max_w)
+					let cw = w + 2 * ui.sp2()
+					field._x = x
+					field._w = cw
+					x += cw
+					if (hit_h_fi === field.index)
+						continue
+					draw_header_cell(field, w, cw)
 				}
+
+				if (hit_h_fi != null) {
+					let field = nav.fields[hit_h_fi]
+					let w = min(max(field.w, field.min_w), field.max_w)
+					let cw = w + 2 * ui.sp2()
+					draw_header_cell(field, w, cw, true)
+				}
+
 			ui.end_scrollbox()
 
 			let cells_w = 0

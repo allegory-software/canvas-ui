@@ -1225,7 +1225,7 @@ G.grid = component('grid', 'Input', function(e) {
 			for (let fi = fi1; fi < fi2; fi++) {
 				if (skip_moving_col && hit_fi == fi)
 					continue
-				if (hit_cell_now && hit_fi == fi)
+				if (hit_cell_now && hit_fi == fi)
 					continue
 				if (foc_cell_now && foc_fi == fi)
 					continue
