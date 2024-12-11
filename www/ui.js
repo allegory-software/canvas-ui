@@ -6625,4 +6625,134 @@ ui.box_widget('frame_graph', {
 	},
 })
 
+// live-move list element pattern --------------------------------------------
+
+// implements:
+//   move_element_start(move_i, move_n, i1, i2[, x1, x2])
+//   move_element_update(elem_x, [i1, i2, x1, x2])
+// uses:
+//   movable_element_size(elem_i) -> w
+//   set_movable_element_pos(i, x, moving)
+//
+ui.live_move_mixin = function(e) {
+
+	e = e || {}
+
+	let move_i1, move_i2, i1, i2, i1x, i2x, offsetx
+	let move_x, over_i, over_p, over_x
+	let sizes
+
+	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
+		move_n = move_n ?? 1
+		move_i1 = move_i
+		move_i2 = move_i + move_n
+		move_x = null
+		over_i = null
+		over_x = null
+		i1  = _i1
+		i2  = _i2
+		i1x = _i1x
+		i2x = _i2x
+		offsetx = _offsetx || 0
+		sizes = []
+		for (let i = i1; i < i2; i++)
+			sizes[i] = e.movable_element_size(i)
+		if (i1x == null) {
+			assert(i1 == 0)
+			i1x = 0
+			i2x = i1x
+			for (let i = i1; i < i2; i++) {
+				if (i < move_i1 || i >= move_i2)
+					i2x += sizes[i]
+			}
+		}
+	}
+
+	e.move_element_stop = function() {
+		set_moving_element_pos(over_x)
+		return over_i
+	}
+
+	function hit_test(elem_x) {
+		let x = i1x
+		let x0 = i1x
+		let last_over_i = over_i
+		let new_over_i, new_over_p
+		for (let i = i1; i < i2; i++) {
+			if (i < move_i1 || i >= move_i2) {
+				let w = sizes[i]
+				let x1 = x + w / 2
+				if (elem_x < x1) {
+					new_over_i = i
+					new_over_p = lerp(elem_x, x0, x1, 0, 1)
+					over_i = new_over_i
+					over_p = new_over_p
+					return new_over_i != last_over_i
+				}
+				x += w
+				x0 = x1
+			}
+		}
+		new_over_i = i2
+		x1 = i2x
+		new_over_p = lerp(elem_x, x0, x1, 0, 1)
+		over_i = new_over_i
+		over_p = new_over_p
+		return new_over_i != last_over_i
+	}
+
+ 	// `[i1..i2)` index generator with `[move_i1..move_i2)` elements moved.
+	function each_index(f) {
+		if (over_i < move_i1) { // moving upwards
+			for (let i = i1     ; i < over_i ; i++) f(i)
+			for (let i = move_i1; i < move_i2; i++) f(i, true)
+			for (let i = over_i ; i < move_i1; i++) f(i)
+			for (let i = move_i2; i < i2     ; i++) f(i)
+		} else {
+			for (let i = i1     ; i < move_i1; i++) f(i)
+			for (let i = move_i2; i < over_i ; i++) f(i)
+			for (let i = move_i1; i < move_i2; i++) f(i, true)
+			for (let i = over_i ; i <  i2    ; i++) f(i)
+		}
+	}
+
+	let move_ri1, move_ri2, move_vi1
+
+	function set_moving_element_pos(x, moving) {
+		if (move_ri1 != null)
+			for (let i = move_ri1; i < move_ri2; i++) {
+				e.set_movable_element_pos(i, offsetx + x, moving)
+				x += sizes[i]
+			}
+	}
+
+	e.move_element_update = function(elem_x) {
+		elem_x = clamp(elem_x, i1x, i2x)
+		if (elem_x != move_x) {
+			move_x = elem_x
+			e.move_x = move_x
+			if (hit_test(move_x)) {
+				e.over_i = over_i
+				e.over_p = over_p
+				let x = i1x
+				move_ri1 = null
+				move_ri2 = null
+				over_x = null
+				each_index(function(i, moving) {
+					if (moving) {
+						over_x = over_x ?? x
+						move_ri1 = move_ri1 ?? i
+						move_ri2 = i+1
+					} else
+						e.set_movable_element_pos(i, offsetx + x)
+					x += sizes[i]
+				})
+			}
+			set_moving_element_pos(move_x, true)
+		}
+	}
+
+	return e
+}
+
 }()) // module function
