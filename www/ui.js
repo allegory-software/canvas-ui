@@ -66,6 +66,18 @@ MOUSE STATE
 
 	pointers        [p1, ...]
 	add_pointer     () -> pointer
+	pointer         -> p    active pointer
+
+	mx              active pointer x-coord, transformed
+	my              active pointer y-coord, transformed
+	mx_notrans      active pointer x-coord
+	my_notrans      active pointer y-coord
+	pressed         active pointer pressed
+	click           active pointer clicked
+	clickup         active pointer de-clicked
+	dblclick        active pointer double-clicked
+	wheel_dy        active pointer wheel delta
+	trackpad        active pointer is a trackpad
 
 	mouse           = default pointer that tracks the local mouse
 	mx0 my0         = mouse position when started dragging
@@ -80,7 +92,7 @@ MOUSE STATE
 
 	hit             (id[, k) -> hit_state_map | v | null    get hit state map if mouse hovers widget and not captured
 	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget incl. if mouse captured
-	hover           (id) -> hit_state_map          declare that mouse hovers widget
+	hover           (id[, x, y, w, h]) -> hit_state_map       declare that mouse hovers widget
 
 	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
 
@@ -1719,13 +1731,17 @@ function hovers(id, k) {
 }
 ui.hovers = hovers
 
-function hover(id) {
+function hover(id, x, y, w, h) {
 	if (!id) return
 	let m = hit_state_maps.get(id)
 	if (!m) {
 		m = hit_state_map_freelist.alloc()
 		hit_state_maps.set(id, m)
 	}
+	m.set('x', x)
+	m.set('y', y)
+	m.set('w', w)
+	m.set('h', h)
 	return m
 }
 ui.hover = hover
@@ -1927,6 +1943,8 @@ function redraw_all() {
 
 		want_redraw = false
 
+		t0 = clock_ms()
+
 		if (ui.captured_id != null) {
 			ui.hit_for = 'captured'
 			hit_frame(recs, layers)
@@ -1939,6 +1957,9 @@ function redraw_all() {
 			hit_frame(recs, layers)
 		}
 		ui.hit_for = null
+
+		t1 = clock_ms()
+		frame_graph_push('frame_hit_time', t1 - t0)
 
 		measure_req_all()
 
@@ -2293,7 +2314,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		let h = a[i+3]
 		let id = a[i+ID]
 		if (hit_rect(x, y, w, h)) {
-			hover(id)
+			hover(id, x, y, w, h)
 			return true
 		}
 	}
@@ -2632,11 +2653,11 @@ translate[CMD_STACK] = translate_ct
 
 hittest[CMD_STACK] = function(a, i, recs) {
 	if (hit_children(a, i, recs)) {
-		hover(a[i+STACK_ID])
+		hover(a[i+STACK_ID], a[i+0], a[i+1], a[i+2], a[i+3])
 		return true
 	}
 	if (hit_box(a, i)) {
-		hover(a[i+STACK_ID])
+		hover(a[i+STACK_ID], a[i+0], a[i+1], a[i+2], a[i+3])
 		hit_template(a, i)
 	}
 }
@@ -2952,7 +2973,7 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 	if (!hit_box(a, i))
 		return
 
-	hover(id)
+	hover(id, a[i+0], a[i+1], a[i+2], a[i+3])
 
 	hit_template(a, i)
 
@@ -3676,7 +3697,7 @@ hittest[CMD_BB] = function(a, i) {
 	let ct_i     = a[i+1]
 	let bg_color = a[i+2]
 	if (bg_color && hit_box(a, ct_i)) {
-		hover(a[i+BB_ID])
+		hover(a[i+BB_ID], a[i+0], a[i+1], a[i+2], a[i+3])
 		hit_template(a, i)
 		return true
 	}
@@ -3685,8 +3706,6 @@ hittest[CMD_BB] = function(a, i) {
 // text state ----------------------------------------------------------------
 
 const CMD_COLOR = cmd('color')
-
-ui._c = () => color // TODO: remove
 
 function force_color(s, state) {
 	if (color != s)
@@ -3703,7 +3722,6 @@ ui.color = function(s, state) {
 	force_color(s, state)
 }
 function end_color(ended_scope) {
-function map_map(m, f) { let a = []; if (m) for (let [k,v] of m) a.push(f(k,v)); return a; }
 	let s     = scope_prev_diff_var(ended_scope, 'color')
 	let state = scope_prev_diff_var(ended_scope, 'color_state')
 	if (s === undefined && state === undefined) return
@@ -4347,7 +4365,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 hittest[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
-		hover(a[i+TEXT_ID])
+		hover(a[i+TEXT_ID], a[i+0], a[i+1], a[i+2], a[i+3])
 		hit_template(a, i)
 		return true
 	}
@@ -6534,6 +6552,7 @@ frame_graph('frame_time'       , 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_make_time'  , 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_layout_time', 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_draw_time'  , 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_hit_time'   , 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_bandwidth'  , 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
 frame_graph('frame_compression', '%'   , 0, 0,   100)
 frame_graph('frame_pack_time'  , 'ms'  , 1, 0,    10)

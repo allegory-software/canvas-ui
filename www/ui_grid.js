@@ -30,7 +30,9 @@ function init_nav(id, e) {
 	let line_height = 22
 
 	let cells_w
+	let cells_h
 
+	let shift, ctrl
 	let hit_state // this affects both rendering and behavior in many ways.
 	let hit_mx, hit_my // last mouse coords, needed on scroll event.
 	let hit_target // last mouse target, needed on click events.
@@ -123,7 +125,7 @@ function init_nav(id, e) {
 		let py = e.padding_y + by
 
 		// state
-		let grid_focused = e.focused
+		let grid_focused = ui.focused(id)
 		let row_focused = e.focused_row == row
 		let cell_focused = row_focused && (!e.can_focus_cells || field == e.focused_field)
 		let disabled = e.is_cell_disabled(row, field)
@@ -210,7 +212,7 @@ function init_nav(id, e) {
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.p(ui.sp2(), 0)
+			ui.p(ui.sp2())
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
 			e.draw_val(row, field, input_val, true, full_width)
@@ -270,10 +272,9 @@ function init_nav(id, e) {
 	{
 	let r = [0, 0, 0, 0]
 	cell_rect = function(ri, fi) {
-		let row   = rows[ri]
 		let field = e.fields[fi]
-		let ry = ri * e.cell_h
-		let x = field._X
+		let ry = ri * cell_h
+		let x = field._x
 		let y = ry
 		let w = field._w
 		let h = cell_h
@@ -285,11 +286,10 @@ function init_nav(id, e) {
 	}
 	}
 
-	function draw_cell(a, ri, fi, x0, draw_stage) {
+	function draw_cell(a, ri, fi, draw_stage) {
+		let [x, y, w, h] = cell_rect(ri, fi)
 		let row   = rows[ri]
 		let field = e.fields[fi]
-		let ry = ri * e.cell_h
-		let [x, y, w, h] = cell_rect(ri, fi)
 		draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
 	}
 
@@ -322,7 +322,7 @@ function init_nav(id, e) {
 		cx.restore()
 	}
 
-	function draw_cells_range(a, x0, y0, rows, ri1, ri2, fi1, fi2, cell_h, draw_stage) {
+	function draw_cells_range(a, x0, y0, rows, ri1, ri2, fi1, fi2, draw_stage) {
 
 		let hit_cell, foc_cell, foc_ri, foc_fi
 
@@ -349,19 +349,19 @@ function init_nav(id, e) {
 			let row = rows[ri]
 
 			let rx = x0
-			let ry = ri * e.cell_h
+			let ry = ri * cell_h
 			let rw = cells_w
 			let rh = e.cell_h
 
-			let foc_cell_now = foc_cell && foc_ri == ri
-			let hit_cell_now = hit_cell && hit_ri == ri
+			let row_is_foc = foc_cell && foc_ri == ri
+			let row_is_hit = hit_cell && hit_ri == ri
 
 			for (let fi = fi1; fi < fi2; fi++) {
 				if (skip_moving_col && hit_fi == fi)
 					continue
-				if (hit_cell_now && hit_fi == fi)
+				if (row_is_hit && hit_fi == fi)
 					continue
-				if (foc_cell_now && foc_fi == fi)
+				if (row_is_foc && foc_fi == fi)
 					continue
 
 				let field = e.fields[fi]
@@ -378,14 +378,14 @@ function init_nav(id, e) {
 		}
 
 		if (foc_cell && foc_ri >= ri1 && foc_ri <= ri2 && foc_fi >= fi1 && foc_fi <= fi2) {
-			draw_cell(a, foc_ri, foc_fi, x0, draw_stage)
+			draw_cell(a, foc_ri, foc_fi, draw_stage)
 		}
 
 		// hit_cell can overlap foc_cell, so we draw it after it.
 		draw_cell_x = null
 		draw_cell_w = null
 		if (hit_cell && hit_ri >= ri1 && hit_ri <= ri2 && hit_fi >= fi1 && hit_fi <= fi2) {
-			draw_cell(a, hit_ri, hit_fi, x0, draw_stage)
+			draw_cell(a, hit_ri, hit_fi, draw_stage)
 		}
 
 		/*
@@ -432,24 +432,11 @@ function init_nav(id, e) {
 		ri1 = max(0, min(ri1, e.rows.length - 1))
 		ri2 = max(0, min(ri2, e.rows.length))
 
-		// layout fields
-
-		if (0) {
-		let x = 0
-		for (let field of e.fields) {
-			let w = min(max(field.w, field.min_w), field.max_w)
-			let cw = w + 2 * ui.sp2()
-			field._x = x
-			field._w = cw
-			x += cw
-		}
-		}
-
 		// find the visible field range
 
 		let fi1, fi2 // visible field range.
 		for (let field of e.fields) {
-			let fx = field._x
+			let fx = field._x + x
 			let fw = field._w
 			if (fi1 == null && fx + fw >= vx)
 				fi1 = field.index
@@ -461,41 +448,93 @@ function init_nav(id, e) {
 		let bx = e.cell_border_v_width
 		let by = e.cell_border_h_width
 
-		let i = e.fields.at(-1).ct_i
-		cells_w = a[i+0] + a[i+2]
+		// hit-test cells
 
-		hit_state = null
-		hit_ri = null
-		hit_fi = null
-		if (ui.hit(id+'.cells')) {
-			hit_ri = floor((ui.my - y) / cell_h)
-			for (let fi = 0; fi < e.fields.length; fi++) {
-				let [x1, y1, w, h] = cell_rect(a, hit_ri, fi, x)
-				let hit_dx = ui.mx - x1 - x
-				let hit_dy = ui.my - y1 - y
-				if (hit_dx >= 0 && hit_dx <= w) {
-					let field = e.fields[fi]
-					hit_state = 'cell'
-					hit_fi = fi
-					/*
-					hit_indent = false
-					if (row && field_has_indent(field)) {
-						let has_children = row.child_rows.length > 0
-						if (has_children) {
-							let indent_x = indent_offset(row_indent(row))
-							hit_indent = hit_dx <= indent_x
+		let cs = ui.capture(id+'.cells')
+
+		if (!cs) {
+			hit_state = null
+			hit_ri = null
+			hit_fi = null
+			if (ui.hit(id+'.cells')) {
+				hit_ri = floor((ui.my - y) / cell_h)
+				for (let fi = 0; fi < e.fields.length; fi++) {
+					let [x1, y1, w, h] = cell_rect(hit_ri, fi,  x)
+					let hit_dx = ui.mx - x1 - x
+					let hit_dy = ui.my - y1 - y
+					if (hit_dx >= 0 && hit_dx <= w) {
+						let field = e.fields[fi]
+						hit_state = 'cell'
+						hit_fi = fi
+						/*
+						hit_indent = false
+						if (row && field_has_indent(field)) {
+							let has_children = row.child_rows.length > 0
+							if (has_children) {
+								let indent_x = indent_offset(row_indent(row))
+								hit_indent = hit_dx <= indent_x
+							}
 						}
+						*/
+						break
 					}
-					*/
-					break
 				}
 			}
 		}
 
-		x += bx
-		y = by
+		// mouse interaction
+
+		// if (!hit_state) {
+		// 	if (ev.target == e.cells_view) // clicked on empty space.
+		// 		e.exit_edit()
+		// 	return
+		// }
+
+		if (cs && hit_state == 'cell') {
+
+			ui.focus(id)
+
+			let row = e.rows[hit_ri]
+			let field = e.fields[hit_fi]
+
+			if (hit_indent)
+				e.toggle_collapsed(row, shift)
+
+			let already_on_it =
+				hit_ri == e.focused_row_index &&
+				hit_fi == e.focused_field_index
+
+			let click =
+				!e.enter_edit_on_click
+				&& !e.stay_in_edit_mode
+				&& !e.editor
+				&& e.cell_clickable(row, field)
+
+			if (e.focus_cell(hit_ri, hit_fi, 0, 0, {
+				must_not_move_col: true,
+				must_not_move_row: true,
+				enter_edit: !hit_indent
+					&& !ctrl && !shift
+					&& ((e.enter_edit_on_click || click)
+						|| (e.enter_edit_on_click_focused && already_on_it)),
+				focus_editor: true,
+				focus_non_editable_if_not_found: true,
+				editor_state: click ? 'click' : 'select_all',
+				expand_selection: shift,
+				invert_selection: ctrl,
+				input: e,
+			})) {
+				hit_state = 'row_dragging'
+			}
+
+		}
+
+		// draw cells
 
 		ui.stack(id+'.cells')
+
+		x = bx + sx
+		y = by + sy
 
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
@@ -505,7 +544,7 @@ function init_nav(id, e) {
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, 0, e.fields.length, 'non_moving_cols')
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
 		} else {
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, cell_h)
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2)
 		}
 
 		ui.end_stack()
@@ -514,15 +553,38 @@ function init_nav(id, e) {
 
 	e.render = function(fr, align, valign, min_w, min_h) {
 
+		if (ui.focused(id))
+			keydown()
+
+		// if (hit_state == 'header_resize')
+		// 	return md_header_resize(ev, mx, my)
+		// if (hit_state == 'col_resize')
+		// 	return md_col_resize(ev, mx, my)
+		// if (hit_state == 'col')
+		// 	return md_col_drag(ev, mx, my)
+
+		// layout fields and compute cell grid size.
+
+		cells_w = 0
+		for (let field of e.fields) {
+			let w = min(max(field.w, field.min_w), field.max_w)
+			let cw = w + 2 * ui.sp2()
+			field._x = cells_w
+			field._w = cw
+			cells_w += cw
+		}
+
+		cells_h = e.rows.length * cell_h
+
 		ui.v(fr, 0, align, valign, min_w, min_h)
 
-			function draw_header_cell(field, w, cw, noclip) {
+			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
 				let c_id = id+'.header_cell_'+field.index
-				ui.stack('', 0, 'l', 't', cw, header_h)
+				ui.stack('', 0, 'l', 't', field._w, header_h)
 					ui.bb('', noclip ? 'bg1' : null, 'r', 'intense')
-					ui.p(ui.sp2(), 0)
-					ui.text('', field.label, 0, field.align, 'c', noclip ? null : w)
+					ui.p(ui.sp2())
+					ui.text('', field.label, 0, field.align, 'c', noclip ? null : field._w - 2 * ui.sp2())
 				ui.end_stack()
 			}
 
@@ -541,31 +603,18 @@ function init_nav(id, e) {
 				}
 
 				ui.bb('', 'bg1')
-				let x = 0
 				for (let field of e.fields) {
-					let w = min(max(field.w, field.min_w), field.max_w)
-					let cw = w + 2 * ui.sp2()
-					field._x = x
-					field._w = cw
-					x += cw
 					if (hit_h_fi === field.index)
 						continue
-					draw_header_cell(field, w, cw)
+					draw_header_cell(field)
 				}
 
 				if (hit_h_fi != null) {
 					let field = e.fields[hit_h_fi]
-					let w = min(max(field.w, field.min_w), field.max_w)
-					let cw = w + 2 * ui.sp2()
-					draw_header_cell(field, w, cw, true)
+					draw_header_cell(field, true)
 				}
 
 			ui.end_scrollbox()
-
-			let cells_w = 0
-			for (let field of e.fields)
-				cells_w += min(max(field.w, field.min_w), field.max_w)
-			let cells_h = e.rows.length * cell_h
 
 			let overflow = auto_expand ? 'contain' : 'auto'
 			sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
@@ -574,6 +623,273 @@ function init_nav(id, e) {
 
 		ui.end_v()
 
+	}
+
+	// keyboard interaction ---------------------------------------------------
+
+	function keydown() {
+
+		shift = ui.key('shift')
+		ctrl  = ui.key('control')
+
+		let left_arrow  =  horiz ? 'arrowleft'  : 'arrowup'
+		let right_arrow =  horiz ? 'arrowright' : 'arrowdown'
+		let up_arrow    = !horiz ? 'arrowleft'  : 'arrowup'
+		let down_arrow  = !horiz ? 'arrowright' : 'arrowdown'
+
+		// same-row field navigation.
+		if (ui.keydown(left_arrow) || ui.keydown(right_arrow)) {
+
+			let cols = ui.keydown(left_arrow) ? -1 : 1
+
+			let move = !e.editor
+				|| (e.auto_jump_cells && !shift && (!horiz || ctrl)
+					&& (!horiz
+						|| !e.editor.editor_state
+						|| ctrl
+							&& (e.editor.editor_state(cols < 0 ? 'left' : 'right')
+							|| e.editor.editor_state('all_selected'))
+						))
+
+			if (move)
+				if (e.focus_next_cell(cols, {
+					editor_state: horiz
+						? (((e.editor && e.editor.editor_state) ? e.editor.editor_state('all_selected') : ctrl)
+							? 'select_all'
+							: cols > 0 ? 'left' : 'right')
+						: 'select_all',
+					expand_selection: shift,
+					input: e,
+				}))
+					return false
+
+		}
+
+		// Tab/Shift+Tab cell navigation.
+		if (ui.keydown('tab') && e.tab_navigation) {
+
+			let cols = shift ? -1 : 1
+
+			if (e.focus_next_cell(cols, {
+				auto_advance_row: true,
+				editor_state: cols > 0 ? 'left' : 'right',
+				input: e,
+			}))
+				return false
+
+		}
+
+		// insert with the arrow down key on the last focusable row.
+		if (ui.keydown(down_arrow) && !shift) {
+			if (!e.save_on_add_row) { // not really compatible behavior...
+				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
+					if (e.insert_rows(1, {
+						input: e,
+						focus_it: true,
+					})) {
+						return false
+					}
+				}
+			}
+		}
+
+		// remove last row with the arrow up key if not edited.
+		if (ui.keydown(up_arrow)) {
+			if (e.is_last_row_focused() && e.focused_row) {
+				let row = e.focused_row
+				if (row.is_new && !e.is_row_user_modified(row)) {
+					let editing = !!e.editor
+					if (e.remove_row(row, {input: e, refocus: true})) {
+						if (editing)
+							e.enter_edit('select_all')
+						return false
+					}
+				}
+			}
+		}
+
+		// row navigation.
+		let rows
+		if      (ui.keydown(up_arrow  )) rows = -1
+		else if (ui.keydown(down_arrow)) rows =  1
+		else if (ui.keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
+		else if (ui.keydown('pagedown')) rows =  (ctrl ? 1/0 : page_row_count)
+		else if (ui.keydown('home'    )) rows = -1/0
+		else if (ui.keydown('end'     )) rows =  1/0
+		if (rows) {
+
+			let move = !e.editor
+				|| (e.auto_jump_cells && !shift
+					&& (horiz
+						|| !e.editor.editor_state
+						|| (ctrl
+							&& (e.editor.editor_state(rows < 0 ? 'left' : 'right')
+							|| e.editor.editor_state('all_selected')))
+						))
+
+			if (move)
+				if (e.focus_cell(true, true, rows, 0, {
+					editor_state: e.editor && e.editor.editor_state
+						&& (horiz ? e.editor.editor_state() : 'select_all'),
+					expand_selection: shift,
+					input: e,
+				}))
+					return false
+
+		}
+
+		// F2: enter edit mode
+		if (!e.editor && ui.keydown('f2')) {
+			e.enter_edit('select_all')
+			return false
+		}
+
+		// Enter: toggle edit mode, and navigate on exit
+		if (ui.keydown('enter')) {
+			if (e.quicksearch_text) {
+				e.quicksearch(e.quicksearch_text, e.focused_row, shift ? -1 : 1)
+				return false
+			} else if (e.hasclass('picker')) {
+				e.pick_val()
+				return false
+			} else if (!e.editor) {
+				e.enter_edit('click')
+				return false
+			} else {
+				if (e.advance_on_enter == 'next_row')
+					e.focus_cell(true, true, 1, 0, {
+						input: e,
+						enter_edit: e.stay_in_edit_mode,
+						editor_state: 'select_all',
+						must_move: true,
+					})
+				else if (e.advance_on_enter == 'next_cell')
+					e.focus_next_cell(shift ? -1 : 1, {
+						input: e,
+						enter_edit: e.stay_in_edit_mode,
+						editor_state: 'select_all',
+						must_move: true,
+					})
+				else if (e.exit_edit_on_enter)
+					e.exit_edit()
+				return false
+			}
+		}
+
+		// Esc: exit edit mode.
+		if (ui.keydown('escape')) {
+			if (e.quicksearch_text) {
+				e.quicksearch('')
+				return false
+			}
+			if (e.editor) {
+				if (e.exit_edit_on_escape) {
+					e.exit_edit()
+					e.focus()
+					return false
+				}
+			} else if (e.focused_row && e.focused_field) {
+				let row = e.focused_row
+				if (row.is_new && !e.is_row_user_modified(row, true))
+					e.remove_row(row, {input: e, refocus: true})
+				else
+					e.revert_cell(row, e.focused_field)
+				return false
+			}
+		}
+
+		// insert key: insert row
+		if (ui.keydown('insert')) {
+			let insert_arg = 1 // add one row
+
+			if (ctrl && e.focused_row) { // add a row filled with focused row's values
+				let row = e.serialize_row_vals(e.focused_row)
+				e.pk_fields.map((f) => delete row[f.name])
+				insert_arg = [row]
+			}
+
+			if (e.insert_rows(insert_arg, {
+				input: e,
+				at_focused_row: true,
+				focus_it: true,
+			})) {
+				return false
+			}
+		}
+
+		if (ui.keydown('delete')) {
+
+			if (e.editor && e.editor.input_val == null)
+				e.exit_edit({cancel: true})
+
+			// delete: toggle-delete selected rows
+			if (!ctrl && !e.editor && e.remove_selected_rows({
+						input: e, refocus: true, toggle: true, confirm: true
+					}))
+				return false
+
+			// ctrl_delete: set selected cells to null.
+			if (ctrl) {
+				e.set_null_selected_cells({input: e})
+				return false
+			}
+
+		}
+
+		if (!e.editor && ui.keydown(' ') && !e.quicksearch_text) {
+			if (e.focused_row && (!e.can_focus_cells || e.focused_field == e.tree_field))
+				e.toggle_collapsed(e.focused_row, shift)
+			else if (e.focused_row && e.focused_field && e.cell_clickable(e.focused_row, e.focused_field))
+				e.enter_edit('click')
+			return false
+		}
+
+		if (!e.editor && ctrl && ui.keydown('a')) {
+			e.select_all_cells()
+			return false
+		}
+
+		if (!e.editor && ui.keydown('backspace')) {
+			if (e.quicksearch_text)
+				e.quicksearch(e.quicksearch_text.slice(0, -1), e.focused_row)
+			return false
+		}
+
+		if (ctrl && ui.keydown('s')) {
+			e.save()
+			return false
+		}
+
+		if (ctrl && !e.editor)
+			if (ui.keydown('c')) {
+				let row = e.focused_row
+				let fld = e.focused_field
+				if (row && fld)
+					copy_to_clipboard(e.cell_text_val(row, fld))
+				return false
+			} else if (ui.keydown('x')) {
+
+				return false
+			} else if (ui.keydown('v')) {
+
+				return false
+			}
+
+	}
+
+	// printable characters: enter quick edit mode.
+	function keypress(c) {
+		if (e.quick_edit) {
+			if (!e.editor && e.focused_row && e.focused_field) {
+				e.enter_edit('select_all')
+				let v = e.focused_field.from_text(c)
+				e.set_cell_val(e.focused_row, e.focused_field, v)
+				return false
+			}
+		} else if (!e.editor) {
+			e.quicksearch(e.quicksearch_text + c, e.focused_row)
+			return false
+		}
 	}
 
 }
