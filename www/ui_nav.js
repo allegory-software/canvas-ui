@@ -1,6 +1,6 @@
 /* ---------------------------------------------------------------------------
 
-	Nav widget mixin.
+	UI nav objects.
 	Written by Cosmin Apreutesei. Public Domain.
 
 A nav is an in-memory table with typed columns and rows. It can be populated
@@ -51,7 +51,6 @@ Sources of field attributes, in precedence order:
 	SCOPE         METHOD
 	------------- -------------------------------------------------------------
 	nav           e.set_prop('col.COL.ATTR', VAL)
-	nav           <col-attrs for=COL ATTR=VAL>
 	nav           e.col_attrs = {COL: {ATTR: VAL}}
 	rowset        window.rowset_col_attrs['ROWSET.COL'] = {ATTR: VAL}
 	rowset        e.rowset.fields = [{ATTR: VAL},...]
@@ -458,6 +457,8 @@ const {
 	display_name,
 	parse_date,
 	format_base,
+	remove,
+	insert,
 } = glue
 
 // utilities ------------------------------------------------------------------
@@ -607,6 +608,20 @@ ui.nav = function(e) {
 
 	e.property = function(name, get, set) {
 		return property(this, name, get, set)
+	}
+
+	e.prop = function(name, opt) {
+		let v
+		function get() {
+			return v
+		}
+		let setter = e['set_'+name]
+		function set(v1) {
+			let v0 = v
+			v = v1
+			setter.call(this, v1, v0)
+		}
+		e.property(name, get, set)
 	}
 
 	e.can_add_rows               = true
@@ -810,14 +825,13 @@ ui.nav = function(e) {
 
 		let name = field.given_name || field.name
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
-		let ht = e.html_col_attrs && e.html_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
 		let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
-		let type = rt && rt.type || ht && ht.type || ct && ct.type || f.type
+		let type = rt && rt.type || ct && ct.type || f.type
 		let tt = field_types[type]
 		let att = all_field_types
 
-		assign_opt(field, att, tt, f, rt, ct, ht, pt)
+		assign_opt(field, att, tt, f, rt, ct, pt)
 
 		for (let k in ifa)
 			ifa[k](field, field[k])
@@ -831,15 +845,13 @@ ui.nav = function(e) {
 		if (v === undefined) {
 
 			let name = field.given_name || field.name
-			let ht = e.html_col_attrs && e.html_col_attrs[name]
 			let ct = e.col_attrs && e.col_attrs[name]
 			let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
 			let type = f.type || (ct && ct.type) || (rt && rt.type)
 			let tt = type && field_types[type]
 			let att = all_field_types
 
-			v = ht && ht[k]
-			v = v ?? (ct && ct[k])
+			v = ct && ct[k]
 			v = v ?? rt
 			v = v ?? f[k]
 			v = v ?? (tt && tt[k])
@@ -1154,14 +1166,12 @@ ui.nav = function(e) {
 
 	// visible cols list ------------------------------------------------------
 
-	/*
 	e.set_cols = function() {
 		e.exit_edit()
 		init_fields()
 		e.update({fields: true})
 	}
-	e.prop('cols', {slot: 'user'})
-	*/
+	e.prop('cols')
 
 	function visible_col(col) {
 		let field = check_field('col', col)
@@ -1199,7 +1209,7 @@ ui.nav = function(e) {
 	e.show_field = function(field, on, at_fi) {
 		let cols = cols_array()
 		if (on)
-			cols.insert(min(at_fi || 1/0, e.fields.length), field.name)
+			insert(cols, min(at_fi || 1/0, e.fields.length), field.name)
 		else
 			cols.remove_value(field.name)
 		e.cols = cols_from_array(cols)
@@ -1210,8 +1220,8 @@ ui.nav = function(e) {
 			return
 		let insert_fi = over_fi - (over_fi > fi ? 1 : 0)
 		let cols = cols_array()
-		let col = cols.remove(fi)
-		cols.insert(insert_fi, col)
+		let col = remove(cols, fi)
+		insert(cols, insert_fi, col)
 		e.cols = cols_from_array(cols)
 		e.update({fields: true}) // in case cols haven't changed.
 	}
@@ -2195,7 +2205,7 @@ ui.nav = function(e) {
 			else
 				add_group(t1, path, label_path, arg1, arg2)
 		}
-		path.remove(path_pos)
+		remove(path, path_pos)
 	}
 
 	// parse `COL[/OFFSET][/UNIT][/FREQ]`
@@ -3652,7 +3662,7 @@ ui.nav = function(e) {
 				update_indices('row_added', row)
 
 				if (e.is_row_visible(row)) {
-					e.rows.insert(ri, row)
+					insert(e.rows, ri, row)
 					if (e.focused_row_index >= ri)
 						e.focused_row = e.rows[e.focused_row_index + 1]
 					ri++
@@ -5108,7 +5118,7 @@ ui.make_nav_data_widget = function() {
 
 /* ---------------------------------------------------------------------------
 
-Widget that has sa nav and a col from the nav as its data model, but doesn't
+Widget that has a nav and a col from the nav as its data model, but doesn't
 depend on the focused row (see next mixin for that).
 
 config props:

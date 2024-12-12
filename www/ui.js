@@ -5,7 +5,7 @@
 
 LOADING
 
-	<script src=glue.js [global]>
+	<script src=glue.js [global] [extend]>
 	<script src=ui.js [global]>
 
 	global flag:   dump the `ui` namespace into `window`.
@@ -92,7 +92,7 @@ MOUSE STATE
 
 	hit             (id[, k) -> hit_state_map | v | null    get hit state map if mouse hovers widget and not captured
 	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget incl. if mouse captured
-	hover           (id[, x, y, w, h]) -> hit_state_map       declare that mouse hovers widget
+	hover           (id) -> hit_state_map       declare that mouse hovers widget
 
 	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
 
@@ -1717,7 +1717,7 @@ ui._hit_state_maps = hit_state_maps
 
 function hit(id, k) {
 	if (!id) return
-	if (ui.pointer_id != null) // unavailable while captured
+	if (ui.captured_id != null) // unavailable while captured
 		return
 	let m = hit_state_maps.get(id)
 	return k ? m?.get(k) : m
@@ -1731,17 +1731,13 @@ function hovers(id, k) {
 }
 ui.hovers = hovers
 
-function hover(id, x, y, w, h) {
+function hover(id) {
 	if (!id) return
 	let m = hit_state_maps.get(id)
 	if (!m) {
 		m = hit_state_map_freelist.alloc()
 		hit_state_maps.set(id, m)
 	}
-	m.set('x', x)
-	m.set('y', y)
-	m.set('w', w)
-	m.set('h', h)
 	return m
 }
 ui.hover = hover
@@ -2314,7 +2310,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		let h = a[i+3]
 		let id = a[i+ID]
 		if (hit_rect(x, y, w, h)) {
-			hover(id, x, y, w, h)
+			hover(id)
 			return true
 		}
 	}
@@ -2653,11 +2649,11 @@ translate[CMD_STACK] = translate_ct
 
 hittest[CMD_STACK] = function(a, i, recs) {
 	if (hit_children(a, i, recs)) {
-		hover(a[i+STACK_ID], a[i+0], a[i+1], a[i+2], a[i+3])
+		hover(a[i+STACK_ID])
 		return true
 	}
 	if (hit_box(a, i)) {
-		hover(a[i+STACK_ID], a[i+0], a[i+1], a[i+2], a[i+3])
+		hover(a[i+STACK_ID])
 		hit_template(a, i)
 	}
 }
@@ -2973,7 +2969,7 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 	if (!hit_box(a, i))
 		return
 
-	hover(id, a[i+0], a[i+1], a[i+2], a[i+3])
+	hover(id)
 
 	hit_template(a, i)
 
@@ -3697,7 +3693,7 @@ hittest[CMD_BB] = function(a, i) {
 	let ct_i     = a[i+1]
 	let bg_color = a[i+2]
 	if (bg_color && hit_box(a, ct_i)) {
-		hover(a[i+BB_ID], a[i+0], a[i+1], a[i+2], a[i+3])
+		hover(a[i+BB_ID])
 		hit_template(a, i)
 		return true
 	}
@@ -4365,7 +4361,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 hittest[CMD_TEXT] = function(a, i) {
 	if (hit_box(a, i)) {
-		hover(a[i+TEXT_ID], a[i+0], a[i+1], a[i+2], a[i+3])
+		hover(a[i+TEXT_ID])
 		hit_template(a, i)
 		return true
 	}
@@ -6630,6 +6626,7 @@ ui.box_widget('frame_graph', {
 // implements:
 //   move_element_start(move_i, move_n, i1, i2[, x1, x2])
 //   move_element_update(elem_x, [i1, i2, x1, x2])
+//   move_element_stop() -> over_i
 // uses:
 //   movable_element_size(elem_i) -> w
 //   set_movable_element_pos(i, x, moving)
@@ -6694,7 +6691,7 @@ ui.live_move_mixin = function(e) {
 			}
 		}
 		new_over_i = i2
-		x1 = i2x
+		let x1 = i2x
 		new_over_p = lerp(elem_x, x0, x1, 0, 1)
 		over_i = new_over_i
 		over_p = new_over_p

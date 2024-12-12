@@ -212,9 +212,9 @@ function init_nav(id, e) {
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.p(ui.sp2())
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
+			ui.p(ui.sp2(), 0)
 			e.draw_val(row, field, input_val, true, full_width)
 		ui.end_stack()
 
@@ -351,7 +351,7 @@ function init_nav(id, e) {
 			let rx = x0
 			let ry = ri * cell_h
 			let rw = cells_w
-			let rh = e.cell_h
+			let rh = cell_h
 
 			let row_is_foc = foc_cell && foc_ri == ri
 			let row_is_hit = hit_cell && hit_ri == ri
@@ -368,7 +368,7 @@ function init_nav(id, e) {
 				let x = field._x
 				let y = ry
 				let w = field._w
-				let h = a[field.ct_i+3]
+				let h = rh
 
 				draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
 			}
@@ -451,16 +451,17 @@ function init_nav(id, e) {
 		// draw cells
 
 		ui.stack(id+'.cells')
+		ui.measure(id+'.cells')
 
 		x = bx + sx
 		y = by + sy
 
 		if (hit_state == 'row_moving') { // draw fixed rows first and moving rows above them.
 			let s = row_move_state
-			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, 0, e.fields.length, 'non_moving_rows')
-			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, 0, e.fields.length, 'moving_rows')
+			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, fi1, fi2, 'non_moving_rows')
+			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, fi1, fi2, 'moving_rows')
 		} else if (hit_state == 'col_moving') { // draw fixed cols first and moving cols above them.
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, 0, e.fields.length, 'non_moving_cols')
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, 'non_moving_cols')
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
 		} else {
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2)
@@ -476,9 +477,9 @@ function init_nav(id, e) {
 
 		cells_w = 0
 		for (let field of e.fields) {
-			let w = min(max(field.w, field.min_w), field.max_w)
+			let w = clamp(field.w, field.min_w, field.max_w)
 			let cw = w + 2 * ui.sp2()
-			if (hit_state != 'col_move')
+			if (hit_state != 'col_moving')
 				field._x = cells_w
 			field._w = cw
 			cells_w += cw
@@ -495,27 +496,33 @@ function init_nav(id, e) {
 
 			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
-				let c_id = id+'.header_cell_'+field.index
 				ui.stack('', 0, 'l', 't', field._w, header_h)
-					ui.bb('', noclip ? 'bg1' : null, 'r', 'intense')
-					ui.p(ui.sp2())
+					ui.bb('', 'bg1', null, 'r', 'light')
+					ui.p(ui.sp2(), 0)
 					ui.text('', field.label, 0, field.align, 'c', noclip ? null : field._w - 2 * ui.sp2())
 				ui.end_stack()
 			}
 
-			h_sb_i = ui.scrollbox(id+'.header_scrollbox', 0, auto_expand ? 'contain' : 'hide', 'contain')
+			h_sb_i = ui.scrollbox('', 0, auto_expand ? 'contain' : 'hide', 'contain')
 
-				ui.bb('', 'bg1')
-				for (let field of e.fields) {
-					if (hit_fi === field.index)
-						continue
-					draw_header_cell(field)
-				}
+				ui.stack(id+'.header_cells')
+				ui.measure(id+'.header_cells')
 
-				if (hit_fi != null) {
-					let field = e.fields[hit_fi]
-					draw_header_cell(field, true)
-				}
+					let col_move = hit_state == 'col_moving' || hit_state == 'col_move'
+
+					ui.bb('', 'bg1')
+					for (let field of e.fields) {
+						if (col_move && hit_fi === field.index)
+							continue
+						draw_header_cell(field)
+					}
+
+					if (col_move && hit_fi != null) {
+						let field = e.fields[hit_fi]
+						draw_header_cell(field, hit_state == 'col_move')
+					}
+
+				ui.end_stack()
 
 			ui.end_scrollbox()
 
@@ -530,103 +537,124 @@ function init_nav(id, e) {
 
 	// mouse interaction ------------------------------------------------------
 
+
+	let col_resize_field_w0
+	let col_move_dx
 	let col_mover
+
 	function process_mouse() {
 
-		let [state, dx, dy] = ui.drag(id+'.header_scrollbox')
-		if (state == 'hover') {
-			let hs = ui.hit(id+'.header_scrollbox')
-			let x0 = hs.get('x')
+		let [state, dx, dy] = ui.drag(id+'.header_cells')
+
+		if (state == 'hover' || state == 'drag') {
+			hit_state = null
+			hit_fi = null
+			let hs = ui.hit(id+'.header_cells')
+			let x0 = ui.state(id+'.header_cells').get('x')
 			for (let field of e.fields) {
 				let x = field._x + x0
 				let w = field._w
 				if (ui.mx >= x + w - 5 && ui.mx <= x + w + 5) {
 					hit_state = 'col_resize'
 					hit_fi = field.index
-					hs.set('action', 'resize')
-					hs.set('fi', hit_fi)
 					ui.set_cursor('ew-resize')
 					break
 				}
 				if (ui.mx >= x && ui.mx <= x + w) {
 					hit_state = 'col_move'
 					hit_fi = field.index
-					hs.set('action', 'move')
-					hs.set('fi', hit_fi)
 					break
 				}
 			}
-		} else if (hit_state == 'col_resize') {
-			let field = e.fields[hit_fi]
-			if (state == 'drag') {
-				field.w0 = field.w
-				ui.set_cursor('ew-resize')
-			} else if (state == 'dragging') {
-				field.w = field.w0 + dx
-				ui.set_cursor('ew-resize')
-			}
-		} else if (hit_state == 'col_move') {
-			let field = e.fields[hit_fi]
-			let cs = ui.captured(id+'.header_scrollbox')
-			if (state == 'drag') {
-
-				col_mover = ui.live_move_mixin()
-
-				col_mover.movable_element_size = function(fi) {
-					let [x, y, w, h] = cell_rect(0, fi)
-					return horiz ? e.fields[fi]._w : h
-				}
-
-				col_mover.set_movable_element_pos = function(fi, x, moving) {
-					e.fields[fi]._x = x
-				}
-
-				col_mover.move_element_start(hit_fi, 1, 0, e.fields.length)
-
-			} else if (state == 'dragging') {
-
-				let mx = ui.mx - cs.get('x')
-
-				col_mover.move_element_update(horiz ? mx : my)
-				// e.scroll_to_cell(hit_ri, hit_fi)
-
-			} else if (state == 'drop') {
-				col_mover = null
-			}
 		}
 
-		let [state1, dx1, dy1] = ui.drag(id+'.cells')
+		if (state == 'drag' && hit_state == 'col_resize') {
+			let field = e.fields[hit_fi]
+			col_resize_field_w0 = field.w
+			ui.set_cursor('ew-resize')
+			hit_state = 'col_resizing'
+		}
 
-		let hover = ui.captured_id == null
-		let cs = ui.capture(id)
-		if (hover) {
-			let hs = ui.hit(id+'.cells')
-			if (hs) {
-				hit_state = null
-				hit_ri = null
-				hit_fi = null
-				let x = hs.get('x')
-				let y = hs.get('y')
-				hit_ri = floor((ui.my - y) / cell_h)
-				let row = e.rows[hit_ri]
-				for (let fi = 0; fi < e.fields.length; fi++) {
-					let [x1, y1, w, h] = cell_rect(hit_ri, fi,  x)
-					let hit_dx = ui.mx - x1 - x
-					let hit_dy = ui.my - y1 - y
-					if (hit_dx >= 0 && hit_dx <= w) {
-						let field = e.fields[fi]
-						hit_state = 'cell'
-						hit_fi = fi
-						hit_indent = false
-						if (row && field_has_indent(field)) {
-							let has_children = row.child_rows.length > 0
-							if (has_children) {
-								let indent_x = indent_offset(row_indent(row))
-								hit_indent = hit_dx <= indent_x
-							}
+		if (hit_state == 'col_resizing') {
+			let field = e.fields[hit_fi]
+			field.w = clamp(col_resize_field_w0 + dx, field.min_w, field.max_w)
+			ui.set_cursor('ew-resize')
+		}
+
+		if (state == 'drag' && hit_state == 'col_move') {
+
+			let field = e.fields[hit_fi]
+
+			let x0 = ui.state(id+'.header_cells').get('x')
+			col_move_dx = ui.mx - x0 - field._x
+
+			let cs = ui.captured(id+'.header_cells')
+
+			col_mover = ui.live_move_mixin()
+
+			col_mover.movable_element_size = function(fi) {
+				let [x, y, w, h] = cell_rect(0, fi)
+				return horiz ? e.fields[fi]._w : h
+			}
+
+			col_mover.set_movable_element_pos = function(fi, x, moving) {
+				e.fields[fi]._x = x
+			}
+
+			col_mover.move_element_start(hit_fi, 1, 0, e.fields.length)
+
+			hit_state = 'col_moving'
+
+		}
+
+		if (hit_state == 'col_moving') {
+
+			let x0 = ui.state(id+'.header_cells').get('x')
+			let mx = ui.mx - x0 - col_move_dx
+
+			col_mover.move_element_update(horiz ? mx : my)
+			// e.scroll_to_cell(hit_ri, hit_fi)
+
+			if (state == 'drop') {
+				let over_fi = col_mover.move_element_stop() // sets x of moved element.
+				e.move_field(hit_fi, over_fi)
+			}
+
+		}
+
+		if (state == 'drop') {
+			col_mover = null
+			hit_state = null
+		}
+
+		;[state, dx, dy] = ui.drag(id+'.cells')
+
+		if (state == 'hover') {
+			hit_state = null
+			hit_ri = null
+			hit_fi = null
+			let s = ui.state(id+'.cells')
+			let x0 = s.get('x')
+			let y0 = s.get('y')
+			hit_ri = floor((ui.my - y0) / cell_h)
+			let row = e.rows[hit_ri]
+			for (let fi = 0; fi < e.fields.length; fi++) {
+				let [x1, y1, w, h] = cell_rect(hit_ri, fi)
+				let hit_dx = ui.mx - x1 - x0
+				let hit_dy = ui.my - y1 - y0
+				if (hit_dx >= 0 && hit_dx <= w) {
+					let field = e.fields[fi]
+					hit_state = 'cell'
+					hit_fi = fi
+					hit_indent = false
+					if (row && field_has_indent(field)) {
+						let has_children = row.child_rows.length > 0
+						if (has_children) {
+							let indent_x = indent_offset(row_indent(row))
+							hit_indent = hit_dx <= indent_x
 						}
-						break
 					}
+					break
 				}
 			}
 		}
@@ -639,7 +667,7 @@ function init_nav(id, e) {
 		// 	return
 		// }
 
-		if (cs && hit_state == 'cell') {
+		if (state == 'drag' && hit_state == 'cell') {
 
 			ui.focus(id)
 
