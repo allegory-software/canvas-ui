@@ -2407,7 +2407,7 @@ function lang() {
 // stub for getting current country.
 let nav_country = navigator.language.substring(3, 5)
 function country() {
-	return document.documentElement.attr('country') || nav_country
+	return document.documentElement.getAttribute('country') || nav_country
 }
 
 // stub for rewriting links to current language.
@@ -2562,5 +2562,6 @@ glue.Sf = function(...args) {
 }
 
 glue.locale = memoize(function() { return glue.lang() + '-' + country() })
+let locale = glue.locale
 
 }()) // module function

@@ -451,14 +451,13 @@ const {
 	obj, set, map, words,
 	do_before, do_after, property, override,
 	assign, assign_opt, attr, empty,
+	remove, insert,
 	noop, return_true, return_arg,
 	memoize,
 	S,
 	display_name,
-	parse_date,
+	parse_date, format_date,
 	format_base,
-	remove,
-	insert,
 } = glue
 
 // utilities ------------------------------------------------------------------
@@ -5612,7 +5611,7 @@ date.to_text = function(v) {
 		return str(v)
 	if (this.timeago)
 		return v.timeago()
-	return v.date(null, this.precision)
+	return format_date(v, null, this.precision)
 }
 
 let inh_draw = all_field_types.draw
@@ -5622,7 +5621,7 @@ date.draw = function(v, cx) {
 
 date.to_json = function(t) {
 	if (this.format == 'sql')
-		return v.date('SQL', this.precision)
+		return format_date(v, 'SQL', this.precision)
 	return t
 }
 

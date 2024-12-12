@@ -57,6 +57,16 @@ function init_nav(id, e) {
 		return horiz && field == e.tree_field
 	}
 
+	let font_size = 14
+
+	function indent_offset(indent) {
+		return floor(font_size * 1.5 + (font_size * 1.2) * indent)
+	}
+
+	function row_indent(row) {
+		return row.parent_rows ? row.parent_rows.length : 0
+	}
+
 	/*
 	cells_w = bx + col_x
 
@@ -138,7 +148,6 @@ function init_nav(id, e) {
 		let hovering = hit_state == 'cell' && hit_ri == ri && hit_fi == fi
 		let full_width = !draw_stage && ((row_focused && field == e.focused_field) || hovering)
 
-		/*
 		let indent_x = 0
 		let collapsed
 		if (field_has_indent(field)) {
@@ -157,7 +166,6 @@ function init_nav(id, e) {
 					indent_x += s.hit_indent_x - s.indent_x
 			}
 		}
-		*/
 
 		// background & text color
 		// drawing a background is slow, so we avoid it when we can.
@@ -212,7 +220,7 @@ function init_nav(id, e) {
 		ui.stack('', 0, 'l', 't', w, h)
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
-			ui.p(ui.sp2(), 0)
+			ui.p(ui.sp2() + indent_x, 0, ui.sp2(), 0)
 			e.draw_val(row, field, input_val, true, full_width)
 		ui.end_stack()
 
@@ -283,7 +291,7 @@ function init_nav(id, e) {
 
 	function draw_cell(a, ri, fi, draw_stage) {
 		let [x, y, w, h] = cell_rect(ri, fi)
-		let row   = rows[ri]
+		let row   = e.rows[ri]
 		let field = e.fields[fi]
 		draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage)
 	}
@@ -991,16 +999,13 @@ ui.spy_input = function() {
 	return ui.sp1()
 }
 
-ui.grid = function(id, rowset, fr, align, valign, min_w, min_h) {
+ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 
 	ui.keepalive(id)
 	let s = ui.state(id)
 	let nav = s.get('nav')
 	if (!nav) {
-		nav = ui.nav({
-			rowset_name : isstr(rowset) ? rowset : null,
-			rowset      : isobj(rowset) ? rowset : null,
-		})
+		nav = ui.nav(opt)
 		ui.on_free(id, () => nav.free())
 		init_nav(id, nav)
 		s.set('nav', nav)
