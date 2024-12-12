@@ -222,6 +222,7 @@ function init_nav(id, e) {
 			ui.color(fg)
 			ui.p(ui.sp2() + indent_x, 0, ui.sp2(), 0)
 			e.draw_val(row, field, input_val, true, full_width)
+			ui.p(0) // TODO: bug
 		ui.end_stack()
 
 		/*

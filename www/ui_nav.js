@@ -5691,18 +5691,11 @@ bool.draw = function(v, cx) {
 	if (!isbool(v))
 		return bool.draw_null.call(this, cx)
 	if (cx) {
-		if (!v) {
-			if (cx.measure)
-				cx.measured_width = 0
-			return
-		}
-		let text_font = cx.text_font
-		cx.text_font = cx.icon_font
-		all_field_types.draw.call(this, '\uf00c', cx)
-		cx.text_font = text_font
-		return true
+		ui.font('fas')
+		ui.text('', v ? '\uf00c' : '', 0, this.align, 'c')
+	} else {
+		return v ? S('true', 'true') : S('false', 'false')
 	}
-	return v ? S('true', 'true') : S('false', 'false')
 }
 
 bool.editor = function(opt) {
