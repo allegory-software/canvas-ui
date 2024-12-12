@@ -2778,6 +2778,18 @@ position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
 }
 is_flex_child[CMD_SCROLLBOX] = true
 
+// box scroll-to-view box. from box2d.lua.
+function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
+	let min_sx = -x
+	let min_sy = -y
+	let max_sx = -(x + w - pw)
+	let max_sy = -(y + h - ph)
+	return [
+		-clamp(-sx, min_sx, max_sx),
+		-clamp(-sy, min_sy, max_sy)
+	]
+}
+
 translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 	let x  = a[i+0] + dx
@@ -2806,6 +2818,19 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
 			if (!visible)
 				continue
+
+			// scroll to view an inner box
+			let box = ui.state(id, 'scroll_to_view')
+			if (box) {
+				let [bx, by, bw, bh] = box
+				;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
+				a[i+SB_SX+0] = sx
+				a[i+SB_SX+1] = sy
+				let s = ui.state(id)
+				s.set('scroll_x', sx)
+				s.set('scroll_y', sy)
+				s.delete('scroll_to_view')
+			}
 
 			// wheel scrolling
 			if (axis && ui.wheel_dy && hit(id)) {
@@ -2869,8 +2894,19 @@ ui.force_scroll = function(a, i, sx, sy) {
 	a[i+SB_SX+0] = sx
 	a[i+SB_SX+1] = sy
 
-	translate_children(a, i, sx0-sx, sy0-sy)
+	// make it persistent
+	let id = a[i+SB_ID]
+	if (id) {
+		let s = ui.state(id)
+		s.set('scroll_x', sx)
+		s.set('scroll_y', sy)
+	}
 
+	translate_children(a, i, sx0-sx, sy0-sy)
+}
+
+ui.scroll_to_view = function(id, x, y, w, h) {
+	ui.state(id).set('scroll_to_view', [x, y, w, h])
 }
 
 draw[CMD_SCROLLBOX] = function(a, i) {

@@ -31,6 +31,7 @@ function init_nav(id, e) {
 
 	let cells_w
 	let cells_h
+	let page_row_count
 
 	let shift, ctrl
 	let hit_state // this affects both rendering and behavior in many ways.
@@ -63,7 +64,6 @@ function init_nav(id, e) {
 	if (col_resizing && !e.auto_expand)
 		cells_w = max(cells_w, last_cells_w)
 
-	page_row_count = floor(cells_view_h / cell_h)
 	vrn = floor(cells_view_h / cell_h) + 2 // 2 is right, think it!
 
 	function measure_cell_width(row, field) {
@@ -112,8 +112,6 @@ function init_nav(id, e) {
 	}
 	*/
 
-	let draw_cell_x
-	let draw_cell_w
 	function draw_cell_at(a, row, field, ri, fi, x, y, w, h, draw_stage) {
 
 		let input_val = e.cell_input_val(row, field)
@@ -263,9 +261,6 @@ function init_nav(id, e) {
 		//	update_editor(
 		//		 horiz ? null : xy,
 		//		!horiz ? null : xy, hit_indent)
-
-		draw_cell_x = x
-		draw_cell_w = w
 	}
 
 	let cell_rect
@@ -382,8 +377,6 @@ function init_nav(id, e) {
 		}
 
 		// hit_cell can overlap foc_cell, so we draw it after it.
-		draw_cell_x = null
-		draw_cell_w = null
 		if (hit_cell && hit_ri >= ri1 && hit_ri <= ri2 && hit_fi >= fi1 && hit_fi <= fi2) {
 			draw_cell(a, hit_ri, hit_fi, draw_stage)
 		}
@@ -411,6 +404,8 @@ function init_nav(id, e) {
 	let sb_i   // cmd record index of cellview scrollbox
 
 	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
+
+		page_row_count = floor(vh / cell_h)
 
 		let sx = vx - x
 		let sy = vy - y
@@ -537,6 +532,15 @@ function init_nav(id, e) {
 
 	// mouse interaction ------------------------------------------------------
 
+	e.scroll_to_cell = function(ri, fi) {
+		let [x, y, w, h] = cell_rect(ri, fi)
+		ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
+	}
+
+	e.update = function(opt) {
+		if (opt.scroll_to_focused_cell)
+			e.scroll_to_focused_cell()
+	}
 
 	let col_resize_field_w0
 	let col_move_dx
@@ -613,7 +617,7 @@ function init_nav(id, e) {
 			let mx = ui.mx - x0 - col_move_dx
 
 			col_mover.move_element_update(horiz ? mx : my)
-			// e.scroll_to_cell(hit_ri, hit_fi)
+			e.scroll_to_cell(hit_ri, hit_fi)
 
 			if (state == 'drop') {
 				let over_fi = col_mover.move_element_stop() // sets x of moved element.
