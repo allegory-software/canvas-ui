@@ -2190,10 +2190,10 @@ reset_paddings()
 
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	let i = ui_cmd(cmd,
-		0, // x
-		0, // y
-		min_w ?? 0,
-		min_h ?? 0,
+		min_w ?? 0, // min_w in measuring phase; x in positioning phase
+		min_h ?? 0, // min_h in measuring phase; y in positioning phase
+		0, // children's min_w in measuring phase; w in positioning phase
+		0, // children's min_h in measuring phase; h in positioning phase
 		px1, py1, px2, py2,
 		mx1, my1, mx2, my2,
 		round(max(0, fr ?? 1) * 1024),
@@ -2231,9 +2231,10 @@ function ct_stack_push(a, i) {
 // calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
 // the minimum dimensions include margins and paddings.
 function box_measure(a, i, axis) {
+	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) // apply own min_w|h
 	a[i+2+axis] += paddings(a, i, axis)
-	let w = a[i+2+axis]
-	add_ct_min_wh(a, axis, w)
+	let min_w = a[i+2+axis]
+	add_ct_min_wh(a, axis, min_w)
 }
 
 // box position phase
@@ -2381,10 +2382,12 @@ measure[CMD_END] = function(a, _, axis) {
 		measure_end_f(a, i, axis)
 	} else {
 		let main_axis = is_main_axis(cmd, axis)
+		let own_min_w = a[i+0+axis]
+		let min_w     = a[i+2+axis]
 		if (main_axis)
-			a[i+2+axis] = max(0, a[i+2+axis] - a[i+FLEX_GAP]) // remove last element's gap
-		a[i+2+axis] += paddings(a, i, axis)
-		let min_w = a[i+2+axis]
+			min_w = max(0, min_w - a[i+FLEX_GAP]) // remove last element's gap
+		min_w = max(min_w, own_min_w) + paddings(a, i, axis)
+		a[i+2+axis] = min_w
 		add_ct_min_wh(a, axis, min_w)
 	}
 }
@@ -2729,11 +2732,10 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 		sy = sy ?? ss.get('scroll_y')
 	}
 
-	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, 0, 0,
+	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, min_w, min_h,
 		overflow_x,
 		overflow_y,
-		round(min_w ?? 0), // swapped with content w on `end`
-		round(min_h ?? 0), // swapped with content h on `end`
+		0, 0, // content w, h
 		id,
 		sx ?? 0, // scroll x
 		sy ?? 0, // scroll y
@@ -2758,10 +2760,11 @@ reindex[CMD_SCROLLBOX] = box_ct_reindex
 measure[CMD_SCROLLBOX] = ct_stack_push
 
 measure_end[CMD_SCROLLBOX] = function(a, i, axis) {
-	let co_min_w = a[i+2+axis] // content min_w
+	let own_min_w = a[i+0+axis]
+	let co_min_w  = a[i+2+axis] // content min_w
 	let contain = a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_CONTAIN
-	let min_w = contain ? co_min_w : 0
-	let sb_min_w = max(a[i+SB_CW+axis], min_w) + paddings(a, i, axis) // scrollbox min_w
+	let sb_min_w = max(contain ? co_min_w : 0, own_min_w) // scrollbox min_w
+	sb_min_w += paddings(a, i, axis)
 	a[i+SB_CW+axis] = co_min_w
 	a[i+2+axis] = sb_min_w
 	add_ct_min_wh(a, axis, sb_min_w)
@@ -3142,6 +3145,7 @@ ui.end_popup = function() { ui.end(CMD_POPUP) }
 measure[CMD_POPUP] = ct_stack_push
 
 measure_end[CMD_POPUP] = function(a, i, axis) {
+	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) // apply own min_w|h
 	a[i+2+axis] += paddings(a, i, axis)
 	// popups don't affect their target's layout so no add_ct_min_wh() call.
 }
@@ -4186,8 +4190,8 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			}
 			text_h += (s.length-1) * round(line_gap * font_size)
 		}
-		let min_w = a[i+2]
-		let min_h = a[i+3]
+		let min_w = a[i+0]
+		let min_h = a[i+1]
 		let max_min_w = a[i+TEXT_W]
 		if (min_w == -1) min_w = text_w
 		if (min_h == -1) min_h = text_h
@@ -4201,6 +4205,8 @@ measure[CMD_TEXT] = function(a, i, axis) {
 	}
 	a[i+2+axis] += paddings(a, i, axis)
 	let min_w = a[i+2+axis]
+	if (a[i+TEXT_S] == 'hello hello hello')
+		pr(axis, min_w)
 	add_ct_min_wh(a, axis, min_w)
 }
 
@@ -4522,6 +4528,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 ss.measure = function(a, i, axis) {
 	let id = a[i+SS_ID]
 	let t = ui.state(id, 'con')?.frame
+	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis])
 	a[i+2+axis] += paddings(a, i, axis) + ((axis ? t?.h : t?.w) ?? 0)
 	let min_w = a[i+2+axis]
 	add_ct_min_wh(a, axis, min_w)
