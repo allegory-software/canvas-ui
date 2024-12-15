@@ -22,6 +22,25 @@ const {
 	cx,
 } = ui
 
+ui.widget('treegrid_indent', {
+	create: function(cmd, indent, state) {
+		return ui.cmd(cmd, ui.ct_i(), indent, state)
+	},
+	draw: function(a, i) {
+		let ct_i   = a[i+0]
+		let indent = a[i+1]
+		let state  = a[i+2]
+		let x = a[ct_i+0]
+		let y = a[ct_i+1]
+		let w = a[ct_i+2]
+		let h = a[ct_i+3]
+		cx.fillStyle = 'red'
+		cx.beginPath()
+		cx.rect(x, y, w, h)
+		cx.fill()
+	},
+})
+
 // cell view -----------------------------------------------------------------
 
 function init_nav(id, e) {
@@ -30,7 +49,6 @@ function init_nav(id, e) {
 	let line_height = 22
 
 	let cells_w
-	let cells_h
 	let page_row_count
 
 	let shift, ctrl
@@ -150,9 +168,10 @@ function init_nav(id, e) {
 
 		let indent_x = 0
 		let collapsed
+		let has_children
 		if (field_has_indent(field)) {
 			indent_x = indent_offset(row_indent(row))
-			let has_children = row.child_rows.length > 0
+			has_children = row.child_rows.length > 0
 			if (has_children)
 				collapsed = !!row.collapsed
 			let s = row_move_state
@@ -220,9 +239,17 @@ function init_nav(id, e) {
 		ui.stack('', 0, 'l', 't', w, h)
 			ui.bb('', bg, bgs, 't', 'light')
 			ui.color(fg)
+			if (has_children) {
+				ui.p(indent_x - ui.sp2(), 0, ui.sp2(), 0)
+				ui.scope()
+				ui.font('fas')
+				ui.text('', collapsed ? '\uf0fe' : '\uf146')
+				// ui.treegrid_indent(indent_x)
+				ui.end_scope()
+			}
 			ui.p(ui.sp2() + indent_x, 0, ui.sp2(), 0)
 			e.draw_val(row, field, input_val, true, full_width)
-			ui.p(0) // TODO: bug
+			ui.p(0)
 		ui.end_stack()
 
 		/*
@@ -475,6 +502,113 @@ function init_nav(id, e) {
 
 	}
 
+	// group-by bar -----------------------------------------------------------
+
+	let render_group_by_bar
+	{
+	let drag_col
+	let mover, xs, is, x0, y0
+	let levels = []
+	let min_levels = []
+	let max_levels = []
+
+	render_group_by_bar = function() {
+		ui.sb('', 0, 'hide', 'hide', 's', 't', null, cell_h * 2)
+			ui.bb('', 'bg2', null, 'tb', 'light')
+
+			let w = 80
+			let h = line_height + ui.sp()
+
+			for (let col of e.group_defs.cols) {
+				let def = e.group_defs.range_defs[col]
+				let x = def.index * (w + 1)
+				let y = def.group_level * 10
+				let gc_id = id+'.group_col.'+col
+				let [state, dx, dy] = ui.drag(gc_id)
+				if (state == 'drag') {
+					drag_col = col
+					mover = ui.live_move_mixin()
+					is = [] // col_index -> col_visual_index
+					xs = [] // col_index -> col_x
+					mover.movable_element_size = function() {
+						return w + 1
+					}
+					mover.set_movable_element_pos = function(i, x, moving, vi) {
+						xs[i] = x
+						if (vi != null)
+							is[i] = vi
+					}
+					mover.move_element_start(def.index, 1, 0, e.group_defs.cols.length)
+					x0 = x
+					y0 = y
+
+					let last_level = 0
+					let i = 0
+					for (let col of e.group_defs.cols) {
+						let def = e.group_defs.range_defs[col]
+						let level = def.group_level
+						levels    [i] = level
+						min_levels[i] = level
+						max_levels[i] = level
+						if (level != last_level) {
+							if (min_levels[i])
+								min_levels[i]--
+							if (last_level)
+								max_levels[i-1]++
+						}
+						last_level = level
+						i++
+					}
+
+				}
+				if (state == 'drag' || state == 'dragging') {
+					mover.move_element_update(x0 + dx)
+				}
+
+				if (mover) {
+					let vi = is[def.index]
+					let level = levels[vi]
+					if (drag_col == col) {
+						let min_level = min_levels[vi]
+						let max_level = max_levels[vi]
+						level = clamp(round((y0 + dy) / 10), min_level, max_level)
+					}
+					x = xs[def.index]
+					y = level * 10
+				}
+
+				ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
+				ui.stack(gc_id, 0, 'l', 't', w, h)
+					ui.bb('', 'bg1',
+							state == 'hover' ? 'hover' :
+							state == 'dragging' || state == 'drag'
+							? 'active' : null,
+						1, 'intense')
+					ui.m(ui.sp2(), ui.sp075())
+					ui.text('', col, 1, 'l', 'c', w - 2 * ui.sp2())
+				ui.end_stack()
+
+				if (state == 'drop') {
+					drag_col   = null
+					mover      = null
+				}
+			}
+
+			if (0 && drag_col) {
+				ui.m(ui.sp2() + drag_col_x, ui.sp2() + drag_col_y, 0, 0)
+				ui.stack('', 0, 'l', 't', w, h)
+					ui.bb('', 'bg1', 'active', 1, 'intense')
+					ui.m(ui.sp2(), ui.sp075())
+					ui.text('', drag_col, 1, 'l', 'c', w - 2 * ui.sp2())
+				ui.end_stack()
+			}
+
+		ui.end_sb()
+	}
+	} // render_group_by_bar scope
+
+	// render grid ------------------------------------------------------------
+
 	e.render = function(fr, align, valign, min_w, min_h) {
 
 		// layout fields and compute cell grid size.
@@ -494,17 +628,44 @@ function init_nav(id, e) {
 		if (ui.focused(id))
 			keydown()
 
-		cells_h = e.rows.length * cell_h
-
 		ui.v(fr, 0, align, valign, min_w, min_h)
+
+			// group-by bar
+
+			render_group_by_bar()
+
+			// header
 
 			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
-				ui.stack('', 0, 'l', 't', field._w, header_h)
+				ui.p(ui.sp2(), 0)
+				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * ui.sp2(), header_h)
 					ui.bb('', 'bg1', null, 'r', 'light')
-					ui.p(ui.sp2(), 0)
-					ui.text('', field.label, 0, field.align, 'c', noclip ? null : field._w - 2 * ui.sp2())
-				ui.end_stack()
+
+					let max_min_w = noclip ? null : max(0,
+						field._w
+							- 2 * ui.sp2()
+							- (field.sort_dir ? 2 * ui.sp2() : 0)
+					)
+					let pri = field.sort_priority
+
+					if (field.align != 'right')
+						ui.text('', field.label, 1, field.align, 'c', max_min_w)
+
+					if (field.sort_dir) {
+						ui.scope()
+						ui.font('fas')
+						ui.text(id+'.sort', field.sort_dir == 'asc'
+							? (pri ? '\uf106' : '\uf102')
+							: (pri ? '\uf107' : '\uf103'),
+						0)
+						ui.end_scope()
+					}
+
+					if (field.align == 'right')
+						ui.text('', field.label, 1, field.align, 'c', max_min_w)
+
+				ui.end_h()
 			}
 
 			h_sb_i = ui.scrollbox('', 0, auto_expand ? 'contain' : 'hide', 'contain')
@@ -530,6 +691,8 @@ function init_nav(id, e) {
 
 			ui.end_scrollbox()
 
+			let cells_h = e.rows.length * cell_h
+
 			let overflow = auto_expand ? 'contain' : 'auto'
 			sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
 				ui.frame(noop, on_cellview_frame, 0, 'l', 't', cells_w, cells_h)
@@ -551,11 +714,18 @@ function init_nav(id, e) {
 			e.scroll_to_focused_cell()
 	}
 
+	let process_mouse
+	{
 	let col_resize_field_w0
 	let col_move_dx
 	let col_mover
 
-	function process_mouse() {
+	process_mouse = function() {
+
+		if (ui.capture(id+'.sort')) {
+			pr('here')
+			//e.set_order_by_dir(field, 'toggle', shift)
+		}
 
 		let [state, dx, dy] = ui.drag(id+'.header_cells')
 
@@ -617,8 +787,8 @@ function init_nav(id, e) {
 			col_mover.move_element_start(hit_fi, 1, 0, e.fields.length)
 
 			hit_state = 'col_moving'
-
 		}
+
 
 		if (hit_state == 'col_moving') {
 
@@ -642,7 +812,7 @@ function init_nav(id, e) {
 
 		;[state, dx, dy] = ui.drag(id+'.cells')
 
-		if (state == 'hover') {
+		if (state == 'hover' || state == 'drag') {
 			hit_state = null
 			hit_ri = null
 			hit_fi = null
@@ -671,8 +841,6 @@ function init_nav(id, e) {
 				}
 			}
 		}
-
-		// mouse interaction
 
 		// if (!hit_state) {
 		// 	if (ev.target == e.cells_view) // clicked on empty space.
@@ -720,6 +888,7 @@ function init_nav(id, e) {
 		}
 
 	}
+	} // process_mouse scope
 
 	// keyboard interaction ---------------------------------------------------
 

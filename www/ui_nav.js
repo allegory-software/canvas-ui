@@ -587,7 +587,9 @@ let errors_no_messages = []
 errors_no_messages.failed = true
 errors_no_messages.client_side = true
 
-ui.nav = function(e) {
+ui.nav = function(opt) {
+
+	let e = {}
 
 	e.announce = noop
 	e.disable = noop
@@ -609,15 +611,24 @@ ui.nav = function(e) {
 		return property(this, name, get, set)
 	}
 
+	let initializing = true
+
 	e.prop = function(name, opt) {
-		let v
+		let v = e[name]
+		delete e[name]
 		function get() {
 			return v
 		}
 		let setter = e['set_'+name]
 		function set(v1) {
+			if (initializing) {
+				v = v1
+				return
+			}
 			let v0 = v
 			v = v1
+			if (v0 === v1)
+				return
 			setter.call(this, v1, v0)
 		}
 		e.property(name, get, set)
@@ -646,32 +657,6 @@ ui.nav = function(e) {
 	e.exit_edit_on_lost_focus    = false
 	e.save_row_states            = false
 	e.action_band_visible        = 'auto' // 'auto always no'
-
-	/*
-	e.prop('can_add_rows'            , {type: 'bool', default: true})
-	e.prop('can_remove_rows'         , {type: 'bool', default: true})
-	e.prop('can_change_rows'         , {type: 'bool', default: true})
-	e.prop('can_move_rows'           , {type: 'bool', default: false})
-	e.prop('can_sort_rows'           , {type: 'bool', default: true})
-	e.prop('can_focus_cells'         , {type: 'bool', default: true , hint: 'allow focusing individual cells vs entire rows'})
-	e.prop('can_select_multiple'     , {type: 'bool', default: true , hint: 'allow selecting multiple cells or rows'})
-	e.prop('can_select_non_siblings' , {type: 'bool', default: true , hint: 'allow multi-selecting rows of different parents'})
-
-	e.prop('auto_advance_row'        , {type: 'bool', default: false, hint: 'jump row on horizontal navigation limits'})
-	e.prop('auto_focus_first_cell'   , {type: 'bool', default: true , hint: 'focus first cell automatically after loading'})
-	e.prop('auto_edit_first_cell'    , {type: 'bool', default: false, hint: 'automatically enter edit mode after loading'})
-	e.prop('stay_in_edit_mode'       , {type: 'bool', default: true , hint: 're-enter edit mode after navigating'})
-
-	e.prop('save_on_add_row'         , {type: 'bool', default: false})
-	e.prop('save_on_remove_row'      , {type: 'bool', default: true })
-	e.prop('save_on_input'           , {type: 'bool', default: false})
-	e.prop('save_on_exit_edit'       , {type: 'bool', default: false})
-	e.prop('save_on_exit_row'        , {type: 'bool', default: true })
-
-	e.prop('exit_edit_on_lost_focus' , {type: 'bool', default: false, hint: 'exit edit mode when losing focus'})
-	e.prop('save_row_states'         , {type: 'bool', default: false, hint: 'static rowset only: save row states or just the values'})
-	e.prop('action_band_visible'     , {type: 'enum', enum_values: 'auto always no', default: 'auto', to_attr: true, slot: 'user'})
-	*/
 
 	// init -------------------------------------------------------------------
 
@@ -732,8 +717,6 @@ ui.nav = function(e) {
 			}
 		}
 	}
-
-	// e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
 
 	// fields utils -----------------------------------------------------------
 
@@ -2207,20 +2190,35 @@ ui.nav = function(e) {
 		remove(path, path_pos)
 	}
 
-	// parse `COL[/OFFSET][/UNIT][/FREQ]`
 	function parse_range_def(col, range_defs) {
-		let freq, offset, unit
-		col = col.replace(/\/[^\/]+$/, k => { freq   = num(k.substring(1)); return '' })
-		col = col.replace(/\/[^\/]+$/, k => { unit   = k.substring(1); return '' })
-		col = col.replace(/\/[^\/]+$/, k => { offset = num(k.substring(1)); return '' })
-		if (freq != null || offset != null || unit != null) {
-			range_defs[col] = {
-				freq   : freq,
-				offset : offset,
-				unit   : unit,
-			}
-		}
 		return col
+	}
+
+	// col_groups_expr : 'col1[/offset][/unit][/freq] col2 > col3 col4 > ...'
+	// range_defs1 : {col->{freq:, unit:, offset:}}
+	function parse_col_groups(col_groups_expr, range_defs1) {
+		// parse out range defs from spec
+		let level = 0
+		let cols = []
+		let col_groups = []
+		let range_defs = {}
+		let index = 0
+		for (let col_group_expr of col_groups_expr.split(/\s*>\s*/)) {
+			let col_group = []
+			for (let col of words(col_group_expr)) {
+				let t = {group_level: level, index: index++}
+				col = col.replace(/\/[^\/]+$/, k => { t.freq   = num(k.substring(1)); return '' })
+				col = col.replace(/\/[^\/]+$/, k => { t.unit   = k.substring(1); return '' })
+				col = col.replace(/\/[^\/]+$/, k => { t.offset = num(k.substring(1)); return '' })
+				range_defs[col] = assign({}, range_defs1?.[col], t)
+				col_group.push(col)
+				cols.push(col)
+			}
+			col_groups.push(col_group)
+			level++
+		}
+		let fields = optflds(cols)
+		return {cols, fields, col_groups, range_defs}
 	}
 
 	// opt:
@@ -2229,33 +2227,28 @@ ui.nav = function(e) {
 	//   rows            : [row1,...]
 	//   group_label_sep : separator for multi-col group labels
 	e.row_groups = function(opt) {
-		let group_label_sep = opt.group_label_sep ?? ' / '
-		let col_groups = opt.col_groups.split(/\s*>\s*/)
-		if (false && col_groups.length == 1) // TODO: enable this optimization again?
-			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
-		let range_defs = obj()
-		if (opt.range_defs)
-			assign(range_defs, opt.range_defs.map(def => assign(obj(), def)))
-		let i = 0
-		for (let col of col_groups)
-			col_groups[i++] = parse_range_def(col, range_defs)
-		let all_cols = col_groups.join(' ')
-		let fields = optflds(all_cols)
+
+		let {cols, fields, col_groups, range_defs} = parse_col_groups(opt.col_groups, opt.range_defs)
 		if (!fields)
 			return
-		let tree = e.tree_index(all_cols, range_defs, opt.rows).tree()
+
+		if (false && col_groups.length == 1) // TODO: enable this optimization again?
+			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
+
+		let group_label_sep = opt.group_label_sep ?? ' / '
+		let tree = e.tree_index(cols, range_defs, opt.rows).tree()
 		let root_group = []
-		let depth = words(col_groups[0]).length-1
+		let depth = col_groups[0].length-1
 		function add_group(t, path, label_path, parent_group, parent_group_level) {
 			let group = []
-			group.key_cols = col_groups[parent_group_level]
+			group.key_cols = col_groups[parent_group_level].join(' ')
 			group.key_vals = path.slice()
 			group.label = label_path.join_nodes(group_label_sep)
 			parent_group.push(group)
 			let level = parent_group_level + 1
 			let col_group = col_groups[level]
 			if (col_group) { // more group levels down...
-				let depth = words(col_group).length-1
+				let depth = col_group.length-1
 				flatten(t, [], [], depth, add_group, group, level)
 			} else { // last group level, t is the array of rows.
 				group.push(...t)
@@ -2264,6 +2257,12 @@ ui.nav = function(e) {
 		flatten(tree, [], [], depth, add_group, root_group, 0)
 		return root_group
 	}
+
+	e.group_cols = ''
+	e.set_group_cols = function() {
+		e.group_defs = parse_col_groups(e.group_cols)
+	}
+	e.prop('group_cols')
 
 	// tree -------------------------------------------------------------------
 
@@ -2592,14 +2591,12 @@ ui.nav = function(e) {
 		return a.length ? a.join(' ') : undefined
 	}
 
-	/*
 	e.set_order_by = function() {
 		update_field_sort_order()
 		sort_rows()
 		e.update({vals: true, state: true, sort_order: true})
 	}
 	e.prop('order_by', {slot: 'user'})
-	*/
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
 		if (!field.sortable)
@@ -4991,7 +4988,12 @@ ui.nav = function(e) {
 				e.fire('val_picked', ev)
 	}
 
+	assign(e, opt)
 	init()
+	initializing = false
+
+	e.set_group_cols()
+	pr(e.group_cols, e.group_col_groups)
 
 	return e
 }

@@ -2,8 +2,8 @@
 <html theme=dark>
 <body>
 <base href="www/">
-<link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2">
+<link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2">
 <script src=glue.js global></script>
 <script src=ui.js></script>
 <script src=ui_validation.js></script>
@@ -313,7 +313,7 @@ for (let i = 0; i <= 10000; i++) {
 	row.focusable = true // i % 100 >= 85
 	rows.push(row)
 }
-rowset2 = {
+tree_rowset = {
 	fields: fields,
 	rows: rows,
 	pk: 'id',
@@ -323,9 +323,56 @@ rowset2 = {
 demos.treegrid = `
 ui.stack('', 0, 'c', 'c', 500, 500)
 	ui.grid('treegrid', {
-		rowset: rowset2,
+		rowset: tree_rowset,
 		order_by: 'active name:desc',
 		tree_col: 'name',
+		w: 606,
+		h: 400,
+		//can_edit: false,
+		can_change_header_visibility: true,
+		//can_focus_cells: false,
+		//order_by: 'parent_id name:desc',
+		can_move_rows: true,
+		//enter_edit_on_click_focused: false,
+		//can_change_parent: false,
+	})
+ui.end_stack()
+`
+}
+
+{
+function starts_with_a(s) {
+	return s.lower().starts('a') || 'Name must start with "A"'
+}
+let fields = [
+	{name: 'id'        , w:  50, min_w:  30, type: 'number', editable: false},
+	{name: 'name'      , w: 100},
+	{name: 'color'     , w:  50},
+	{name: 'type'      , w:  50},
+	{name: 'good'      , w:  30, type: 'bool', true_text: 'Good', false_text: 'Bad', },
+	{name: 'climate'   , w:  50},
+]
+let rows = [
+	[1, 'Apple'    , 'Red'    , 'Fruit' , true  , 'Temperate'],
+	[2, 'Banana'   , 'Yellow' , 'Fruit' , true  , 'Tropical' ],
+	[3, 'Lemon'    , 'Yellow' , 'Fruit' , false , 'Tropical' ],
+	[4, 'Pear'     , 'Yellow' , 'Fruit' , false , 'Temperate'],
+	[5, 'Broccoli' , 'Green'  , 'Veggie', false , 'Temperate'],
+	[6, 'Pepper'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
+	[7, 'Potato'   , 'Yellow' , 'Veggie', true  , 'Temperate'],
+	[8, 'Carrot'   , 'Orange' , 'Veggie', false , 'Temperate'],
+]
+food_rowset = {
+	fields: fields,
+	rows: rows,
+	pk: 'id',
+}
+demos.grid_groups = `
+ui.stack('', 0, 'c', 'c', 500, 500)
+	ui.grid('groups_grid', {
+		rowset: food_rowset,
+		group_cols: 'climate > type good > color',
+		order_by: 'color type:desc',
 		w: 606,
 		h: 400,
 		//can_edit: false,
@@ -792,7 +839,7 @@ ui.main = function() {
 
 			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.bb('', null, null, 'r', 'light')
-				ui.state_init('demos_list', 'focused_item_i', 11)
+				ui.state_init('demos_list', 'focused_item_i', 12)
 				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)

@@ -149,6 +149,7 @@ HASH MAPS
 	empty_set -> set()              global empty set, read-only!
 	keys(t) -> [k1, ...]
 	assign(dt, t1, ...)             dump t1, ... into dt
+	entries(t) -> *[k,v]            iterate hash map entries
 	assign_opt(dt, t1, ...)         dump t1, ... into dt, skips undefined values
 	clone(t) -> t1                  deep clone
 	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
@@ -939,6 +940,7 @@ let empty_set = set()
 let keys = Object.keys
 
 let assign = Object.assign
+let entries = Object.entries
 let clone = structuredClone
 
 // like Object.assign() but skips assigning `undefined` values.
@@ -2440,7 +2442,7 @@ insert, remove, remove_value, replace_value, remove_values, array_move, array_eq
 binsearch, uniq_sorted, group_sorted, remove_duplicates,
 map, map_first_key, map_assign,
 set, set_addset, set_set, set_toarray, set_equals, empty_set,
-obj, empty, empty_obj,  keys, assign, assign_opt, clone, count_keys, first_key, attr,
+obj, empty, empty_obj,  keys, assign, entries, assign_opt, clone, count_keys, first_key, attr,
 memoize,
 f32arr, i8arr, u8arr, i16arr, u16arr, i32arr, u32arr,
 max_index_from_array, arr_type_from_max_index, index_arr_type,

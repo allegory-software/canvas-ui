@@ -345,7 +345,7 @@ const {
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str, json, json_arg,
 	obj, set, map, array,
-	assign, insert, map_assign, remove_value,
+	assign, entries, insert, map_assign, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter,
 	memoize,
@@ -6709,7 +6709,7 @@ ui.live_move_mixin = function(e) {
 	}
 
 	e.move_element_stop = function() {
-		set_moving_element_pos(over_x)
+		set_moving_element_pos(over_x, false)
 		return over_i
 	}
 
@@ -6756,14 +6756,13 @@ ui.live_move_mixin = function(e) {
 		}
 	}
 
-	let move_ri1, move_ri2, move_vi1
-
-	function set_moving_element_pos(x, moving) {
-		if (move_ri1 != null)
-			for (let i = move_ri1; i < move_ri2; i++) {
-				e.set_movable_element_pos(i, offsetx + x, moving)
-				x += sizes[i]
-			}
+	function set_moving_element_pos(x, moving, vi) {
+		for (let i = move_i1; i < move_i2; i++) {
+			e.set_movable_element_pos(i, offsetx + x, moving, vi)
+			x += sizes[i]
+			if (vi != null)
+				vi++
+		}
 	}
 
 	e.move_element_update = function(elem_x) {
@@ -6771,24 +6770,26 @@ ui.live_move_mixin = function(e) {
 		if (elem_x != move_x) {
 			move_x = elem_x
 			e.move_x = move_x
-			if (hit_test(move_x)) {
+			if (hit_test(move_x)) { // first time always hits because over_i is null
 				e.over_i = over_i
 				e.over_p = over_p
 				let x = i1x
-				move_ri1 = null
-				move_ri2 = null
 				over_x = null
+				let vi = 0 // visual index
+				let mx = move_x
 				each_index(function(i, moving) {
 					if (moving) {
 						over_x = over_x ?? x
-						move_ri1 = move_ri1 ?? i
-						move_ri2 = i+1
+						e.set_movable_element_pos(i, offsetx + mx, true, vi)
+						mx += sizes[i]
 					} else
-						e.set_movable_element_pos(i, offsetx + x)
+						e.set_movable_element_pos(i, offsetx + x, false, vi)
 					x += sizes[i]
+					vi++
 				})
+			} else {
+				set_moving_element_pos(move_x, true)
 			}
-			set_moving_element_pos(move_x, true)
 		}
 	}
 
