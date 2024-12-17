@@ -746,30 +746,40 @@ function init_nav(id, e) {
 				if (ui.mx >= x && ui.mx <= x + w) {
 					hit_state = 'col_move'
 					hit_fi = field.index
+					col_move_dx = ui.mx - x0 - field._x
 					break
 				}
 			}
 		}
 
-		if (state == 'drag' && hit_state == 'col_resize') {
+		if (state == 'dragging' && abs(dx) > 10 && hit_state == 'col_resize') {
 			let field = e.fields[hit_fi]
 			col_resize_field_w0 = field.w
 			ui.set_cursor('ew-resize')
 			hit_state = 'col_resizing'
 		}
 
-		if (hit_state == 'col_resizing') {
+		if (state == 'dragging' && hit_state == 'col_resizing') {
 			let field = e.fields[hit_fi]
 			field.w = clamp(col_resize_field_w0 + dx, field.min_w, field.max_w)
 			ui.set_cursor('ew-resize')
 		}
 
-		if (state == 'drag' && hit_state == 'col_move') {
+		if (state == 'dragging' && dy < -10 && hit_state == 'col_move') {
 
 			let field = e.fields[hit_fi]
+			pr('here')
+			hit_state = 'col_group'
 
-			let x0 = ui.state(id+'.header_cells').get('x')
-			col_move_dx = ui.mx - x0 - field._x
+		}
+
+		if (hit_state == 'col_group') {
+			ui.set_cursor('pointer')
+		}
+
+		if (state == 'dragging' && abs(dx) > 10 && hit_state == 'col_move') {
+
+			let field = e.fields[hit_fi]
 
 			let cs = ui.captured(id+'.header_cells')
 
@@ -797,6 +807,8 @@ function init_nav(id, e) {
 
 			col_mover.move_element_update(horiz ? mx : my)
 			e.scroll_to_cell(hit_ri, hit_fi)
+
+			ui.set_cursor('grabbing')
 
 			if (state == 'drop') {
 				let over_fi = col_mover.move_element_stop() // sets x of moved element.
