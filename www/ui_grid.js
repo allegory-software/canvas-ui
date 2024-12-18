@@ -82,7 +82,7 @@ function init_nav(id, e) {
 	}
 
 	function row_indent(row) {
-		return row.parent_rows ? row.parent_rows.length : 0
+		return row.depth ?? 0
 	}
 
 	/*
@@ -519,8 +519,9 @@ function init_nav(id, e) {
 			let w = 80
 			let h = line_height + ui.sp()
 
-			for (let col of e.group_defs.cols) {
-				let def = e.group_defs.range_defs[col]
+			let drag_col_rec
+			for (let col of e.groups.cols) {
+				let def = e.groups.range_defs[col]
 				let x = def.index * (w + 1)
 				let y = def.group_level * 10
 				let gc_id = id+'.group_col.'+col
@@ -538,14 +539,14 @@ function init_nav(id, e) {
 						if (vi != null)
 							is[i] = vi
 					}
-					mover.move_element_start(def.index, 1, 0, e.group_defs.cols.length)
+					mover.move_element_start(def.index, 1, 0, e.groups.cols.length)
 					x0 = x
 					y0 = y
 
 					let last_level = 0
 					let i = 0
-					for (let col of e.group_defs.cols) {
-						let def = e.group_defs.range_defs[col]
+					for (let col of e.groups.cols) {
+						let def = e.groups.range_defs[col]
 						let level = def.group_level
 						levels    [i] = level
 						min_levels[i] = level
@@ -577,6 +578,9 @@ function init_nav(id, e) {
 					y = level * 10
 				}
 
+				if (drag_col == col)
+					ui.record()
+
 				ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
 				ui.stack(gc_id, 0, 'l', 't', w, h)
 					ui.bb('', 'bg1',
@@ -588,20 +592,17 @@ function init_nav(id, e) {
 					ui.text('', col, 1, 'l', 'c', w - 2 * ui.sp2())
 				ui.end_stack()
 
+				if (drag_col == col)
+					drag_col_rec = ui.end_record()
+
 				if (state == 'drop') {
-					drag_col   = null
-					mover      = null
+					drag_col = null
+					mover    = null
 				}
 			}
 
-			if (0 && drag_col) {
-				ui.m(ui.sp2() + drag_col_x, ui.sp2() + drag_col_y, 0, 0)
-				ui.stack('', 0, 'l', 't', w, h)
-					ui.bb('', 'bg1', 'active', 1, 'intense')
-					ui.m(ui.sp2(), ui.sp075())
-					ui.text('', drag_col, 1, 'l', 'c', w - 2 * ui.sp2())
-				ui.end_stack()
-			}
+			if (drag_col_rec)
+				ui.record_play(drag_col_rec)
 
 		ui.end_sb()
 	}

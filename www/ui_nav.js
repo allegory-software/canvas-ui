@@ -201,7 +201,7 @@ Tree:
 	state:
 		e.child_rows -> [row1,...]
 		row.child_rows -> [row1,...]
-		row.parent_rows -> [row1,...]
+		row.depth -> parent_row_count
 		row.parent_row -> row
 	needs:
 		e.tree_col
@@ -984,8 +984,8 @@ ui.nav = function(opt) {
 		if (e.is_tree) {
 			for (let row of e.all_rows) {
 				row.child_rows = null
-				row.parent_rows = null
 				row.parent_row = null
+				row.depth = null
 			}
 			e.child_rows = null
 			e.is_tree = false
@@ -2243,7 +2243,7 @@ ui.nav = function(opt) {
 			let group = []
 			group.key_cols = col_groups[parent_group_level].join(' ')
 			group.key_vals = path.slice()
-			group.label = label_path.join_nodes(group_label_sep)
+			group.label = label_path.join(group_label_sep)
 			parent_group.push(group)
 			let level = parent_group_level + 1
 			let col_group = col_groups[level]
@@ -2255,12 +2255,14 @@ ui.nav = function(opt) {
 			}
 		}
 		flatten(tree, [], [], depth, add_group, root_group, 0)
-		return root_group
+		pr(root_group)
+		return {cols: cols, range_defs: range_defs, root: root_group}
 	}
 
 	e.group_cols = ''
 	e.set_group_cols = function() {
-		e.group_defs = parse_col_groups(e.group_cols)
+		e.groups = e.row_groups({col_groups: e.group_cols}) || {cols: []}
+		//e.rows = e.groups.root
 	}
 	e.prop('group_cols')
 
@@ -2279,47 +2281,41 @@ ui.nav = function(opt) {
 		e.each_child_row(row, f)
 	}
 
-	function init_parent_rows_for_row(row, parent_rows) {
+	function init_depth_for_row(row, depth) {
 
-		if (!init_parent_rows_for_rows(row.child_rows))
+		if (init_depth_for_rows(row.child_rows, depth+1) == null)
 			return // circular ref: abort.
 
-		if (!parent_rows) {
+		if (depth == null) {
 
-			// reuse the parent rows array from a sibling, if any.
+			// reuse the depth from a sibling, if set.
 			let sibling_row = (row.parent_row || e).child_rows[0]
-			parent_rows = sibling_row && sibling_row.parent_rows
+			depth = sibling_row && sibling_row.depth
 
-			if (!parent_rows) {
+			if (depth == null) {
 
-				parent_rows = []
+				depth = 0
 				let parent_row = row.parent_row
 				while (parent_row) {
-					if (parent_row == row || parent_rows.includes(parent_row))
-						return // circular ref: abort.
-					parent_rows.push(parent_row)
+					depth++
+					if (depth > 64)
+						return // too deep, assume circular ref.
 					parent_row = parent_row.parent_row
 				}
 			}
 		}
-		row.parent_rows = parent_rows
-		return parent_rows
+
+		row.depth = depth
+		return depth
 	}
 
-	function init_parent_rows_for_rows(rows) {
-		let parent_rows
+	function init_depth_for_rows(rows, depth) {
 		for (let row of rows) {
-			parent_rows = init_parent_rows_for_row(row, parent_rows)
-			if (!parent_rows)
+			depth = init_depth_for_row(row, depth)
+			if (depth == null)
 				return // circular ref: abort.
 		}
-		return true
-	}
-
-	function remove_parent_rows_for(row) {
-		row.parent_rows = null
-		for (let child_row of row.child_rows)
-			remove_parent_rows_for(child_row)
+		return depth
 	}
 
 	function remove_row_from_tree(row) {
@@ -2330,7 +2326,8 @@ ui.nav = function(opt) {
 		if (row.parent_row && row.parent_row.child_rows.length == 0)
 			row.parent_row.collapsed = null
 		row.parent_row = null
-		remove_parent_rows_for(row)
+		row.child_rows = null
+		row.depth = null
 	}
 
 	function add_row_to_tree(row, parent_row) {
@@ -2352,7 +2349,7 @@ ui.nav = function(opt) {
 		for (let row of e.all_rows) {
 			row.child_rows = []
 			row.parent_row = null
-			row.parent_rows = null
+			row.depth = null
 		}
 
 		let p_fi = e.parent_field.val_index
@@ -2362,7 +2359,7 @@ ui.nav = function(opt) {
 			add_row_to_tree(row, parent_row)
 		}
 
-		if (!init_parent_rows_for_rows(e.child_rows)) {
+		if (init_depth_for_rows(e.child_rows, 0) == null) {
 			// circular refs detected: revert to flat mode.
 			warn('Circular refs detected. Cannot present data as a tree.')
 			e.can_be_tree = false
@@ -2374,13 +2371,21 @@ ui.nav = function(opt) {
 
 	// row moving -------------------------------------------------------------
 
+	function is_parent_of(row, check_row) {
+		if (!row.parent_row)
+			return false
+		if (row.parent_row == check_row)
+			return true
+		return is_parent_of(row.parent_row, check_row)
+	}
+
 	function change_row_parent(row, parent_row) {
 		if (!e.is_tree)
 			return
 		if (parent_row == row.parent_row)
 			return
 		assert(parent_row != row)
-		assert(!parent_row || !parent_row.parent_rows.includes(row))
+		assert(!parent_row || !is_parent_of(parent_row, row))
 
 		let parent_id = parent_row ? e.cell_val(parent_row, e.id_field) : null
 		e.set_cell_val(row, e.parent_field, parent_id)
@@ -2388,7 +2393,7 @@ ui.nav = function(opt) {
 		remove_row_from_tree(row)
 		add_row_to_tree(row, parent_row)
 
-		assert(init_parent_rows_for_row(row))
+		assert(init_depth_for_row(row) != null)
 	}
 
 	// row collapsing ---------------------------------------------------------
@@ -3652,7 +3657,7 @@ ui.nav = function(opt) {
 						let parent_id = e.cell_val(row.parent_row, e.id_field)
 						row[e.parent_field.val_index] = parent_id
 					}
-					assert(init_parent_rows_for_row(row))
+					assert(init_depth_for_row(row) != null)
 				}
 
 				update_indices('row_added', row)
@@ -3891,10 +3896,10 @@ ui.nav = function(opt) {
 		let n = 0
 		if (e.is_tree) {
 			let row = e.rows[ri]
-			let min_parent_count = row.parent_rows.length + 1
+			let min_parent_count = row.depth + 1
 			for (ri++; ri < e.rows.length; ri++) {
 				let child_row = e.rows[ri]
-				if (child_row.parent_rows.length < min_parent_count)
+				if (child_row.depth < min_parent_count)
 					break
 				n++
 			}
@@ -3904,10 +3909,10 @@ ui.nav = function(opt) {
 
 	function update_pos_field_for_children_of(row) {
 		let index = 1
-		let min_parent_count = row ? row.parent_rows.length + 1 : 0
+		let min_parent_count = row ? row.depth + 1 : 0
 		for (let ri = row ? e.row_index(row) + 1 : 0; ri < e.rows.length; ri++) {
 			let child_row = e.rows[ri]
-			if (child_row.parent_rows.length < min_parent_count)
+			if (child_row.depth < min_parent_count)
 				break
 			if (child_row.parent_row == row)
 				e.set_cell_val(child_row, e.pos_field, index++)
@@ -3943,7 +3948,7 @@ ui.nav = function(opt) {
 
 		if (e.is_tree) {
 
-			let min_parent_count = top_row.parent_rows.length
+			let min_parent_count = top_row.depth
 
 			// extend selection with all visible children which must be moved along.
 			// another way to compute this would be to find the last selected sibling
@@ -3952,14 +3957,14 @@ ui.nav = function(opt) {
 				let row = e.rows[move_ri2]
 				if (!row)
 					break
-				if (row.parent_rows.length <= min_parent_count) // sibling or unrelated
+				if (row.depth <= min_parent_count) // sibling or unrelated
 					break
 				move_ri2++
 			}
 
 			// check to see that all selected rows are siblings or children of the first row.
 			for (let ri = move_ri1; ri < move_ri2; ri++)
-				if (e.rows[ri].parent_rows.length < min_parent_count)
+				if (e.rows[ri].depth < min_parent_count)
 					return
 
 		}
@@ -3999,9 +4004,9 @@ ui.nav = function(opt) {
 
 			// move top siblings to new parent.
 			if (old_parent_row != parent_row) {
-				let parent_count = rows[0].parent_rows.length
+				let parent_count = rows[0].depth
 				for (let row of rows)
-					if (row.parent_rows.length == parent_count) // sibling of top row
+					if (row.depth == parent_count) // sibling of top row
 						change_row_parent(row, parent_row)
 			}
 
