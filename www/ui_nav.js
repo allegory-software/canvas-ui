@@ -1193,7 +1193,7 @@ ui.nav = function(opt) {
 		if (on)
 			insert(cols, min(at_fi || 1/0, e.fields.length), field.name)
 		else
-			cols.remove_value(field.name)
+			remove_value(cols, field.name)
 		e.cols = cols_from_array(cols)
 	}
 
@@ -2190,14 +2190,9 @@ ui.nav = function(opt) {
 		remove(path, path_pos)
 	}
 
-	function parse_range_def(col, range_defs) {
-		return col
-	}
-
 	// col_groups_expr : 'col1[/offset][/unit][/freq] col2 > col3 col4 > ...'
 	// range_defs1 : {col->{freq:, unit:, offset:}}
-	function parse_col_groups(col_groups_expr, range_defs1) {
-		// parse out range defs from spec
+	function parse_group_defs(col_groups_expr, range_defs1) {
 		let level = 0
 		let cols = []
 		let col_groups = []
@@ -2207,9 +2202,9 @@ ui.nav = function(opt) {
 			let col_group = []
 			for (let col of words(col_group_expr)) {
 				let t = {group_level: level, index: index++}
-				col = col.replace(/\/[^\/]+$/, k => { t.freq   = num(k.substring(1)); return '' })
-				col = col.replace(/\/[^\/]+$/, k => { t.unit   = k.substring(1); return '' })
-				col = col.replace(/\/[^\/]+$/, k => { t.offset = num(k.substring(1)); return '' })
+				col = col.replace(/\/[^\/]+$/, k => {t.freq = num(k.substring(1)); return '' })
+				col = col.replace(/\/[^\/]+$/, k => {t.unit = k.substring(1); return '' })
+				col = col.replace(/\/[^\/]+$/, k => {t.offset = num(k.substring(1)); return '' })
 				range_defs[col] = assign({}, range_defs1?.[col], t)
 				col_group.push(col)
 				cols.push(col)
@@ -2221,6 +2216,26 @@ ui.nav = function(opt) {
 		return {cols, fields, col_groups, range_defs}
 	}
 
+	function format_group_defs(col_groups, range_defs) {
+		let t = []
+		for (let i = 0; i < col_groups.length; i++) {
+			let col_group = col_groups[i]
+			for (let j = 0; j < col_group.length; j++) {
+				let col = col_group[j]
+				t.push(col)
+				let def = range_defs[col]
+				if (def.offset != null) t.push('/', def.offset)
+				if (def.unit   != null) t.push('/', def.unit)
+				if (def.freq   != null) t.push('/', def.freq)
+				if (j < col_group.length)
+					t.push(' ')
+			}
+			if (i < col_groups.length)
+				t.push('> ')
+		}
+		return t.join('')
+	}
+
 	// opt:
 	//   col_groups      : 'col1[/...] col2 > col3 col4 > ...'
 	//   range_defs      : {col->{freq:, unit:, offset:}}
@@ -2228,7 +2243,7 @@ ui.nav = function(opt) {
 	//   group_label_sep : separator for multi-col group labels
 	e.row_groups = function(opt) {
 
-		let {cols, fields, col_groups, range_defs} = parse_col_groups(opt.col_groups, opt.range_defs)
+		let {cols, fields, col_groups, range_defs} = parse_group_defs(opt.col_groups, opt.range_defs)
 		if (!fields)
 			return
 
@@ -2237,7 +2252,7 @@ ui.nav = function(opt) {
 
 		let group_label_sep = opt.group_label_sep ?? ' / '
 		let tree = e.tree_index(cols, range_defs, opt.rows).tree()
-		let root_group = []
+		let root = []
 		let depth = col_groups[0].length-1
 		function add_group(t, path, label_path, parent_group, parent_group_level) {
 			let group = []
@@ -2254,15 +2269,67 @@ ui.nav = function(opt) {
 				group.push(...t)
 			}
 		}
-		flatten(tree, [], [], depth, add_group, root_group, 0)
-		pr(root_group)
-		return {cols: cols, range_defs: range_defs, root: root_group}
+		flatten(tree, [], [], depth, add_group, root, 0)
+		pr(root)
+		return {cols, range_defs, root}
 	}
 
 	e.group_cols = ''
 	e.set_group_cols = function() {
-		e.groups = e.row_groups({col_groups: e.group_cols}) || {cols: []}
-		//e.rows = e.groups.root
+		e.groups = e.row_groups({col_groups: e.group_cols})
+		if (!e.groups)
+			return
+
+		// convert index tree to row tree
+		e.focus_cell(false, false)
+
+		e.is_tree = true
+		e.tree_field = fld('id')
+		e.rows = []
+		function push_row(row, parent_row, depth) {
+			row.parent_row = parent_row
+			row.depth = depth
+			e.rows.push(row)
+		}
+		function push_group_or_row(group, parent_row, depth) {
+			let row
+			if (group.key_vals) { // it's a group
+
+				let vals = obj()
+				let i = 0
+				for (let col of words(group.key_cols)) {
+					let val = group.key_vals[i++]
+					vals[col] = val
+				}
+				row = e.deserialize_row_vals(vals)
+
+				push_row(row, parent_row, depth)
+				row.child_rows = []
+				row.collapsed = false
+				row.is_group_row = true
+				for (let sub_group of group) {
+					let child_row = push_group_or_row(sub_group, row, depth+1)
+					row.child_rows.push(child_row)
+				}
+			} else { // it's a row
+				row = group
+				row.child_rows = []
+				push_row(row, parent_row, depth)
+			}
+			assert(row)
+			return row
+		}
+
+		e.child_rows = []
+		for (let group of e.groups.root) {
+			let row = push_group_or_row(group, null, 0)
+			e.child_rows.push(row)
+		}
+
+		update_row_index()
+		e.announce('rows_changed')
+		e.focus_cell(true, true)
+
 	}
 	e.prop('group_cols')
 
@@ -2322,7 +2389,7 @@ ui.nav = function(opt) {
 		let child_rows = (row.parent_row || e).child_rows
 		if (!child_rows)
 			return
-		child_rows.remove_value(row)
+		remove_value(child_rows, row)
 		if (row.parent_row && row.parent_row.child_rows.length == 0)
 			row.parent_row.collapsed = null
 		row.parent_row = null
@@ -2338,7 +2405,11 @@ ui.nav = function(opt) {
 
 	function init_tree() {
 
+		if (e.groups)
+			return
+
 		e.is_tree = true
+
 		e.can_be_tree = !!e.parent_field
 		if (!e.can_be_tree || e.flat || e.must_be_flat) {
 			reset_tree()
@@ -3796,8 +3867,8 @@ ui.nav = function(opt) {
 			if (removed_rows.size < 100) {
 				// much faster removal for a small number of rows (common case).
 				for (let row of removed_rows) {
-					e.rows.remove_value(row)
-					e.all_rows.remove_value(row)
+					remove_value(e.rows, row)
+					remove_value(e.all_rows, row)
 				}
 				update_row_index()
 			} else {
@@ -4998,7 +5069,6 @@ ui.nav = function(opt) {
 	initializing = false
 
 	e.set_group_cols()
-	pr(e.group_cols, e.group_col_groups)
 
 	return e
 }
@@ -5686,11 +5756,11 @@ field_types.bool = bool
 
 bool.draw_null = function(cx) {
 	if (cx) {
-		let text_font = cx.text_font
-		cx.text_font = cx.icon_font
-		all_field_types.draw.call(this, '\uf0c8', cx)
-		cx.text_font = text_font
-		return true
+		// let text_font = cx.text_font
+		// cx.text_font = cx.icon_font
+		// all_field_types.draw.call(this, '\uf0c8', cx)
+		// cx.text_font = text_font
+		// return true
 	}
 }
 

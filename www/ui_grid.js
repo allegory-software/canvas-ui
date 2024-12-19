@@ -171,7 +171,7 @@ function init_nav(id, e) {
 		let has_children
 		if (field_has_indent(field)) {
 			indent_x = indent_offset(row_indent(row))
-			has_children = row.child_rows.length > 0
+			has_children = (row.child_rows?.length ?? 0) > 0
 			if (has_children)
 				collapsed = !!row.collapsed
 			let s = row_move_state
@@ -221,11 +221,14 @@ function init_nav(id, e) {
 			bg = 'row'
 			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
 		}
-		if (!bg)
-			if ((ri & 1) == 0)
+		if (!bg) {
+			if (row.is_group_row)
+				bg = 'bg2'
+			else if ((ri & 1) == 0)
 				bg = 'alt'
 			else if (full_width)
 				bg = 'bg'
+		}
 
 		let fg
 		if (is_null || is_empty || disabled)
@@ -520,7 +523,7 @@ function init_nav(id, e) {
 			let h = line_height + ui.sp()
 
 			let drag_col_rec
-			for (let col of e.groups.cols) {
+			for (let col of e.groups?.cols || empty_array) {
 				let def = e.groups.range_defs[col]
 				let x = def.index * (w + 1)
 				let y = def.group_level * 10
@@ -844,7 +847,7 @@ function init_nav(id, e) {
 					hit_fi = fi
 					hit_indent = false
 					if (row && field_has_indent(field)) {
-						let has_children = row.child_rows.length > 0
+						let has_children = (row.child_rows?.length ?? 0) > 0
 						if (has_children) {
 							let indent_x = indent_offset(row_indent(row))
 							hit_indent = hit_dx <= indent_x
