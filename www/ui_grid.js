@@ -223,7 +223,7 @@ function init_nav(id, e) {
 		}
 		if (!bg) {
 			if (row.is_group_row)
-				bg = 'bg2'
+				bg = null
 			else if ((ri & 1) == 0)
 				bg = 'alt'
 			else if (full_width)
@@ -409,6 +409,7 @@ function init_nav(id, e) {
 
 			if (row.removed)
 				draw_row_strike_line(row, ri, rx, ry, rw, rh, draw_stage)
+
 		}
 
 		if (foc_cell && foc_ri >= ri1 && foc_ri <= ri2 && foc_fi >= fi1 && foc_fi <= fi2) {

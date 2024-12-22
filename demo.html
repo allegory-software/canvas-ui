@@ -372,6 +372,8 @@ ui.stack('', 0, 'c', 'c', 500, 500)
 	ui.grid('groups_grid', {
 		rowset: food_rowset,
 		group_cols: 'climate > type good > color',
+		tree_col: 'name',
+		cols: 'name id color type good climate',
 		group_cols: 'type > color',
 		order_by: 'color type:desc',
 		w: 606,

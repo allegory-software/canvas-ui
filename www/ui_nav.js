@@ -932,9 +932,11 @@ ui.nav = function(opt) {
 
 		let rs = e.rowset
 
-		if (rs.fields)
+		if (rs.fields) {
 			for (let fi = 0; fi < rs.fields.length; fi++)
 				init_field(rs.fields[fi], fi)
+			init_field({hidden: true, name: '$$group', label: 'Group'}, rs.fields.length)
+		}
 
 		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
 		e.pk_fields = optflds(e.pk)
@@ -954,6 +956,7 @@ ui.nav = function(opt) {
 
 		init_all_rows()
 		init_tree()
+		init_groups()
 
 		init_fields()
 		init_rows()
@@ -981,7 +984,7 @@ ui.nav = function(opt) {
 
 	function reset_tree() {
 		reset_tree_fields()
-		if (e.is_tree) {
+		if (e.is_tree || e.is_grouped) {
 			for (let row of e.all_rows) {
 				row.child_rows = null
 				row.parent_row = null
@@ -989,6 +992,7 @@ ui.nav = function(opt) {
 			}
 			e.child_rows = null
 			e.is_tree = false
+			e.is_grouped = false
 		}
 	}
 
@@ -1108,6 +1112,10 @@ ui.nav = function(opt) {
 	function init_fields() {
 		e.fields.length = 0
 		if (e.all_fields.length)
+			if (e.is_grouped) {
+				let group_field = fld('$$group')
+				e.fields.push(group_field)
+			}
 			for (let col of cols_array()) {
 				let field = check_field('col', col)
 				if (field && !field.internal)
@@ -2270,38 +2278,47 @@ ui.nav = function(opt) {
 			}
 		}
 		flatten(tree, [], [], depth, add_group, root, 0)
-		pr(root)
 		return {cols, range_defs, root}
 	}
 
-	e.group_cols = ''
-	e.set_group_cols = function() {
+	function init_groups() {
+
 		e.groups = e.row_groups({col_groups: e.group_cols})
-		if (!e.groups)
+		if (!e.groups) {
+			reset_tree()
 			return
+		}
 
 		// convert index tree to row tree
 		e.focus_cell(false, false)
 
-		e.is_tree = true
-		e.tree_field = fld('id')
+		e.is_grouped = true
+
+		init_fields() // make group field visible
+
+		e.group_field = fld('$$group')
+		e.tree_field = e.group_field
+
 		e.rows = []
 		function push_row(row, parent_row, depth) {
 			row.parent_row = parent_row
 			row.depth = depth
 			e.rows.push(row)
 		}
+		let group_fi = e.group_field.val_index
 		function push_group_or_row(group, parent_row, depth) {
 			let row
 			if (group.key_vals) { // it's a group
 
-				let vals = obj()
+				row = []
 				let i = 0
+				row[group_fi] = []
 				for (let col of words(group.key_cols)) {
 					let val = group.key_vals[i++]
-					vals[col] = val
+					let field = fld(col)
+					row[group_fi].push(field.draw_text(val))
 				}
-				row = e.deserialize_row_vals(vals)
+				row[group_fi] = row[group_fi].join(' / ')
 
 				push_row(row, parent_row, depth)
 				row.child_rows = []
@@ -2327,6 +2344,11 @@ ui.nav = function(opt) {
 		}
 
 		update_row_index()
+}
+
+	e.group_cols = ''
+	e.set_group_cols = function() {
+		sort_rows()
 		e.announce('rows_changed')
 		e.focus_cell(true, true)
 
@@ -2405,16 +2427,13 @@ ui.nav = function(opt) {
 
 	function init_tree() {
 
-		if (e.groups)
-			return
-
-		e.is_tree = true
-
 		e.can_be_tree = !!e.parent_field
 		if (!e.can_be_tree || e.flat || e.must_be_flat) {
 			reset_tree()
 			return
 		}
+
+		e.is_tree = true
 
 		e.child_rows = []
 		for (let row of e.all_rows) {
@@ -2499,7 +2518,7 @@ ui.nav = function(opt) {
 	}
 
 	e.set_collapsed = function(row, collapsed, recursive) {
-		if (!e.is_tree)
+		if (!(e.is_tree || e.is_grouped))
 			return
 		if (row)
 			set_collapsed(row, collapsed, recursive)
@@ -2590,35 +2609,31 @@ ui.nav = function(opt) {
 	}
 
 	function sort_rows() {
+		// if the rows are not going to be sorted, then they need to be
+		// recreated to achieve rowset order.
 		let must_create_rows = !e.rows || !order_by_map.size
 		let must_sort = !!order_by_map.size
 		let cmp = row_comparator(order_by_map)
-
-		if (must_create_rows) {
-			e.rows = []
-			if (e.is_tree) {
-				if (!must_sort)
+		if (e.is_tree || e.is_grouped) {
+			if (must_create_rows && !must_sort)
+				if (e.is_tree)
 					init_tree()
-				if (cmp)
-					sort_child_rows(e.child_rows, cmp)
-				add_visible_child_rows(e.child_rows)
-			} else {
+				else
+					init_groups()
+			if (cmp)
+				sort_child_rows(e.child_rows, cmp)
+			e.rows = []
+			add_visible_child_rows(e.child_rows)
+		} else {
+			if (must_create_rows) {
+				e.rows = []
 				for (let row of e.all_rows)
 					if (e.is_row_visible(row))
 						e.rows.push(row)
-				if (cmp)
-					e.rows.sort(cmp)
 			}
-		} else {
-			if (e.is_tree) {
-				sort_child_rows(e.child_rows, cmp)
-				e.rows = []
-				add_visible_child_rows(e.child_rows)
-			} else {
+			if (cmp)
 				e.rows.sort(cmp)
-			}
 		}
-
 		update_row_index()
 	}
 
@@ -2889,7 +2904,7 @@ ui.nav = function(opt) {
 	}
 
 	e.is_row_visible = function(row) {
-		if (e.is_tree && row.parent_collapsed)
+		if ((e.is_tree || e.is_grouped) && row.parent_collapsed)
 			return false
 		return is_row_visible(row)
 	}
@@ -2914,7 +2929,7 @@ ui.nav = function(opt) {
 
 	// row layout: [f1_val, f2_val, ..., row_index, f1_k1, f2_k1, ..., f1_k2, f2_k2, ...].
 	// a row grows dynamically for every new key that needs to be allocated:
-	//	value slots for that key are added the end of the row for all fields.
+	//	value slots for that key are added at the end of the row for all fields.
 	// the slot at `e.all_fields.length` is reserved for storing the row index.
 	function cell_state_val_index(key, field, allocate) {
 		if (key == 'val')
@@ -5067,8 +5082,6 @@ ui.nav = function(opt) {
 	assign(e, opt)
 	init()
 	initializing = false
-
-	e.set_group_cols()
 
 	return e
 }
