@@ -46,8 +46,8 @@ THEME API
 	*_color_rgb     (name, [state], [theme]) -> 0xRRGGBB                  get theme color for WebGL, ignoring alpha
 	*_color_rgba    (name, [state], [theme]) -> 0xRRGGBBAA                get theme color for WebGL, with alpha
 	bg_is_dark      (bg_color) -> t|f                                     based on this, text is white or black
-	get_theme       () -> dark|light
 	dark            () -> t|f
+	get_theme       () -> dark|light
 	hsl             (h, s, L, a) -> css_color              make a CSS color from HSL components
 	hsl_adjust      (c, h, s, L, a) -> css_color           make a CSS color from a color_hsl() return value, with h, s, L adjusted
 	alpha_adjust    (c, a) -> css_color                    make a CSS color from a color_hsl() return value, with alpha adjusted

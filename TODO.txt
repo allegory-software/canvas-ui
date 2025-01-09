@@ -1,3 +1,10 @@
+TODO GRID
+------------------------------------------------------------------------------
+- drop group-by column
+- move column to group-by bar
+- move column from group-by bar to column-bar
+- auto-hide/show group-by bar
+
 
 BUGS
 ------------------------------------------------------------------------------
@@ -10,10 +17,9 @@ THINK
 - solve the IMGUI achilles heel:
 	widgets depending on the state of other widgets that appear later in the frame.
 		solutions:
-			- cmd record buffers
-			- events
-			- forced re-layouting without redrawing
-			- update callback when reading state(id)
+			* cmd record buffers
+			* forced re-layouting without redrawing
+			* update callback when reading state(id)
 
 - bb on text
 - bb on scrollbox?
@@ -33,12 +39,13 @@ GOALS
 * IMGUI with popups and layouting
 * remote screen sharing
 	* with input routing
-	- with client-side themes
+	* with client-side themes
 
 IMGUI
 
 - drawing
-	* z-index
+	* global z-index
+	- local z-index
 	* text
 	* bg-color
 	* border
@@ -78,17 +85,19 @@ IMGUI
 	* put it behind the canvas with correct width & height
 		- route keyboard events to it
 		* redraw it on canvas with offset and selection
+		- reuse a single global input object for all inputs
 
 CHALLENGES
 
 * input on a canvas
 - textarea on a canvas
 * webgl2 canvas on a 2d canvas
-* word wrapping (our layout algo supports word-wrapping for horizontal text)
+* word wrapping for horizontal text
 - rich text on a canvas (inline box model)
 
 PROS vs WEB
-- stateless i.e. reactive / IMGUI (but with layouting and z-index and no frame lag)
+- stateless i.e. reactive / IMGUI
+	- but with layouting and z-index and no frame lag
 - simpler and far more productive layouting and styling models
 - global z-index, allowing for:
 	- relatively-positioned but painted-last popups

@@ -52,4 +52,3 @@ not feasible because of missing APIs. Text APIs in particular are very crude
 in the browser, so things like BiDi (UAX#9), Unicode line breaking (UAX#14),
 dictionary-based word wrapping, underlines that break under letter stems,
 all those things are hard, and we don't implement them.
-

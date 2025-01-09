@@ -510,7 +510,7 @@ function init_nav(id, e) {
 
 	let render_group_by_bar
 	{
-	let drag_col
+	let drag_col, drag_col_def, drop_level
 	let mover, xs, is, x0, y0
 	let levels = []
 	let min_levels = []
@@ -532,6 +532,7 @@ function init_nav(id, e) {
 				let [state, dx, dy] = ui.drag(gc_id)
 				if (state == 'drag') {
 					drag_col = col
+					drag_col_def = def
 					mover = ui.live_move_mixin()
 					is = [] // col_index -> col_visual_index
 					xs = [] // col_index -> col_x
@@ -577,6 +578,8 @@ function init_nav(id, e) {
 						let min_level = min_levels[vi]
 						let max_level = max_levels[vi]
 						level = clamp(round((y0 + dy) / 10), min_level, max_level)
+						levels[vi] = level
+						drop_level = level
 					}
 					x = xs[def.index]
 					y = level * 10
@@ -600,8 +603,38 @@ function init_nav(id, e) {
 					drag_col_rec = ui.end_record()
 
 				if (state == 'drop') {
+
+					let over_i = mover.move_element_stop()
+					let a = []
+					for (let col of e.groups.cols) {
+						let def = e.groups.range_defs[col]
+						let vi = is[def.index]
+						let level = levels[vi]
+						a.push([col, level])
+					}
+					array_move(a, drag_col_def.index, 1, over_i, true)
+					let t = []
+					let last_level = 0
+					let i = 0
+					for (let [col, level] of a) {
+						if (level != last_level)
+							t.push(' > ')
+						t.push(col)
+						let def = e.groups.range_defs[col]
+						if (def.offset != null) t.push('/', def.offset)
+						if (def.unit   != null) t.push('/', def.unit)
+						if (def.freq   != null) t.push('/', def.freq)
+						t.push(' ')
+						last_level = level
+						i++
+					}
+					e.group_cols = t.join('')
+
 					drag_col = null
-					mover    = null
+					drag_col_def = null
+					mover = null
+					xs = null
+					is = null
 				}
 			}
 

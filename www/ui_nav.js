@@ -2284,6 +2284,7 @@ ui.nav = function(opt) {
 	function init_groups() {
 
 		e.groups = e.row_groups({col_groups: e.group_cols})
+
 		if (!e.groups) {
 			reset_tree()
 			return
@@ -2348,6 +2349,7 @@ ui.nav = function(opt) {
 
 	e.group_cols = ''
 	e.set_group_cols = function() {
+		init_groups()
 		sort_rows()
 		e.announce('rows_changed')
 		e.focus_cell(true, true)
