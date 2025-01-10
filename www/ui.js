@@ -1062,11 +1062,11 @@ ui.captured = captured
 
 {
 let out = [null, 0, 0]
-ui.drag = function(id, move, dx0, dy0) {
-	let move_x = !move || move == 'x' || move == 'xy'
-	let move_y = !move || move == 'y' || move == 'xy'
-	let dx = dx0 ?? 0
-	let dy = dy0 ?? 0
+ui.drag = function(id, axis) {
+	let move_x = !axis || axis == 'x' || axis == 'xy'
+	let move_y = !axis || axis == 'y' || axis == 'xy'
+	let dx = 0
+	let dy = 0
 	let cs = captured(id)
 	let state = null
 	if (cs) {
