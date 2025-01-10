@@ -531,6 +531,8 @@ function init_nav(id, e) {
 				let gc_id = id+'.group_col.'+col
 				let [state, dx, dy] = ui.drag(gc_id)
 				if (state == 'drag') {
+
+					// start dragging group-bar columns using a live_move_mixin.
 					drag_col = col
 					drag_col_def = def
 					mover = ui.live_move_mixin()
@@ -548,6 +550,9 @@ function init_nav(id, e) {
 					x0 = x
 					y0 = y
 
+					// compute the allowed ranges that the dragged column is allowed
+					// to move vertically in each horizontal position that it finds
+					// itself in (since it can move in both directions).
 					let last_level = 0
 					let i = 0
 					for (let col of e.groups.cols) {
@@ -557,10 +562,13 @@ function init_nav(id, e) {
 						min_levels[i] = level
 						max_levels[i] = level
 						if (level != last_level) {
-							if (min_levels[i])
-								min_levels[i]--
-							if (last_level)
+							min_levels[i]--
+							if (i > 0)
 								max_levels[i-1]++
+						} else if (i == 1) {
+							min_levels[i-1]--
+						} else if (i > 0 && i == e.groups.cols.length-1) {
+							max_levels[i]++
 						}
 						last_level = level
 						i++
@@ -612,9 +620,10 @@ function init_nav(id, e) {
 						let level = levels[vi]
 						a.push([col, level])
 					}
+
 					array_move(a, drag_col_def.index, 1, over_i, true)
 					let t = []
-					let last_level = 0
+					let last_level = a[0][1] // can be -1..1 from dragging
 					let i = 0
 					for (let [col, level] of a) {
 						if (level != last_level)
