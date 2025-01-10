@@ -2345,7 +2345,7 @@ ui.nav = function(opt) {
 		}
 
 		update_row_index()
-}
+	}
 
 	e.group_cols = ''
 	e.set_group_cols = function() {

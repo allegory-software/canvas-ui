@@ -509,28 +509,31 @@ function init_nav(id, e) {
 	// group-by bar -----------------------------------------------------------
 
 	let render_group_by_bar
+	let render_group_by_bar_col_move
 	{
-	let drag_col, drag_col_def, drop_level
+	let drag_col, drag_col_def, drop_level, drag_col_rec
 	let mover, xs, is, x0, y0
 	let levels = []
 	let min_levels = []
 	let max_levels = []
 
 	render_group_by_bar = function() {
-		ui.sb('', 0, 'hide', 'hide', 's', 't', null, cell_h * 2)
+		let group_bar_i = ui.sb('', 0, 'hide', 'hide', 's', 't', null, cell_h * 2)
 			ui.bb('', 'bg2', null, 'tb', 'light')
 
 			let w = 80
 			let h = line_height + ui.sp()
+			let cols = e.groups?.cols || empty_array
 
-			let drag_col_rec
-			for (let col of e.groups?.cols || empty_array) {
-				let def = e.groups.range_defs[col]
-				let x = def.index * (w + 1)
-				let y = def.group_level * 10
+			// check columns for dragging
+			for (let col of cols) {
 				let gc_id = id+'.group_col.'+col
 				let [state, dx, dy] = ui.drag(gc_id)
 				if (state == 'drag') {
+
+					let def = e.groups.range_defs[col]
+					let x = def.index * (w + 1)
+					let y = def.group_level * 10
 
 					// start dragging group-bar columns using a live_move_mixin.
 					drag_col = col
@@ -550,9 +553,10 @@ function init_nav(id, e) {
 					x0 = x
 					y0 = y
 
-					// compute the allowed ranges that the dragged column is allowed
-					// to move vertically in each horizontal position that it finds
-					// itself in (since it can move in both directions).
+					// compute the allowed level ranges that the dragged column is
+					// allowed to move vertically in each horizontal position that
+					// it finds itself in (since it can move in both directions).
+					// these ranges remain fixed while moving.
 					let last_level = 0
 					let i = 0
 					for (let col of e.groups.cols) {
@@ -573,28 +577,56 @@ function init_nav(id, e) {
 						last_level = level
 						i++
 					}
-
 				}
+			}
+
+			if (mover) {
+				let gc_id = id+'.group_col.'+drag_col
+				let [state, dx, dy] = ui.drag(gc_id)
 				if (state == 'drag' || state == 'dragging') {
 					mover.move_element_update(x0 + dx)
-				}
-
-				if (mover) {
+					let def = e.groups.range_defs[drag_col]
 					let vi = is[def.index]
 					let level = levels[vi]
-					if (drag_col == col) {
-						let min_level = min_levels[vi]
-						let max_level = max_levels[vi]
-						level = clamp(round((y0 + dy) / 10), min_level, max_level)
-						levels[vi] = level
+					let min_level = min_levels[vi]
+					let max_level = max_levels[vi]
+					let my = y0 + dy
+					level = clamp(round(my / 10), min_level, max_level)
+					let min_y = min_level * 10 - ui.sp2()
+					let max_y = max_level * 10 + ui.sp2()
+					if (my >= min_y && my <= max_y) { // move
 						drop_level = level
+					} else { // remove
+						drop_level = null
+						mover.move_element_update(null)
 					}
-					x = xs[def.index]
-					y = level * 10
+				}
+			}
+
+			drag_col_rec = null
+			for (let col of cols) {
+
+				let def = e.groups.range_defs[col]
+				let x = def.index * (w + 1)
+				let y = def.group_level * 10
+
+				let gc_id = id+'.group_col.'+col
+				let [state, dx, dy] = ui.drag(gc_id)
+
+				if (mover) {
+					if (col == drag_col && drop_level == null) {
+						x = x0 + dx
+						y = y0 + dy
+					} else {
+						let vi = is[def.index]
+						let level = col == drag_col ? drop_level : levels[vi]
+						x = xs[def.index]
+						y = level * 10
+					}
 				}
 
 				if (drag_col == col)
-					ui.record()
+					ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
 
 				ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
 				ui.stack(gc_id, 0, 'l', 't', w, h)
@@ -608,7 +640,7 @@ function init_nav(id, e) {
 				ui.end_stack()
 
 				if (drag_col == col)
-					drag_col_rec = ui.end_record()
+					ui.end_popup()
 
 				if (state == 'drop') {
 
@@ -617,7 +649,7 @@ function init_nav(id, e) {
 					for (let col of e.groups.cols) {
 						let def = e.groups.range_defs[col]
 						let vi = is[def.index]
-						let level = levels[vi]
+						let level = col == drag_col ? drop_level : levels[vi]
 						a.push([col, level])
 					}
 
@@ -647,11 +679,15 @@ function init_nav(id, e) {
 				}
 			}
 
-			if (drag_col_rec)
-				ui.record_play(drag_col_rec)
-
 		ui.end_sb()
 	}
+
+	render_group_by_bar_col_move = function() {
+		if (!drag_col_rec) return
+		// ui.record_play(drag_col_rec)
+		// drag_col_rec = null
+	}
+
 	} // render_group_by_bar scope
 
 	// render grid ------------------------------------------------------------
@@ -681,7 +717,7 @@ function init_nav(id, e) {
 
 			render_group_by_bar()
 
-			// header
+			// header cell
 
 			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
@@ -738,12 +774,17 @@ function init_nav(id, e) {
 
 			ui.end_scrollbox()
 
-			let cells_h = e.rows.length * cell_h
+			// cells
 
+			let cells_h = e.rows.length * cell_h
 			let overflow = auto_expand ? 'contain' : 'auto'
 			sb_i = ui.scrollbox(id+'.cells_scrollbox', 1, overflow, overflow, 's', 's')
 				ui.frame(noop, on_cellview_frame, 0, 'l', 't', cells_w, cells_h)
 			ui.end_scrollbox()
+
+			// group-by bar col move
+
+			render_group_by_bar_col_move()
 
 		ui.end_v()
 
@@ -815,8 +856,8 @@ function init_nav(id, e) {
 		if (state == 'dragging' && dy < -10 && hit_state == 'col_move') {
 
 			let field = e.fields[hit_fi]
-			pr('here')
 			hit_state = 'col_group'
+			//
 
 		}
 

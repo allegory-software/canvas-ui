@@ -4,6 +4,15 @@ TODO GRID
 - move column from group-by bar to column-bar
 - auto-hide/show group-by bar
 
+TODO CORE UI
+------------------------------------------------------------------------------
+- remove scopes and automatic container scopes and replace them with
+	begin_font() end_font()
+	begin_bold() end_bold()
+
+	- careful with begin_rec()
+	- careful with frames
+
 
 BUGS
 ------------------------------------------------------------------------------

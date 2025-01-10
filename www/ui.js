@@ -6668,7 +6668,7 @@ ui.box_widget('frame_graph', {
 
 // implements:
 //   move_element_start(move_i, move_n, i1, i2[, x1, x2])
-//   move_element_update(elem_x, [i1, i2, x1, x2])
+//   move_element_update(elem_x)
 //   move_element_stop() -> over_i
 // uses:
 //   movable_element_size(elem_i) -> w
@@ -6758,7 +6758,7 @@ ui.live_move_mixin = function(e) {
 
 	function set_moving_element_pos(x, moving, vi) {
 		for (let i = move_i1; i < move_i2; i++) {
-			e.set_movable_element_pos(i, offsetx + x, moving, vi)
+			e.set_movable_element_pos(i, x != null ? offsetx + x : null, moving, vi)
 			x += sizes[i]
 			if (vi != null)
 				vi++
@@ -6766,11 +6766,11 @@ ui.live_move_mixin = function(e) {
 	}
 
 	e.move_element_update = function(elem_x) {
-		elem_x = clamp(elem_x, i1x, i2x)
+		elem_x = elem_x != null ? clamp(elem_x, i1x, i2x) : null
 		if (elem_x != move_x) {
 			move_x = elem_x
 			e.move_x = move_x
-			if (hit_test(move_x)) { // first time always hits because over_i is null
+			if (hit_test(move_x ?? 1/0)) { // first time always hits because over_i is null
 				e.over_i = over_i
 				e.over_p = over_p
 				let x = i1x
@@ -6780,10 +6780,12 @@ ui.live_move_mixin = function(e) {
 				each_index(function(i, moving) {
 					if (moving) {
 						over_x = over_x ?? x
-						e.set_movable_element_pos(i, offsetx + mx, true, vi)
-						mx += sizes[i]
-					} else
+						e.set_movable_element_pos(i, mx != null ? offsetx + mx : null, true, vi)
+						if (mx != null)
+							mx += sizes[i]
+					} else {
 						e.set_movable_element_pos(i, offsetx + x, false, vi)
+					}
 					x += sizes[i]
 					vi++
 				})
