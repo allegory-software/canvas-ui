@@ -1,5 +1,6 @@
 TODO GRID
 ------------------------------------------------------------------------------
+- hide grouped colums
 - move column to group-by bar
 - move column from group-by bar to column-bar
 - auto-hide/show group-by bar
@@ -113,7 +114,7 @@ PROS vs WEB
 - transition animations for in-layout objects, allowing for:
 	- animated element moving, drag/drop and selection under/overlays
 - streamable and replayable rendering, for sreen-sharing and remote interaction
-- super-fast and memory-efficient with very low gc pressure between frames.
+- fast and memory-efficient with low gc pressure between frames.
 - complex widgets built with a combination of box-stacking and custom-drawing.
 
 CONS vs WEB

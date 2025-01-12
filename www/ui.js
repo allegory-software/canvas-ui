@@ -93,6 +93,7 @@ MOUSE STATE
 	hit             (id[, k) -> hit_state_map | v | null    get hit state map if mouse hovers widget and not captured
 	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget incl. if mouse captured
 	hover           (id) -> hit_state_map       declare that mouse hovers widget
+	nohit           ()      exclude last command from hit-testing
 
 	drag            (id, move, dx0, dy0) -> [null|hover|drag|dragging|drop, dx, dy]
 
@@ -622,23 +623,25 @@ ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
 //           theme    name     state       h     s     L    a
 // ---------------------------------------------------------------------------
-ui.fg_style('light', 'text' , 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'text' , 'hover'  ,   0, 0.00, 0.30)
-ui.fg_style('light', 'text' , 'active' ,   0, 0.00, 0.40)
-ui.fg_style('light', 'label', 'normal' ,   0, 0.00, 0.00)
-ui.fg_style('light', 'label', 'hover'  ,   0, 0.00, 0.00, 0.9)
-ui.fg_style('light', 'link' , 'normal' , 222, 0.00, 0.50)
-ui.fg_style('light', 'link' , 'hover'  , 222, 1.00, 0.70)
-ui.fg_style('light', 'link' , 'active' , 222, 1.00, 0.80)
+ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
+ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
+ui.fg_style('light', 'text'   , 'active' ,   0, 0.00, 0.40)
+ui.fg_style('light', 'label'  , 'normal' ,   0, 0.00, 0.00)
+ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
+ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
+ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
+ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
+ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
 
-ui.fg_style('dark' , 'text' , 'normal' ,   0, 0.00, 0.90)
-ui.fg_style('dark' , 'text' , 'hover'  ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'text' , 'active' ,   0, 0.00, 1.00)
-ui.fg_style('dark' , 'label', 'normal' ,   0, 0.00, 0.95, 0.7)
-ui.fg_style('dark' , 'label', 'hover'  ,   0, 0.00, 0.90, 0.9)
-ui.fg_style('dark' , 'link' , 'normal' ,  26, 0.88, 0.60)
-ui.fg_style('dark' , 'link' , 'hover'  ,  26, 0.99, 0.70)
-ui.fg_style('dark' , 'link' , 'active' ,  26, 0.99, 0.80)
+ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
+ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
+ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
+ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)
+ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
+ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
+ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
+ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
+ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
 
 ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
@@ -655,17 +658,18 @@ ui.border_color = border_color
 ui.border_color_rgb  = lookup_color_rgb_int_func(border_color_hsl)
 ui.border_color_rgba = lookup_color_rgba_int_func(border_color_hsl)
 
-//               theme    name        state       h    s    L     a
+//               theme    name        state       h     s     L     a
 // ---------------------------------------------------------------------------
-ui.border_style('light', 'light'   , 'normal' ,   0,   0,   0, 0.10)
-ui.border_style('light', 'light'   , 'hover'  ,   0,   0,   0, 0.30)
-ui.border_style('light', 'intense' , 'normal' ,   0,   0,   0, 0.30)
-ui.border_style('light', 'intense' , 'hover'  ,   0,   0,   0, 0.40)
+ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
+ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
+ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
+ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
 
-ui.border_style('dark' , 'light'   , 'normal' ,   0,   0,   1, 0.09)
-ui.border_style('dark' , 'light'   , 'hover'  ,   0,   0,   1, 0.03)
-ui.border_style('dark' , 'intense' , 'normal' ,   0,   0,   1, 0.20)
-ui.border_style('dark' , 'intense' , 'hover'  ,   0,   0,   1, 0.40)
+ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
+ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
+ui.border_style('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
+ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
+ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 // background colors ---------------------------------------------------------
 
@@ -1468,10 +1472,22 @@ let cmd_arg_end_i = (a, i) => a[i-2] - 3
 
 let rec_freelist = array_freelist()
 
+function rec() {
+	let a = rec_freelist.alloc()
+	return a
+}
+
+function free_rec(a) {
+	a.length = 0
+	if (a.nohit_set)
+		a.nohit_set.clear()
+	rec_freelist.free(a)
+}
+
 let rec_stack = []
 
 ui.record = function() {
-	let a1 = rec_freelist.alloc()
+	let a1 = rec()
 	rec_stack.push(a)
 	a = a1
 }
@@ -1483,11 +1499,6 @@ ui.end_record = function() {
 }
 
 let reindex = []
-
-function rec_free(a) {
-	a.length = 0
-	rec_freelist.free(a)
-}
 
 ui.record_play = function(a1) {
 
@@ -1507,7 +1518,7 @@ ui.record_play = function(a1) {
 	}
 
 	a.push(...a1)
-	rec_free(a1)
+	free_rec(a1)
 }
 
 function rec_stack_check() {
@@ -1519,7 +1530,7 @@ let rec_i
 
 function begin_rec() {
 	let a0 = a
-	a = rec_freelist.alloc()
+	a = rec()
 	rec_i = recs.length
 	recs.push(a)
 	return a0
@@ -1533,7 +1544,7 @@ function end_rec(a0) {
 
 function free_recs() {
 	for (let a of recs)
-		rec_free(a)
+		free_rec(a)
 	recs.length = 0
 }
 
@@ -1568,10 +1579,12 @@ function clear_layers() {
 
 const layer_base =
 ui_layer('base'   , 0)
-ui_layer('handle' , 1)
-ui_layer('window' , 2)
+ui_layer('window' , 1) // modals
+// all these below must be temporary to work with modals!
+ui_layer('overlay', 2) // temporary overlays that must show behind the dragged object.
 ui_layer('tooltip', 3)
-ui_layer('open'   , 4)
+ui_layer('open'   , 4) // dropdowns, must cover tooltips
+ui_layer('handle' , 5) // dragged object
 
 let layer_stack = [] // [layer1_i, ...]
 let layer_i // current layer = layer_arr[layer_i]
@@ -1742,6 +1755,12 @@ function hover(id) {
 }
 ui.hover = hover
 
+ui.nohit = function() {
+	if (!a.nohit_set)
+		a.nohit_set = set()
+	a.nohit_set.add(a.at(-1))
+}
+
 function hit_frame(recs, layers) {
 
 	ui.set_cursor()
@@ -1771,7 +1790,7 @@ function hit_frame(recs, layers) {
 			let i     = indexes[k+1]
 			let a = recs[rec_i]
 			let hit_f = hittest[a[i-1]]
-			if (hit_f(a, i, recs)) {
+			if (!a.nohit_set?.has(i) && hit_f(a, i, recs)) {
 				j = -1
 				break
 			}
@@ -1941,18 +1960,7 @@ function redraw_all() {
 
 		t0 = clock_ms()
 
-		if (ui.captured_id != null) {
-			ui.hit_for = 'captured'
-			hit_frame(recs, layers)
-			if (ui.dragging) {
-				ui.hit_for = 'drop'
-				hit_frame(recs, layers)
-			}
-		} else {
-			ui.hit_for = 'hover'
-			hit_frame(recs, layers)
-		}
-		ui.hit_for = null
+		hit_frame(recs, layers)
 
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
@@ -2315,13 +2323,14 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 			return true
 		}
 	}
-	return ui.widget(cmd_name, assign({
+	return ui.widget(cmd_name, {
 		measure   : do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
 		position  : do_after(do_before(box_position  , t.before_position ), t.after_position ),
 		translate : do_after(do_before(box_translate , t.before_translate), t.after_translate),
 		hit       : ID != null && box_hit,
 		is_flex_child: true,
-	}, t), is_ct)
+		...t,
+	}, is_ct)
 }
 
 // container-box widgets -----------------------------------------------------
@@ -3622,10 +3631,21 @@ const BB_CT_I = 1
 
 const CMD_BB = cmd('bb') // border-background
 
-ui.bb = function(id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius) {
+let border_dashes = {
+	dots   : [1, 1],
+	dashes : [2, 6],
+}
+
+ui.bb = function(id,
+	bg_color, bg_color_state,
+	border_sides, border_color, border_color_state, border_radius, border_dash
+) {
+	if (border_dash)
+		assert(border_dashes[border_dash], 'invalid border dash ', border_dash)
 	ui_cmd(CMD_BB, id ?? 0, ui.ct_i(), bg_color ?? 0, parse_state(bg_color_state),
-		parse_border_sides(sides), border_color ?? 0, parse_state(border_color_state),
+		parse_border_sides(border_sides), border_color ?? 0, parse_state(border_color_state),
 		round((border_radius ?? 0) * 128),
+		border_dash ?? null,
 	)
 }
 
@@ -3713,6 +3733,7 @@ draw[CMD_BB] = function(a, i) {
 	let border_color       = a[i+5]
 	let border_color_state = a[i+6]
 	let border_radius      = a[i+7] / 128
+	let border_dash        = a[i+8]
 	if (bg_color) {
 		set_bg_color(bg_color, bg_color_state)
 		bg_path(cx, x, y, x + w, y + h, border_sides, border_radius)
@@ -3724,8 +3745,12 @@ draw[CMD_BB] = function(a, i) {
 		cx.strokeStyle = ui_border_color(border_color, border_color_state)
 		cx.lineCap = 'square'
 		border_path(cx, x + .5, y + .5, x + w - .5, y + h - .5, border_sides, border_radius)
+		if (border_dash)
+			cx.setLineDash(border_dashes[border_dash])
 		cx.stroke()
 		cx.lineCap = 'butt'
+		if (border_dash)
+			cx.setLineDash(empty_array)
 	}
 }
 
@@ -4205,8 +4230,6 @@ measure[CMD_TEXT] = function(a, i, axis) {
 	}
 	a[i+2+axis] += paddings(a, i, axis)
 	let min_w = a[i+2+axis]
-	if (a[i+TEXT_S] == 'hello hello hello')
-		pr(axis, min_w)
 	add_ct_min_wh(a, axis, min_w)
 }
 
@@ -4232,6 +4255,7 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 is_flex_child[CMD_TEXT] = true
 
 translate[CMD_TEXT] = function(a, i, dx, dy) {
+	let s = a[i+TEXT_S]
 	a[i+0] += dx
 	a[i+1] += dy
 	a[i+TEXT_X] += dx
@@ -5646,7 +5670,7 @@ ui.box_widget('toggle', toggle)
 
 // checkbox ------------------------------------------------------------------
 
-let checkbox = assign({}, toggle)
+let checkbox = {...toggle}
 
 checkbox.create = function(cmd, id, fr, align, valign, min_w, min_h) {
 	return toggle.create(cmd, id, fr, align, valign,
@@ -5706,7 +5730,7 @@ ui.box_widget('checkbox', checkbox)
 
 // radio ---------------------------------------------------------------------
 
-let radio = assign({}, checkbox)
+let radio = {...checkbox}
 
 let RADIO_GROUP_ID = S+0
 
@@ -6361,7 +6385,7 @@ ui.widget('hue_bar', {
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
-		let hs = ui.hit_for == 'captured' ? ui.captured(id) : hit_rect(x, y, w, h) && hover(id)
+		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
 		if (hs) {
 			let hue = clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360)
 			hs.set('hue', hue)
