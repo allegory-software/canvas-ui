@@ -327,8 +327,6 @@ ui.stack('', 0, 'c', 'c', 500, 500)
 		rowset: tree_rowset,
 		order_by: 'active name:desc',
 		tree_col: 'name',
-		w: 606,
-		h: 400,
 		//can_edit: false,
 		can_change_header_visibility: true,
 		//can_focus_cells: false,
@@ -342,9 +340,6 @@ ui.end_stack()
 }
 
 {
-function starts_with_a(s) {
-	return s.lower().starts('a') || 'Name must start with "A"'
-}
 let fields = [
 	{name: 'id'        , w:  50, min_w:  30, type: 'number', editable: false},
 	{name: 'name'      , w: 100},
@@ -368,6 +363,7 @@ food_rowset = {
 	rows: rows,
 	pk: 'id',
 }
+grid_state = {}
 demos.grid_groups = `
 ui.stack('', 0, 'c', 'c', 500, 500)
 	ui.grid('groups_grid', {
@@ -377,9 +373,8 @@ ui.stack('', 0, 'c', 'c', 500, 500)
 		order_by: 'color type:desc',
 		group_cols: 'climate > type good > color',
 		group_cols: 'good type > climate color',
+		col_attrs: {'$$group': {w: 200}},
 		//group_cols: 'type > color',
-		w: 606,
-		h: 400,
 		//can_edit: false,
 		can_change_header_visibility: true,
 		//can_focus_cells: false,

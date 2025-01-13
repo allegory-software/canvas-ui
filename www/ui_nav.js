@@ -662,7 +662,7 @@ ui.nav = function(opt) {
 
 	e.ready = false
 
-	function init() {
+	function init() { // block
 
 		if (e.rowset_name) {
 			bind_rowset_name(e.rowset_name, true)
@@ -682,6 +682,14 @@ ui.nav = function(opt) {
 		bind_rowset_name(e.rowset_name, false)
 	}
 
+	e.sync = function(opt1) {
+		for (let k in opt1) {
+			if (opt[k] !== opt1[k]) {
+
+			}
+		}
+	}
+
 	e.reset = function(ev) {
 
 		abort_all_requests()
@@ -691,7 +699,9 @@ ui.nav = function(opt) {
 
 		e.changed_rows = null // set(row)
 		rows_moved = false
-		init_row_validators()
+
+		e.row_validator = create_validator(e)
+
 		init_all_fields()
 
 		if (e.dropdown)
@@ -803,7 +813,7 @@ ui.nav = function(opt) {
 		field.known_values = set(words(v))
 	}
 
-	function init_field_attrs(field, f) {
+	function init_field_attrs(field, f) { // block
 
 		let name = field.given_name || field.name
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
@@ -855,7 +865,7 @@ ui.nav = function(opt) {
 		e.announce(...args)
 	}
 
-	function init_field(f, fi) {
+	function init_field(f, fi) { // block
 
 		let field = obj()
 
@@ -1118,7 +1128,7 @@ ui.nav = function(opt) {
 			}
 			for (let col of cols_array()) {
 				let field = check_field('col', col)
-				if (field && !field.internal)
+				if (field && !field.internal && !e.groups.cols.includes(field.name))
 					e.fields.push(field)
 			}
 		update_field_index()
@@ -1481,7 +1491,7 @@ ui.nav = function(opt) {
 		}
 	}
 
-	function init_all_rows() {
+	function init_all_rows() { // block
 		free_all_rows()
 		e.do_update_load_fail(false)
 		update_indices('invalidate')
@@ -2350,7 +2360,8 @@ ui.nav = function(opt) {
 	e.group_cols = ''
 	e.set_group_cols = function() {
 		init_groups()
-		sort_rows()
+		init_fields()
+		init_rows()
 		e.announce('rows_changed')
 		e.focus_cell(true, true)
 
@@ -3098,10 +3109,6 @@ ui.nav = function(opt) {
 		if (field.min != null) field.min = field.validator.parse(field.min)
 		if (field.max != null) field.max = field.validator.parse(field.max)
 
-	}
-
-	function init_row_validators() {
-		e.row_validator = create_validator(e)
 	}
 
 	function add_validation_errors(validator, errors) {

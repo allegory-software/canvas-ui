@@ -1349,6 +1349,8 @@ ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 		ui.on_free(id, () => nav.free())
 		init_nav(id, nav)
 		s.set('nav', nav)
+	} else {
+		nav.sync(opt)
 	}
 	nav.render(fr, align, valign, min_w, min_h)
 

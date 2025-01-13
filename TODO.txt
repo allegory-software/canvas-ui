@@ -1,6 +1,5 @@
 TODO GRID
 ------------------------------------------------------------------------------
-- hide grouped colums
 - move column to group-by bar
 - move column from group-by bar to column-bar
 - auto-hide/show group-by bar
