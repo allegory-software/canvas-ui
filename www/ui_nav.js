@@ -662,17 +662,6 @@ ui.nav = function(opt) {
 
 	e.ready = false
 
-	function init() { // block
-
-		if (e.rowset_name) {
-			bind_rowset_name(e.rowset_name, true)
-			e.rowset_url = v1 ? '/rowset.json/' + e.rowset_name : null
-		}
-
-		// update_param_vals()
-		e.reload()
-	}
-
 	e.free = function() {
 		e.ready = false
 		e.announce('ready', false)
@@ -813,9 +802,30 @@ ui.nav = function(opt) {
 		field.known_values = set(words(v))
 	}
 
-	function init_field_attrs(field, f) { // block
+	function e_announce(...args) {
+		e.announce(...args)
+	}
 
-		let name = field.given_name || field.name
+	function init_field(f, fi) {
+
+		let field = obj()
+
+		// disambiguate field name.
+		let given_name = (f.name || 'f'+fi)
+		let name = given_name
+		if (name in e.all_fields_map) {
+			let suffix = 2
+			while (name+suffix in e.all_fields_map)
+				suffix++
+			name += suffix
+		}
+
+		if (given_name != name)
+			field.given_name = given_name
+		field.name = name
+		field.val_index = fi
+		field.nav = e
+
 		let pt = e.prop_col_attrs && e.prop_col_attrs[name]
 		let ct = e.col_attrs && e.col_attrs[name]
 		let rt = e.rowset_name && rowset_col_attrs[e.rowset_name+'.'+name]
@@ -828,6 +838,21 @@ ui.nav = function(opt) {
 		for (let k in ifa)
 			ifa[k](field, field[k])
 
+		e.all_fields[fi] = field
+		e.all_fields_map[name] = field
+
+		init_field_own_lookup_nav(field)
+		bind_lookup_nav(field, true)
+
+		if (field.timeago)
+			e.bool('has-timeago', true)
+
+		field.announce = e_announce // for validator
+
+		if (e.init_field)
+			e.init_field(field)
+
+		return field
 	}
 
 	function set_field_attr(field, k, v) {
@@ -861,49 +886,6 @@ ui.nav = function(opt) {
 
 	}
 
-	function e_announce(...args) {
-		e.announce(...args)
-	}
-
-	function init_field(f, fi) { // block
-
-		let field = obj()
-
-		// disambiguate field name.
-		let given_name = (f.name || 'f'+fi)
-		let name = given_name
-		if (name in e.all_fields_map) {
-			let suffix = 2
-			while (name+suffix in e.all_fields_map)
-				suffix++
-			name += suffix
-		}
-
-		if (given_name != name)
-			field.given_name = given_name
-		field.name = name
-		field.val_index = fi
-		field.nav = e
-
-		init_field_attrs(field, f)
-
-		e.all_fields[fi] = field
-		e.all_fields_map[name] = field
-
-		init_field_own_lookup_nav(field)
-		bind_lookup_nav(field, true)
-
-		if (field.timeago)
-			e.bool('has-timeago', true)
-
-		field.announce = e_announce // for validator
-
-		if (e.init_field)
-			e.init_field(field)
-
-		return field
-	}
-
 	e.on_init_field = function(f) {
 		e.do_after('init_field', f)
 	}
@@ -930,15 +912,18 @@ ui.nav = function(opt) {
 	}
 
 	e.all_fields = [] // fields in row value order.
+	e.all_rows = [] // all rows in natural order.
 
 	function init_all_fields() {
 
-		if (e.all_fields)
-			for (let field of e.all_fields)
-				free_field(field)
+		// free all fields
 
+		for (let field of e.all_fields)
+			free_field(field)
 		e.all_fields.length = 0
 		e.all_fields_map = obj() // {col->field}
+
+		// init all fields
 
 		let rs = e.rowset
 
@@ -961,10 +946,71 @@ ui.nav = function(opt) {
 
 		init_tree_fields()
 
-		for (let field of e.all_fields)
-			init_field_validator(field)
+		// init field validators
 
-		init_all_rows()
+		for (let field of e.all_fields) {
+			if (field.readonly)
+				return
+
+			field.validator = create_validator(field)
+
+			for (let k in field) {
+				if (k.startsWith('validator_')) {
+					k = k.replace(/^validator_/, '')
+					let rule = field[k]
+					rule.name = k
+					field.validator.add_rule(rule)
+				}
+			}
+
+			// parsing these here after we have a parser as they depend on type.
+			if (field.min != null) field.min = field.validator.parse(field.min)
+			if (field.max != null) field.max = field.validator.parse(field.max)
+		}
+
+		// free all rows
+
+		if (e.free_row)
+			for (let row of e.all_rows)
+				e.free_row(row)
+		e.all_rows.length = 0
+
+		// init all rows
+
+		e.do_update_load_fail(false)
+		update_indices('invalidate')
+		e.all_rows = e.rowset && (
+				   e.deserialize_all_row_states(e.row_states)
+				|| e.deserialize_all_row_vals(e.row_vals)
+				|| e.deserialize_all_row_vals(e.rowset.row_vals)
+				|| e.rowset.rows
+			) || []
+
+		// validate all rows
+
+		for (let row of e.all_rows) {
+			let cells_failed
+			for (let field of e.all_fields) {
+				if (field.readonly)
+					continue
+				if (field.validator) {
+					let iv = e.cell_input_val(row, field)
+					let failed = !field.validator.validate(iv, false)
+					if (!field.validator.parse_failed)
+						row[field.val_index] = field.validator.value
+					if (failed) {
+						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+						cells_failed = true
+					}
+				}
+			}
+			let row_failed = !e.row_validator.validate(row, false)
+			if (cells_failed || row_failed)
+				e.set_row_state_for(row, 'invalid', true)
+			if (row_failed)
+				e.set_row_state_for(row, 'errors', errors_no_messages)
+		}
+
 		init_tree()
 		init_groups()
 
@@ -1441,13 +1487,6 @@ ui.nav = function(opt) {
 
 	// all rows in load order -------------------------------------------------
 
-	function free_all_rows() {
-		if (e.all_rows && e.free_row)
-			for (let row of e.all_rows)
-				e.free_row(row)
-		e.all_rows = null
-	}
-
 	// parse & validate cells & rows silently and without making too much
 	// garbage and without getting the error messages, just the failed state.
 	function validate_all_rows_of(field) {
@@ -1465,43 +1504,6 @@ ui.nav = function(opt) {
 				e.set_row_state_for(row, 'invalid', true)
 			}
 		}
-	}
-	function validate_all_rows() {
-		for (let row of e.all_rows) {
-			let cells_failed
-			for (let field of e.all_fields) {
-				if (field.readonly)
-					continue
-				if (field.validator) {
-					let iv = e.cell_input_val(row, field)
-					let failed = !field.validator.validate(iv, false)
-					if (!field.validator.parse_failed)
-						row[field.val_index] = field.validator.value
-					if (failed) {
-						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
-						cells_failed = true
-					}
-				}
-			}
-			let row_failed = !e.row_validator.validate(row, false)
-			if (cells_failed || row_failed)
-				e.set_row_state_for(row, 'invalid', true)
-			if (row_failed)
-				e.set_row_state_for(row, 'errors', errors_no_messages)
-		}
-	}
-
-	function init_all_rows() { // block
-		free_all_rows()
-		e.do_update_load_fail(false)
-		update_indices('invalidate')
-		e.all_rows = e.rowset && (
-				   e.deserialize_all_row_states(e.row_states)
-				|| e.deserialize_all_row_vals(e.row_vals)
-				|| e.deserialize_all_row_vals(e.rowset.row_vals)
-				|| e.rowset.rows
-			) || []
-		validate_all_rows()
 	}
 
 	// filtered and custom-sorted subset of all_rows --------------------------
@@ -3088,27 +3090,6 @@ ui.nav = function(opt) {
 
 	e.focused_row_cell_val = function(col) {
 		return e.focused_row && e.cell_val(e.focused_row, col)
-	}
-
-	function init_field_validator(field) {
-		if (field.readonly)
-			return
-
-		field.validator = create_validator(field)
-
-		for (let k in field) {
-			if (k.startsWith('validator_')) {
-				k = k.replace(/^validator_/, '')
-				let rule = field[k]
-				rule.name = k
-				field.validator.add_rule(rule)
-			}
-		}
-
-		// parsing these here after we have a parser as they depend on type.
-		if (field.min != null) field.min = field.validator.parse(field.min)
-		if (field.max != null) field.max = field.validator.parse(field.max)
-
 	}
 
 	function add_validation_errors(validator, errors) {
@@ -5089,7 +5070,15 @@ ui.nav = function(opt) {
 	}
 
 	assign(e, opt)
-	init()
+
+	if (e.rowset_name) {
+		bind_rowset_name(e.rowset_name, true)
+		e.rowset_url = v1 ? '/rowset.json/' + e.rowset_name : null
+	}
+
+	// update_param_vals()
+	e.reload()
+
 	initializing = false
 
 	return e
