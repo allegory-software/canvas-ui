@@ -191,7 +191,7 @@ Indexing:
 		ix.tree() -> index_tree
 		ix.lookup(vals) -> [row1,...]
 		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
-		e.row_groups({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
+		e.group_rows({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
 
 Master-detail:
 	needs:
@@ -591,9 +591,11 @@ ui.nav = function(opt) {
 
 	let e = {}
 
-	e.announce = noop
+	e.announce = function(ev, ...args) {
+		announce(ev, e, ...args)
+	}
+
 	e.disable = noop
-	e.update = noop
 
 	e.override = function(method, func) {
 		this[method] = wrap(this[method], func)
@@ -613,9 +615,9 @@ ui.nav = function(opt) {
 
 	let initializing = true
 
-	e.prop = function(name, opt) {
-		let v = e[name]
-		delete e[name]
+	e.prop = function(name, init_value) {
+		assert(!(name in e))
+		let v = init_value
 		function get() {
 			return v
 		}
@@ -679,7 +681,11 @@ ui.nav = function(opt) {
 		}
 	}
 
+	e.find_row = return_false
+
 	e.reset = function(ev) {
+
+		// clean up so we can free
 
 		abort_all_requests()
 
@@ -691,10 +697,130 @@ ui.nav = function(opt) {
 
 		e.row_validator = create_validator(e)
 
-		init_all_fields()
+		// free all fields
 
-		if (e.dropdown)
-			e.init_as_picker()
+		for (let field of e.all_fields)
+			free_field(field)
+		e.all_fields.length = 0
+		e.all_fields_map = obj() // {col->field}
+
+		// init all fields
+
+		let rs = e.rowset
+
+		if (rs.fields) {
+			for (let fi = 0; fi < rs.fields.length; fi++)
+				init_field(rs.fields[fi], fi)
+			init_field({hidden: true, name: '$$group', label: 'Group'}, rs.fields.length)
+		}
+
+		// init pk field and find_row function.
+
+		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
+		e.pk_fields = optflds(e.pk)
+
+		if (!e.pk_fields) {
+			e.find_row = return_false
+		} else {
+			let pk = e.pk_fields
+			let pk_vs = []
+			let pk_fi = pk.map(f => f.val_index)
+			let n = pk_fi.length
+			e.find_row = function(row) {
+				for (let i = 0; i < n; i++)
+					pk_vs[i] = row[pk_fi[i]]
+				return e.lookup(pk, pk_vs)[0]
+			}
+		}
+
+		// init other functional fields
+
+		e.val_field = check_field('val_col', e.val_col)
+		e.pos_field = check_field('pos_col', rs.pos_col)
+		e.name_field = check_field('name_col', e.name_col ?? rs.name_col)
+		if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
+			e.name_field = e.pk_fields[0]
+		e.display_field = check_field('display_col', e.display_col) || e.name_field
+		e.quicksearch_field = check_field('quicksearch_col', e.quicksearch_col)
+
+		// init tree fields
+
+		e.id_field = check_field('id_col', rs.id_col)
+		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
+			e.id_field = e.pk_fields[0]
+		e.parent_field = check_field('parent_col', rs.parent_col)
+		e.tree_field = check_field('tree_col', e.tree_col ?? rs.tree_col) || e.name_field
+
+		// init field validators
+
+		for (let field of e.all_fields) {
+			if (field.readonly)
+				return
+
+			field.validator = create_validator(field)
+
+			for (let k in field) {
+				if (k.startsWith('validator_')) {
+					k = k.replace(/^validator_/, '')
+					let rule = field[k]
+					rule.name = k
+					field.validator.add_rule(rule)
+				}
+			}
+
+			// parsing these here after we have a parser as they depend on type.
+			if (field.min != null) field.min = field.validator.parse(field.min)
+			if (field.max != null) field.max = field.validator.parse(field.max)
+		}
+
+		// free all rows
+
+		if (e.free_row)
+			for (let row of e.all_rows)
+				e.free_row(row)
+		e.all_rows.length = 0
+
+		// init all rows
+
+		e.do_update_load_fail(false)
+		update_indices('invalidate')
+		e.all_rows = e.rowset && (
+				   e.deserialize_all_row_states(e.row_states)
+				|| e.deserialize_all_row_vals(e.row_vals)
+				|| e.deserialize_all_row_vals(e.rowset.row_vals)
+				|| e.rowset.rows
+			) || []
+
+		// validate all rows
+
+		for (let row of e.all_rows) {
+			let cells_failed
+			for (let field of e.all_fields) {
+				if (field.readonly)
+					continue
+				if (field.validator) {
+					let iv = e.cell_input_val(row, field)
+					let failed = !field.validator.validate(iv, false)
+					if (!field.validator.parse_failed)
+						row[field.val_index] = field.validator.value
+					if (failed) {
+						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+						cells_failed = true
+					}
+				}
+			}
+			let row_failed = !e.row_validator.validate(row, false)
+			if (cells_failed || row_failed)
+				e.set_row_state_for(row, 'invalid', true)
+			if (row_failed)
+				e.set_row_state_for(row, 'errors', errors_no_messages)
+		}
+
+		update_fields()
+		update_rows()
+
+		e.ready = true
+		e.announce('ready', true)
 
 		e.refocus(fs)
 
@@ -802,8 +928,8 @@ ui.nav = function(opt) {
 		field.known_values = set(words(v))
 	}
 
-	function e_announce(...args) {
-		e.announce(...args)
+	function field_announce(...args) {
+		e.announce(this, ...args)
 	}
 
 	function init_field(f, fi) {
@@ -847,7 +973,7 @@ ui.nav = function(opt) {
 		if (field.timeago)
 			e.bool('has-timeago', true)
 
-		field.announce = e_announce // for validator
+		field.announce = field_announce // for validator
 
 		if (e.init_field)
 			e.init_field(field)
@@ -914,124 +1040,6 @@ ui.nav = function(opt) {
 	e.all_fields = [] // fields in row value order.
 	e.all_rows = [] // all rows in natural order.
 
-	function init_all_fields() {
-
-		// free all fields
-
-		for (let field of e.all_fields)
-			free_field(field)
-		e.all_fields.length = 0
-		e.all_fields_map = obj() // {col->field}
-
-		// init all fields
-
-		let rs = e.rowset
-
-		if (rs.fields) {
-			for (let fi = 0; fi < rs.fields.length; fi++)
-				init_field(rs.fields[fi], fi)
-			init_field({hidden: true, name: '$$group', label: 'Group'}, rs.fields.length)
-		}
-
-		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
-		e.pk_fields = optflds(e.pk)
-		init_find_row()
-		e.val_field = check_field('val_col', e.val_col)
-		e.pos_field = check_field('pos_col', rs.pos_col)
-		e.name_field = check_field('name_col', e.name_col ?? rs.name_col)
-		if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
-			e.name_field = e.pk_fields[0]
-		e.display_field = check_field('display_col', e.display_col) || e.name_field
-		e.quicksearch_field = check_field('quicksearch_col', e.quicksearch_col)
-
-		init_tree_fields()
-
-		// init field validators
-
-		for (let field of e.all_fields) {
-			if (field.readonly)
-				return
-
-			field.validator = create_validator(field)
-
-			for (let k in field) {
-				if (k.startsWith('validator_')) {
-					k = k.replace(/^validator_/, '')
-					let rule = field[k]
-					rule.name = k
-					field.validator.add_rule(rule)
-				}
-			}
-
-			// parsing these here after we have a parser as they depend on type.
-			if (field.min != null) field.min = field.validator.parse(field.min)
-			if (field.max != null) field.max = field.validator.parse(field.max)
-		}
-
-		// free all rows
-
-		if (e.free_row)
-			for (let row of e.all_rows)
-				e.free_row(row)
-		e.all_rows.length = 0
-
-		// init all rows
-
-		e.do_update_load_fail(false)
-		update_indices('invalidate')
-		e.all_rows = e.rowset && (
-				   e.deserialize_all_row_states(e.row_states)
-				|| e.deserialize_all_row_vals(e.row_vals)
-				|| e.deserialize_all_row_vals(e.rowset.row_vals)
-				|| e.rowset.rows
-			) || []
-
-		// validate all rows
-
-		for (let row of e.all_rows) {
-			let cells_failed
-			for (let field of e.all_fields) {
-				if (field.readonly)
-					continue
-				if (field.validator) {
-					let iv = e.cell_input_val(row, field)
-					let failed = !field.validator.validate(iv, false)
-					if (!field.validator.parse_failed)
-						row[field.val_index] = field.validator.value
-					if (failed) {
-						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
-						cells_failed = true
-					}
-				}
-			}
-			let row_failed = !e.row_validator.validate(row, false)
-			if (cells_failed || row_failed)
-				e.set_row_state_for(row, 'invalid', true)
-			if (row_failed)
-				e.set_row_state_for(row, 'errors', errors_no_messages)
-		}
-
-		init_tree()
-		init_groups()
-
-		init_fields()
-		init_rows()
-
-		e.ready = true
-		e.announce('ready', true)
-	}
-
-	function init_tree_fields() {
-		let rs = e.rowset
-		e.id_field = check_field('id_col', rs.id_col)
-		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
-			e.id_field = e.pk_fields[0]
-		e.parent_field = check_field('parent_col', rs.parent_col)
-		e.tree_field = check_field('tree_col', e.tree_col ?? rs.tree_col) || e.name_field
-		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden)
-			reset_tree_fields()
-	}
-
 	function reset_tree_fields() {
 		e.id_field = null
 		e.parent_field = null
@@ -1053,20 +1061,14 @@ ui.nav = function(opt) {
 	}
 
 	function flat_changed() {
-		reset_tree()
-		init_tree_fields()
-		init_tree()
-		init_rows()
-		e.update({rows: true})
+		update_rows()
 	}
 
-	e.flat = false
 	e.set_flat = flat_changed
-	e.prop('flat')
+	e.prop('flat', false)
 
-	e.must_be_flat = false
 	e.set_must_be_flat = flat_changed
-	e.prop('must_be_flat')
+	e.prop('must_be_flat', false)
 
 	// field attributes exposed as `col.*` props
 
@@ -1083,7 +1085,7 @@ ui.nav = function(opt) {
 		let field = e.all_fields_map[col]
 		if (field) {
 			set_field_attr(field, k, v)
-			e.update({fields: true})
+			update_fields()
 		}
 
 		e.announce('field_changed', field, k, v)
@@ -1141,7 +1143,7 @@ ui.nav = function(opt) {
 
 	e.fields = []
 
-	function init_fields() {
+	function update_fields() {
 		e.fields.length = 0
 		if (e.all_fields.length)
 			if (e.is_grouped) {
@@ -1188,12 +1190,11 @@ ui.nav = function(opt) {
 
 	// visible cols list ------------------------------------------------------
 
+	e.prop('cols')
 	e.set_cols = function() {
 		e.exit_edit()
-		init_fields()
-		e.update({fields: true})
+		update_fields()
 	}
-	e.prop('cols')
 
 	function visible_col(col) {
 		let field = check_field('col', col)
@@ -1240,12 +1241,12 @@ ui.nav = function(opt) {
 	e.move_field = function(fi, over_fi) {
 		if (fi == over_fi)
 			return
+		// todo: use array_move
 		let insert_fi = over_fi - (over_fi > fi ? 1 : 0)
 		let cols = cols_array()
 		let col = remove(cols, fi)
 		insert(cols, insert_fi, col)
 		e.cols = cols_from_array(cols)
-		e.update({fields: true}) // in case cols haven't changed.
 	}
 
 	/* params -----------------------------------------------------------------
@@ -1359,8 +1360,7 @@ ui.nav = function(opt) {
 			return
 		if (!e.rowset_url) { // re-filter and re-focus.
 			e.unfocus_focused_cell({cancel: true})
-			init_rows()
-			e.update({rows: true})
+			update_rows()
 			e.focus_cell()
 		} else {
 			e.reload()
@@ -1506,8 +1506,7 @@ ui.nav = function(opt) {
 
 	function reinit_rows() {
 		let fs = e.refocus_state('row')
-		init_rows()
-		e.update({rows: true})
+		update_rows()
 		e.refocus(fs)
 	}
 
@@ -1842,6 +1841,7 @@ ui.nav = function(opt) {
 			qs_changed = true
 		}
 
+		/*
 		if (row_changed || sel_rows_changed || field_changed || qs_changed)
 			e.update({state: true})
 
@@ -1852,6 +1852,7 @@ ui.nav = function(opt) {
 		if (ev.make_visible != false)
 			if (e.focused_row)
 				e.update({scroll_to_focused_cell: true})
+		*/
 
 		return true
 	}
@@ -1901,7 +1902,6 @@ ui.nav = function(opt) {
 				}
 				e.selected_rows.set(row, sel_fields)
 			}
-		e.update({state: true})
 		if (sel_rows_size_before != e.selected_rows.size)
 			selected_rows_changed()
 	}
@@ -2138,24 +2138,6 @@ ui.nav = function(opt) {
 			indices[cols][method](...args)
 	}
 
-	let find_row
-	function init_find_row() {
-		let pk = e.pk_fields
-		if (!pk) {
-			find_row = return_false
-			return
-		}
-		let lookup = e.lookup
-		let pk_vs = []
-		let pk_fi = pk.map(f => f.val_index)
-		let n = pk_fi.length
-		find_row = function(row) {
-			for (let i = 0; i < n; i++)
-				pk_vs[i] = row[pk_fi[i]]
-			return lookup(pk, pk_vs)[0]
-		}
-	}
-
 	// groups -----------------------------------------------------------------
 
 	function row_groups_one_level(cols, range_defs, rows) {
@@ -2237,7 +2219,7 @@ ui.nav = function(opt) {
 	//   range_defs      : {col->{freq:, unit:, offset:}}
 	//   rows            : [row1,...]
 	//   group_label_sep : separator for multi-col group labels
-	e.row_groups = function(opt) {
+	e.group_rows = function(opt) {
 
 		let {cols, fields, col_groups, range_defs} = parse_group_defs(opt.col_groups, opt.range_defs)
 		if (!fields)
@@ -2271,7 +2253,7 @@ ui.nav = function(opt) {
 
 	function init_groups() {
 
-		e.groups = e.row_groups({col_groups: e.group_cols})
+		e.groups = e.group_rows({col_groups: e.group_cols})
 
 		if (!e.groups) {
 			reset_tree()
@@ -2283,7 +2265,7 @@ ui.nav = function(opt) {
 
 		e.is_grouped = true
 
-		init_fields() // make group field visible
+		update_fields() // make group field visible
 
 		e.group_field = fld('$$group')
 		e.tree_field = e.group_field
@@ -2335,16 +2317,14 @@ ui.nav = function(opt) {
 		update_row_index()
 	}
 
-	e.group_cols = ''
 	e.set_group_cols = function() {
-		init_groups()
 		init_fields()
 		init_rows()
 		e.announce('rows_changed')
 		e.focus_cell(true, true)
 
 	}
-	e.prop('group_cols')
+	e.prop('group_cols', '')
 
 	// tree -------------------------------------------------------------------
 
@@ -2417,6 +2397,10 @@ ui.nav = function(opt) {
 	}
 
 	function init_tree() {
+
+		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden) {
+			reset_tree_fields()
+		}
 
 		e.can_be_tree = !!e.parent_field
 		if (!e.can_be_tree || e.flat || e.must_be_flat) {
@@ -2631,8 +2615,8 @@ ui.nav = function(opt) {
 	e.sort_rows = function(rows, order_by) {
 		let order_by_map = map()
 		set_order_by_map(order_by, order_by_map)
-		row_comparator(order_by_map)
-		return rows.sort()
+		let cmp = row_comparator(order_by_map)
+		return rows.sort(cmp)
 	}
 
 	// changing the sort order ------------------------------------------------
@@ -2675,10 +2659,9 @@ ui.nav = function(opt) {
 
 	e.set_order_by = function() {
 		update_field_sort_order()
-		sort_rows()
-		e.update({vals: true, state: true, sort_order: true})
+		update_rows('sort')
 	}
-	e.prop('order_by', {slot: 'user'})
+	e.prop('order_by', '')
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
 		if (!field.sortable)
@@ -2996,8 +2979,6 @@ ui.nav = function(opt) {
 		row = null
 		ev = null
 		depth = null
-		if (changed)
-			e.update({state: true, vals: vals_changed, errors: errors_changed})
 		return changed
 	}
 
@@ -3470,7 +3451,6 @@ ui.nav = function(opt) {
 	function col_vals_changed(field) {
 		e.announce('col_vals_changed', field)
 		reset_quicksearch()
-		e.update({vals: true})
 	}
 
 	function init_lookup_nav(field, ln) {
@@ -3736,9 +3716,6 @@ ui.nav = function(opt) {
 			e.announce('rows_changed')
 		}
 
-		if (rows_added || rows_updated)
-			e.update({rows: rows_added, vals: rows_updated})
-
 		if (ev.focus_it)
 			e.focus_cell(ri1, true, 0, 0, ev)
 
@@ -3872,9 +3849,6 @@ ui.nav = function(opt) {
 		if (removed_rows.size)
 			e.announce('rows_changed')
 
-		if (rows_changed || removed_rows.size)
-			e.update({state: rows_changed, rows: !!removed_rows.size})
-
 		if (marked_rows.size)
 			if (e.save_on_remove_row)
 				e.save(ev)
@@ -3933,11 +3907,6 @@ ui.nav = function(opt) {
 		}
 
 		e.remove_rows(rm_rows, {from_server: true})
-
-		e.update({
-			rows: rows_added || rm_rows.length || undefined,
-			vals: rows_updated || undefined,
-		})
 
 		return true
 	}
@@ -4106,7 +4075,6 @@ ui.nav = function(opt) {
 			if (e.save_on_move_row)
 				e.save(ev)
 
-			e.update({rows: true})
 		}
 
 		state.finish_up = function() {
@@ -4299,7 +4267,6 @@ ui.nav = function(opt) {
 		else if (e.changed_rows.has(row))
 			return
 		e.changed_rows.add(row)
-		e.update({state: true})
 	}
 
 	function row_unchanged(row) {
@@ -4308,7 +4275,6 @@ ui.nav = function(opt) {
 		e.changed_rows.delete(row)
 		if (!e.changed_rows.size)
 			e.changed_rows = null
-		e.update({state: true})
 	}
 
 	function pack_changes() {
@@ -4438,7 +4404,6 @@ ui.nav = function(opt) {
 			dont_send: true,
 		})
 		rows_moved = false
-		e.update({state: true})
 		add_request(req)
 		set_save_state(source_rows, req)
 		e.announce('saving', true)
@@ -4514,7 +4479,6 @@ ui.nav = function(opt) {
 
 		e.changed_rows = null
 		rows_moved = false
-		e.update({state: true})
 	}
 
 	e.commit_changes = function() {
@@ -4540,7 +4504,6 @@ ui.nav = function(opt) {
 
 		e.changed_rows = null
 		rows_moved = false
-		e.update({state: true})
 	}
 
 	// row (de)serialization --------------------------------------------------
@@ -4773,7 +4736,7 @@ ui.nav = function(opt) {
 	// action bar -------------------------------------------------------------
 
 	e.set_action_band_visible = function(v) {
-		e.update({state: true})
+		//
 	}
 
 	function nrows(n) {
@@ -4997,7 +4960,6 @@ ui.nav = function(opt) {
 
 		if (!s) {
 			reset_quicksearch()
-			e.update({state: true})
 			return
 		}
 
@@ -5161,21 +5123,21 @@ ui.make_nav_data_widget = function() {
 	e.on_bind(update_nav)
 
 	// external nav: referenced directly or by id.
-	e.prop('nav', {private: true})
-	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
+	e.prop('nav')
+	e.prop('nav_id')
 	e.set_nav = update_nav
 
 	// internal nav: local rowset binding
-	e.prop('rowset', {private: true, type: 'rowset'})
+	e.prop('rowset')
 	e.set_rowset = update_nav
 
 	// internal nav: remote rowset binding
-	e.prop('rowset_name', {type: 'rowset', attr: 'rowset'})
+	e.prop('rowset_name')
 	e.set_rowset_name = update_nav
 
 	e.property('nav_based', () => !!(e.nav_id || e.nav || e.rowset_name || e.rowset))
 
-	e.prop('ready', {type: 'bool', slot: 'state', default: false, updates: 'value'})
+	e.prop('ready', false)
 
 }
 
@@ -5215,7 +5177,6 @@ ui.make_nav_col_widget = function() {
 			e.fire('bind_field', field, false)
 			field = null
 		}
-		e.update()
 	}
 
 	function update_nav(force) {
@@ -5232,11 +5193,11 @@ ui.make_nav_col_widget = function() {
 		update_nav(true)
 	}
 
-	e.prop('col', {type: 'col'})
+	e.prop('col')
 	e.set_col = update_field
 
-	e.prop('nav', {private: true, type: 'nav'})
-	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
+	e.prop('nav')
+	e.prop('nav_id')
 	e.set_nav = update_nav
 
 	e.listen('reset', function(reset_nav) {
@@ -5246,7 +5207,7 @@ ui.make_nav_col_widget = function() {
 
 	e.property('nav_based', () => !!((e.nav_id || e.nav) && e.col))
 
-	e.prop('ready', {type: 'bool', slot: 'state', default: false, updates: 'value'})
+	e.prop('ready')
 
 }
 
@@ -5311,7 +5272,6 @@ ui.make_nav_input_widget = function(field_props, range, field_range_props) {
 			e.fire('bind_field', field, false)
 			field = null
 		}
-		e.update()
 		return field
 	}
 
@@ -5346,22 +5306,22 @@ ui.make_nav_input_widget = function(field_props, range, field_range_props) {
 	}
 
 	if (range) {
-		e.prop('col1', {type: 'col'})
-		e.prop('col2', {type: 'col'})
+		e.prop('col1')
+		e.prop('col2')
 		e.set_col1 = update_fields
 		e.set_col2 = update_fields
 	} else {
-		e.prop('col', {type: 'col'})
+		e.prop('col')
 		e.set_col = update_fields
 	}
 
-	e.prop('nav', {private: true, type: 'nav'})
-	e.prop('nav_id', {type: 'nav', attr: 'nav', bind_id: 'nav'})
+	e.prop('nav')
+	e.prop('nav_id')
 	e.set_nav = update_nav
 
 	e.property('nav_based', () => !!((e.nav_id || e.nav) && (range ? e.col1 && e.col2 : e.col)))
 
-	e.prop('ready', {type: 'bool', slot: 'state', default: false, updates: 'value'})
+	e.prop('ready')
 
 	e.listen('reset', function(reset_nav) {
 		if (reset_nav != nav) return
