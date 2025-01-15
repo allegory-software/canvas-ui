@@ -1060,37 +1060,13 @@ ui.nav = function(opt) {
 		e.update({rows: true})
 	}
 
-	/*
+	e.flat = false
 	e.set_flat = flat_changed
-	e.prop('flat', {type: 'bool', slot: 'user', default: false})
+	e.prop('flat')
 
+	e.must_be_flat = false
 	e.set_must_be_flat = flat_changed
-	e.prop('must_be_flat', {default: false, private: true})
-
-	// `*_col` properties
-
-	e.set_val_col = function(v) {
-		init_all_fields()
-	}
-	e.prop('val_col', {type: 'col'})
-
-	e.set_tree_col = function() {
-		init_all_fields()
-	}
-	e.prop('tree_col', {type: 'col'})
-
-	e.set_name_col = function(v) {
-		init_all_fields()
-	}
-	e.prop('name_col', {type: 'col'})
-
-	e.set_quicksearch_col = function(v) {
-		e.quicksearch_field = check_field('quicksearch_col', v)
-		reset_quicksearch()
-		e.update({state: true})
-	}
-	e.prop('quicksearch_col', {type: 'col'})
-	*/
+	e.prop('must_be_flat')
 
 	// field attributes exposed as `col.*` props
 
@@ -4250,7 +4226,7 @@ ui.nav = function(opt) {
 
 		let req = nav_ajax(assign_opt({
 			rowset_name: e.rowset_name,
-			wait: e.wait || num(e.attr('wait')),
+			wait: e.wait,
 			url: rowset_url(),
 			progress: load_progress,
 			done: load_done,
@@ -4449,7 +4425,7 @@ ui.nav = function(opt) {
 		update_ids.add(update_id)
 		let req = nav_ajax({
 			rowset_name: e.rowset_name,
-			wait: e.wait || num(e.attr('wait')),
+			wait: e.wait,
 			url: rowset_url(),
 			upload: {exec: 'save', changes: changes, update_id: update_id},
 			source_rows: source_rows,
