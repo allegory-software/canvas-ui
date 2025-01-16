@@ -1071,18 +1071,29 @@ ui.nav = function(opt) {
 
 	e.fields = []
 
+	e.group_by = null
+	e.group_defs = null
+
 	update.fields = function() {
+
+		// parse group_by
+		e.group_defs = parse_group_defs(e.group_by)
+		e.group_field = null
+
 		e.fields.length = 0
-		if (e.all_fields.length)
-			if (e.is_grouped) {
-				let group_field = fld('$$group')
-				e.fields.push(group_field)
-			}
-			for (let col of cols_array()) {
-				let field = check_field('col', col)
-				if (field && !field.internal && !e.group_cols.includes(field.name))
-					e.fields.push(field)
-			}
+
+		// add group field
+		if (e.group_defs.fields) {
+			e.tree_field = fld('$$group')
+			e.fields.push(e.tree_field)
+		}
+
+		// add visible fields
+		for (let col of cols_array()) {
+			let field = check_field('col', col)
+			if (field && !field.internal && !e.group_defs.cols.includes(field.name))
+				e.fields.push(field)
+		}
 		update_field_index()
 
 		// remove references to invisible fields.
@@ -1158,7 +1169,7 @@ ui.nav = function(opt) {
 			insert(cols, min(at_fi || 1/0, e.fields.length), field.name)
 		else
 			remove_value(cols, field.name)
-		e.cols = cols_from_array(cols)
+		e.update({cols: cols_from_array(cols)})
 	}
 
 	e.move_field = function(fi, over_fi) {
@@ -2137,21 +2148,21 @@ ui.nav = function(opt) {
 	}
 
 	// opt:
-	//   col_groups      : 'col1[/...] col2 > col3 col4 > ...'
+	//   group_by        : 'col1[/...] col2 > col3 col4 > ...'
 	//   range_defs      : {col->{freq:, unit:, offset:}}
 	//   rows            : [row1,...]
 	//   group_label_sep : separator for multi-col group labels
-	e.group_rows = function(opt) {
+	function group_rows(group_defs, rows, group_label_sep) {
 
-		let {cols, fields, col_groups, range_defs} = parse_group_defs(opt.col_groups, opt.range_defs)
+		let {cols, fields, col_groups, range_defs} = group_defs
 		if (!fields)
 			return
 
 		if (false && col_groups.length == 1) // TODO: enable this optimization again?
-			return row_groups_one_level(opt.col_groups, opt.range_defs, opt.rows)
+			return row_groups_one_level(group_by, range_defs, rows)
 
-		let group_label_sep = opt.group_label_sep ?? ' / '
-		let tree = e.tree_index(cols, range_defs, opt.rows).tree()
+		group_label_sep ??= ' / '
+		let tree = e.tree_index(cols, range_defs, rows).tree()
 		let root = []
 		let depth = col_groups[0].length-1
 		function add_group(t, path, label_path, parent_group, parent_group_level) {
@@ -2170,29 +2181,26 @@ ui.nav = function(opt) {
 			}
 		}
 		flatten(tree, [], [], depth, add_group, root, 0)
-		return {cols, range_defs, root}
+		return root
+	}
+
+	e.group_rows = function(group_by, range_defs, rows, group_label_sep) {
+		let group_defs = parse_group_defs(group_by, range_defs)
+		return {...group_defs, root: group_rows(group_defs, rows, group_label_sep)}
 	}
 
 	function init_groups() {
 
-		let groups = e.group_rows({col_groups: e.group_by})
+		e.group_root = group_rows(e.group_defs, e.rows)
 
-		if (!groups) {
-			e.group_cols = []
+		if (!e.group_root) {
 			reset_tree()
 			return
 		}
 
-		e.group_cols = e.groups.cols
-
 		// convert index tree to row tree
 		e.focus_cell(false, false)
 
-		e.is_grouped = true
-
-		update.fields() // make group field visible
-
-		e.group_field = fld('$$group')
 		e.tree_field = e.group_field
 
 		e.rows = []
@@ -2234,16 +2242,14 @@ ui.nav = function(opt) {
 		}
 
 		e.child_rows = []
-		for (let group of e.groups.root) {
+		for (let group of e.group_root) {
 			let row = push_group_or_row(group, null, 0)
 			e.child_rows.push(row)
 		}
 
 		update_row_index()
-	}
 
-	e.group_cols = []
-	e.group_by = null
+	}
 
 	// tree -------------------------------------------------------------------
 
