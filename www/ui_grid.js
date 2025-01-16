@@ -1350,7 +1350,7 @@ ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 		init_nav(id, nav)
 		s.set('nav', nav)
 	} else {
-		nav.sync(opt)
+		nav.update(opt)
 	}
 	nav.render(fr, align, valign, min_w, min_h)
 

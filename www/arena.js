@@ -255,6 +255,7 @@ assert(!ar.set_has(s, 'c'))
 pr('arena tests passed')
 }
 
+if (0)
 arena_test()
 
 function benchmark() {
@@ -272,6 +273,7 @@ function benchmark() {
 	console.timeEnd('map')
 }
 
+if (0)
 for (let i = 1; i <= 3; i++)
 	benchmark()
 
