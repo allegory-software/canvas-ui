@@ -593,6 +593,8 @@ ui.nav = function(opt) {
 
 	let e = {}
 
+	// instance utils ---------------------------------------------------------
+
 	e.announce = function(ev, ...args) {
 		announce(ev, e, ...args)
 	}
@@ -614,30 +616,6 @@ ui.nav = function(opt) {
 	e.property = function(name, get, set) {
 		return property(this, name, get, set)
 	}
-
-	e.can_add_rows               = true
-	e.can_remove_rows            = true
-	e.can_change_rows            = true
-	e.can_move_rows              = false
-	e.can_sort_rows              = true
-	e.can_focus_cells            = true
-	e.can_select_multiple        = true
-	e.can_select_non_siblings    = true
-
-	e.auto_advance_row           = false
-	e.auto_focus_first_cell      = true
-	e.auto_edit_first_cell       = false
-	e.stay_in_edit_mode          = true
-
-	e.save_on_add_row            = false
-	e.save_on_remove_row         = true
-	e.save_on_input              = false
-	e.save_on_exit_edit          = false
-	e.save_on_exit_row           = true
-
-	e.exit_edit_on_lost_focus    = false
-	e.save_row_states            = false
-	e.action_band_visible        = 'auto' // 'auto always no'
 
 	// partial update of internal state based on multiple prop changes --------
 
@@ -671,195 +649,48 @@ ui.nav = function(opt) {
 
 	}
 
-	// reset ------------------------------------------------------------------
+	// state ------------------------------------------------------------------
+
+	// behavior options
+
+	e.can_add_rows               = true
+	e.can_remove_rows            = true
+	e.can_change_rows            = true
+	e.can_move_rows              = false
+	e.can_sort_rows              = true
+	e.can_focus_cells            = true
+	e.can_select_multiple        = true
+	e.can_select_non_siblings    = true
+
+	e.auto_advance_row           = false
+	e.auto_focus_first_cell      = true
+	e.auto_edit_first_cell       = false
+	e.stay_in_edit_mode          = true
+
+	e.save_on_add_row            = false
+	e.save_on_remove_row         = true
+	e.save_on_input              = false
+	e.save_on_exit_edit          = false
+	e.save_on_exit_row           = true
+
+	e.exit_edit_on_lost_focus    = false
+	e.save_row_states            = false
+	e.action_band_visible        = 'auto' // auto | always | no
+
+	// model
 
 	e.ready = false
 
-	e.free = function() {
-		e.ready = false
-		e.announce('ready', false)
-		abort_all_requests()
-		e.unfocus_focused_cell({cancel: true})
-		e.announce('reset')
-		bind_rowset_name(rowset_name, false)
-	}
+	let rowset, loaded_rowset, rowset_name, rowset_url
+
+	e.all_fields = [] // all fields in rowset order
+	e.all_rows   = [] // all rows in rowset order
+
+	// dynamic methods
 
 	e.find_row = return_false
 
-	let rowset, rowset_name, rowset_url
-
-	function update_reload(ev) {
-
-		bind_rowset_name(rowset_name, false)
-		rowset_name = null
-		rowset_url = null
-		rowset = e.rowset
-		if (!rowset) {
-			rowset_url = e.rowset_url
-			if (!rowset_url && e.rowset_name) {
-				rowset_name = e.rowset_name
-				bind_rowset_name(rowset_name, true)
-				rowset_url = '/rowset.json/' + rowset_name
-			}
-		}
-
-		if (!rowset_url || e.param_vals === false) {
-			// client-side rowset or param vals not available: reset it.
-			reset(ev)
-		} else {
-			reload(ev && {event: ev})
-		}
-
-	}
-
-	e.all_fields = [] // fields in row value order.
-	e.all_rows = [] // all rows in natural order.
-
-	function reset(ev) {
-
-		// clean up so we can free
-
-		abort_all_requests()
-
-		let refocus_state = e.refocus_state('val') || e.refocus_state('pk')
-		e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
-
-		e.changed_rows = null // set(row)
-		rows_moved = false
-
-		e.row_validator = create_validator(e)
-
-		// free all fields
-
-		for (let field of e.all_fields)
-			free_field(field)
-		e.all_fields.length = 0
-		e.all_fields_map = obj() // {col->field}
-
-		// init all fields
-
-		let rs = rowset
-
-		if (rs.fields) {
-			for (let fi = 0; fi < rs.fields.length; fi++)
-				init_field(rs.fields[fi], fi)
-			init_field({hidden: true, name: '$$group', label: 'Group'}, rs.fields.length)
-		}
-
-		update_field_sort_order()
-
-		// init pk field and find_row function.
-
-		e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
-		e.pk_fields = optflds(e.pk)
-
-		if (!e.pk_fields) {
-			e.find_row = return_false
-		} else {
-			let pk = e.pk_fields
-			let pk_vs = []
-			let pk_fi = pk.map(f => f.val_index)
-			let n = pk_fi.length
-			e.find_row = function(row) {
-				for (let i = 0; i < n; i++)
-					pk_vs[i] = row[pk_fi[i]]
-				return e.lookup(pk, pk_vs)[0]
-			}
-		}
-
-		// init other functional fields
-
-		e.val_field = check_field('val_col', e.val_col)
-		e.pos_field = check_field('pos_col', rs.pos_col)
-		e.name_field = check_field('name_col', e.name_col ?? rs.name_col)
-		if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
-			e.name_field = e.pk_fields[0]
-		e.display_field = check_field('display_col', e.display_col) || e.name_field
-		e.quicksearch_field = check_field('quicksearch_col', e.quicksearch_col)
-
-		// init tree fields
-
-		e.id_field = check_field('id_col', rs.id_col)
-		if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
-			e.id_field = e.pk_fields[0]
-		e.parent_field = check_field('parent_col', rs.parent_col)
-		e.tree_field = check_field('tree_col', e.tree_col ?? rs.tree_col) || e.name_field
-
-		// init field validators
-
-		for (let field of e.all_fields) {
-			if (field.readonly)
-				return
-
-			field.validator = create_validator(field)
-
-			for (let k in field) {
-				if (k.startsWith('validator_')) {
-					k = k.replace(/^validator_/, '')
-					let rule = field[k]
-					rule.name = k
-					field.validator.add_rule(rule)
-				}
-			}
-
-			// parsing these here after we have a parser as they depend on type.
-			if (field.min != null) field.min = field.validator.parse(field.min)
-			if (field.max != null) field.max = field.validator.parse(field.max)
-		}
-
-		// free all rows
-
-		if (e.free_row)
-			for (let row of e.all_rows)
-				e.free_row(row)
-		e.all_rows.length = 0
-
-		// init all rows
-
-		e.do_update_load_fail(false)
-		update_indices('invalidate')
-		e.all_rows = rowset && (
-				   e.deserialize_all_row_states(e.row_states)
-				|| e.deserialize_all_row_vals(e.row_vals)
-				|| e.deserialize_all_row_vals(rowset.row_vals)
-				|| rowset.rows
-			) || []
-
-		// validate all rows
-
-		for (let row of e.all_rows) {
-			let cells_failed
-			for (let field of e.all_fields) {
-				if (field.readonly)
-					continue
-				if (field.validator) {
-					let iv = e.cell_input_val(row, field)
-					let failed = !field.validator.validate(iv, false)
-					if (!field.validator.parse_failed)
-						row[field.val_index] = field.validator.value
-					if (failed) {
-						e.set_cell_state_for(row, field, 'errors', errors_no_messages)
-						cells_failed = true
-					}
-				}
-			}
-			let row_failed = !e.row_validator.validate(row, false)
-			if (cells_failed || row_failed)
-				e.set_row_state_for(row, 'invalid', true)
-			if (row_failed)
-				e.set_row_state_for(row, 'errors', errors_no_messages)
-		}
-
-		update.fields()
-		update.rows()
-
-		e.ready = true
-		e.announce('ready', true)
-
-		e.refocus(refocus_state)
-
-		e.announce('reset', ev)
-	}
+	// init/update/free -------------------------------------------------------
 
 	function bind_rowset_name(name, on) {
 		if (!name)
@@ -875,6 +706,296 @@ ui.nav = function(opt) {
 					delete rowset_navs[name]
 			}
 		}
+	}
+
+	e.free = function() {
+		update({free: true})
+	}
+
+	function update(ev) {
+
+		ev ??= empty
+
+		// parse rowset options
+
+		let new_rowset      = !ev.free && e.rowset || ev.rowset || null
+		let new_rowset_url  = !ev.free && !e.rowset && e.rowset_url || null
+		let new_rowset_name = !ev.free && !e.rowset && !e.rowset_url && e.rowset_name || null
+		new_rowset_url ??= new_rowset_name && '/rowset.json/' + new_rowset_name
+
+		if (!e.param_vals)
+			new_rowset_url = null
+
+		// rebind named rowset
+
+		if (new_rowset_name != rowset_name) {
+			bind_rowset_name(rowset_name, false)
+			rowset_name = new_rowset_name
+			bind_rowset_name(rowset_name, true)
+		}
+
+		// reload rowset if url changed
+
+		if (new_rowset_url != rowset_url || ev.reload) {
+			abort_all_requests()
+			rowset_url = new_rowset_url
+			if (rowset_url) {
+				reload(ev && {event: ev})
+				return
+			}
+		}
+
+		let reset = new_rowset != rowset || ev.reset
+		let update_fields = ev.fields
+		let update_rows = ev.rows
+		let update_row_order = ev.row_order
+		let refocus_state
+
+		// update rowset
+		if (reset) {
+
+			rowset = new_rowset
+
+			if (!rowset && e.ready) {
+				e.ready = false
+				e.announce('ready', false)
+			}
+
+			// clean up any row refs so we can free the rows
+
+			abort_all_requests()
+
+			let refocus_state = e.refocus_state('val') || e.refocus_state('pk')
+			e.unfocus_focused_cell({cancel: true, input: ev && ev.input})
+
+			e.changed_rows = null // set(row)
+			rows_moved = false
+
+			e.row_validator = create_validator(e)
+
+			// free all fields
+
+			for (let field of e.all_fields)
+				free_field(field)
+			e.all_fields.length = 0
+			e.all_fields_map = obj() // {col->field}
+
+			// init all fields
+
+			let rs = rowset
+
+			if (rs.fields) {
+				for (let fi = 0; fi < rs.fields.length; fi++)
+					init_field(rs.fields[fi], fi)
+				init_field({hidden: true, name: '$$group', label: 'Group'}, rs.fields.length)
+			}
+
+			update_field_sort_order()
+
+			// init pk field and find_row function
+
+			e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
+			e.pk_fields = optflds(e.pk)
+
+			if (!e.pk_fields) {
+				e.find_row = return_false
+			} else {
+				let pk = e.pk_fields
+				let pk_vs = []
+				let pk_fi = pk.map(f => f.val_index)
+				let n = pk_fi.length
+				e.find_row = function(row) {
+					for (let i = 0; i < n; i++)
+						pk_vs[i] = row[pk_fi[i]]
+					return e.lookup(pk, pk_vs)[0]
+				}
+			}
+
+			// init other functional fields
+
+			e.val_field = check_field('val_col', e.val_col)
+			e.pos_field = check_field('pos_col', rs.pos_col)
+			e.name_field = check_field('name_col', e.name_col ?? rs.name_col)
+			if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
+				e.name_field = e.pk_fields[0]
+			e.display_field = check_field('display_col', e.display_col) || e.name_field
+			e.quicksearch_field = check_field('quicksearch_col', e.quicksearch_col)
+
+			// init tree fields
+
+			e.id_field = check_field('id_col', rs.id_col)
+			if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
+				e.id_field = e.pk_fields[0]
+			e.parent_field = check_field('parent_col', rs.parent_col)
+			e.tree_field = check_field('tree_col', e.tree_col ?? rs.tree_col) || e.name_field
+
+			// init field validators
+
+			for (let field of e.all_fields) {
+				if (field.readonly)
+					return
+
+				field.validator = create_validator(field)
+
+				for (let k in field) {
+					if (k.startsWith('validator_')) {
+						k = k.replace(/^validator_/, '')
+						let rule = field[k]
+						rule.name = k
+						field.validator.add_rule(rule)
+					}
+				}
+
+				// parsing these here after we have a parser as they depend on type.
+				if (field.min != null) field.min = field.validator.parse(field.min)
+				if (field.max != null) field.max = field.validator.parse(field.max)
+			}
+
+			// free all rows
+
+			if (e.free_row)
+				for (let row of e.all_rows)
+					e.free_row(row)
+			e.all_rows.length = 0
+
+			// init all rows
+
+			e.do_update_load_fail(false)
+			update_indices('invalidate')
+			e.all_rows = rowset && (
+						e.deserialize_all_row_states(e.row_states)
+					|| e.deserialize_all_row_vals(e.row_vals)
+					|| e.deserialize_all_row_vals(rowset.row_vals)
+					|| rowset.rows
+				) || []
+
+			// validate all rows
+
+			for (let row of e.all_rows) {
+				let cells_failed
+				for (let field of e.all_fields) {
+					if (field.readonly)
+						continue
+					if (field.validator) {
+						let iv = e.cell_input_val(row, field)
+						let failed = !field.validator.validate(iv, false)
+						if (!field.validator.parse_failed)
+							row[field.val_index] = field.validator.value
+						if (failed) {
+							e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+							cells_failed = true
+						}
+					}
+				}
+				let row_failed = !e.row_validator.validate(row, false)
+				if (cells_failed || row_failed)
+					e.set_row_state_for(row, 'invalid', true)
+				if (row_failed)
+					e.set_row_state_for(row, 'errors', errors_no_messages)
+			}
+
+			update_fields = true
+			update_rows = true
+
+		}
+
+		// init visible fields
+		if (update_fields) {
+
+			e.fields.length = 0
+
+			// parse group_by
+			e.groups = parse_group_defs(e.group_by)
+
+			// add group field
+			if (e.groups.fields) {
+				e.tree_field = fld('$$group')
+				e.fields.push(e.tree_field)
+			}
+
+			// add visible fields
+			for (let col of cols_array()) {
+				let field = check_field('col', col)
+				if (field && !field.internal && !e.groups.cols.includes(field.name))
+					e.fields.push(field)
+			}
+			update_field_index()
+
+			// remove references to invisible fields.
+			if (e.focused_field && e.focused_field.index == null)
+				e.focused_field = null
+			if (e.selected_field && e.selected_field.index == null)
+				e.selected_field = null
+			let lff = e.all_fields_map[e.last_focused_col]
+			if (lff && lff.index == null)
+				e.last_focused_col = null
+			if (e.quicksearch_field && e.quicksearch_field.index == null)
+				reset_quicksearch()
+			if (e.selected_rows)
+				for (let [row, sel_fields] of e.selected_rows)
+					if (isobject(sel_fields))
+						for (let field of sel_fields)
+							if (field && field.index == null)
+								sel_fields.delete(field)
+
+		}
+
+		// init visible rows
+		if (update_rows) {
+
+			e.focused_row = null
+			e.selected_row = null
+			e.selected_rows = map()
+			reset_quicksearch()
+			init_filters()
+			e.rows = null
+
+		}
+
+		let must_create_rows = !e.rows || !order_by_map.size
+		let must_sort = !!order_by_map.size
+
+		if (update_row_order) {
+
+			// if the rows are not going to be sorted, then they need to be
+			// recreated to achieve rowset order.
+			let cmp = row_comparator(order_by_map)
+			if (e.is_tree || e.is_grouped) {
+				if (must_create_rows && !must_sort)
+					if (e.is_tree)
+						init_tree()
+					else
+						init_groups()
+				if (cmp)
+					sort_child_rows(e.child_rows, cmp)
+				e.rows = []
+				add_visible_child_rows(e.child_rows)
+			} else {
+				if (must_create_rows) {
+					e.rows = []
+					for (let row of e.all_rows)
+						if (e.is_row_visible(row))
+							e.rows.push(row)
+				}
+				if (cmp)
+					e.rows.sort(cmp)
+			}
+		}
+
+		if (update_rows)
+			update_row_index()
+
+		if (rowset && !e.ready) {
+			e.ready = true
+			e.announce('ready', true)
+		}
+
+		if (refocus_state)
+			e.refocus(refocus_state)
+
+		if (reset)
+			e.announce('reset', ev)
+
 	}
 
 	// fields utils -----------------------------------------------------------
@@ -1076,46 +1197,6 @@ ui.nav = function(opt) {
 
 	e.group_by = null
 	e.groups = null
-
-	update.fields = function() {
-
-		e.fields.length = 0
-
-		// parse group_by
-		e.groups = parse_group_defs(e.group_by)
-
-		// add group field
-		if (e.groups.fields) {
-			e.tree_field = fld('$$group')
-			e.fields.push(e.tree_field)
-		}
-
-		// add visible fields
-		for (let col of cols_array()) {
-			let field = check_field('col', col)
-			if (field && !field.internal && !e.groups.cols.includes(field.name))
-				e.fields.push(field)
-		}
-		update_field_index()
-
-		// remove references to invisible fields.
-		if (e.focused_field && e.focused_field.index == null)
-			e.focused_field = null
-		if (e.selected_field && e.selected_field.index == null)
-			e.selected_field = null
-		let lff = e.all_fields_map[e.last_focused_col]
-		if (lff && lff.index == null)
-			e.last_focused_col = null
-		if (e.quicksearch_field && e.quicksearch_field.index == null)
-			reset_quicksearch()
-		if (e.selected_rows)
-			for (let [row, sel_fields] of e.selected_rows)
-				if (isobject(sel_fields))
-					for (let field of sel_fields)
-						if (field && field.index == null)
-							sel_fields.delete(field)
-
-	}
 
 	e.field_index = function(field) {
 		return field && field.index
@@ -1414,15 +1495,6 @@ ui.nav = function(opt) {
 	}
 
 	// filtered and custom-sorted subset of all_rows --------------------------
-
-	update.rows = function() {
-		e.focused_row = null
-		e.selected_row = null
-		e.selected_rows = map()
-		reset_quicksearch()
-		init_filters()
-		e.rows = null
-	}
 
 	e.row_index = function(row) {
 		return row && row[e.all_fields.length]
@@ -2191,9 +2263,6 @@ ui.nav = function(opt) {
 		e.groups.root = group_rows(e.groups, e.rows)
 
 		// convert index tree to row tree
-		e.focus_cell(false, false)
-
-		e.tree_field = e.group_field
 
 		e.rows = []
 		function push_row(row, parent_row, depth) {
@@ -2512,35 +2581,6 @@ ui.nav = function(opt) {
 				e.rows.push(row)
 				add_visible_child_rows(row.child_rows)
 			}
-	}
-
-	update.row_order = function() {
-		// if the rows are not going to be sorted, then they need to be
-		// recreated to achieve rowset order.
-		let must_create_rows = !e.rows || !order_by_map.size
-		let must_sort = !!order_by_map.size
-		let cmp = row_comparator(order_by_map)
-		if (e.is_tree || e.is_grouped) {
-			if (must_create_rows && !must_sort)
-				if (e.is_tree)
-					init_tree()
-				else
-					init_groups()
-			if (cmp)
-				sort_child_rows(e.child_rows, cmp)
-			e.rows = []
-			add_visible_child_rows(e.child_rows)
-		} else {
-			if (must_create_rows) {
-				e.rows = []
-				for (let row of e.all_rows)
-					if (e.is_row_visible(row))
-						e.rows.push(row)
-			}
-			if (cmp)
-				e.rows.sort(cmp)
-		}
-		update_row_index()
 	}
 
 	e.sort_rows = function(rows, order_by) {
