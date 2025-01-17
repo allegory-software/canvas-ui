@@ -641,37 +641,34 @@ ui.nav = function(opt) {
 
 	// partial update of internal state based on multiple prop changes --------
 
-	let update = {} // {sub_name->update_f}
-	let prop_subs = { // {prop->'sub_name1 ...'}
+	let prop_parts = { // {prop->'sub_name1 ...'}
 		rowset       : 'reload',
 		rowset_name  : 'reload',
+		rowset_url   : 'reload',
 		cols         : 'fields',
 		order_by     : 'row_order',
 		group_by     : 'fields rows',
 		flat         : 'rows',
-		must_be_flat : 'rows',
 		col_attrs    : 'fields',
 	}
-	for (let sub in prop_subs)
-		prop_subs[sub] = words(prop_subs[sub])
-
-	let subs = ['reload', 'fields', 'rows', 'row_order'] // subs in call order
+	for (let sub in prop_parts)
+		prop_parts[sub] = words(prop_parts[sub])
 
 	e.update = function(prop_vals, ev) {
-		let update_subs = {}
+		let parts = {}
 		for (let k in prop_vals) {
 			if (e[k] !== prop_vals[k]) {
 				e[k] = prop_vals[k]
-				let subs = prop_subs[k]
-				if (subs)
-					for (let sub of prop_subs[k])
-						update_subs[sub] = true
+				assign(parts, prop_parts[k])
 			}
 		}
-		for (let sub of subs)
-			if (update_subs[sub]) {
-				update[sub](ev)
-			}
+		update(parts, ev)
+	}
+
+	function update(parts, ev) {
+		if (parts.reload)
+			update_reload(ev)
+
 	}
 
 	// reset ------------------------------------------------------------------
@@ -691,7 +688,7 @@ ui.nav = function(opt) {
 
 	let rowset, rowset_name, rowset_url
 
-	update.reload = function(ev) {
+	function update_reload(ev) {
 
 		bind_rowset_name(rowset_name, false)
 		rowset_name = null
@@ -706,7 +703,13 @@ ui.nav = function(opt) {
 			}
 		}
 
-		e.reload({event: ev})
+		if (!rowset_url || e.param_vals === false) {
+			// client-side rowset or param vals not available: reset it.
+			reset(ev)
+		} else {
+			reload(ev && {event: ev})
+		}
+
 	}
 
 	e.all_fields = [] // fields in row value order.
@@ -1072,18 +1075,17 @@ ui.nav = function(opt) {
 	e.fields = []
 
 	e.group_by = null
-	e.group_defs = null
+	e.groups = null
 
 	update.fields = function() {
 
-		// parse group_by
-		e.group_defs = parse_group_defs(e.group_by)
-		e.group_field = null
-
 		e.fields.length = 0
 
+		// parse group_by
+		e.groups = parse_group_defs(e.group_by)
+
 		// add group field
-		if (e.group_defs.fields) {
+		if (e.groups.fields) {
 			e.tree_field = fld('$$group')
 			e.fields.push(e.tree_field)
 		}
@@ -1091,7 +1093,7 @@ ui.nav = function(opt) {
 		// add visible fields
 		for (let col of cols_array()) {
 			let field = check_field('col', col)
-			if (field && !field.internal && !e.group_defs.cols.includes(field.name))
+			if (field && !field.internal && !e.groups.cols.includes(field.name))
 				e.fields.push(field)
 		}
 		update_field_index()
@@ -1129,11 +1131,6 @@ ui.nav = function(opt) {
 	// visible cols list ------------------------------------------------------
 
 	e.cols = null // null means all
-
-	function visible_col(col) {
-		let field = check_field('col', col)
-		return field && !field.internal
-	}
 
 	let user_cols = () =>
 		e.cols != null &&
@@ -2191,12 +2188,7 @@ ui.nav = function(opt) {
 
 	function init_groups() {
 
-		e.group_root = group_rows(e.group_defs, e.rows)
-
-		if (!e.group_root) {
-			reset_tree()
-			return
-		}
+		e.groups.root = group_rows(e.groups, e.rows)
 
 		// convert index tree to row tree
 		e.focus_cell(false, false)
@@ -4086,20 +4078,12 @@ ui.nav = function(opt) {
 		return s
 	}
 
-	e.reload = function(opt) {
-
-		opt = opt || empty
-
-		if (!rowset_url || e.param_vals === false) {
-			// client-side rowset or param vals not available: reset it.
-			reset(opt.event)
-			return
-		}
+	function reload(opt) {
 
 		let saving = requests && requests.size && !e.load_request
 
 		// ignore rowset-changed event if coming exclusively from our update operations.
-		if (opt.update_ids) {
+		if (opt?.update_ids) {
 			let ignore
 			for (let update_id of opt.update_ids) {
 				if (update_ids.has(update_id)) {
@@ -4114,7 +4098,7 @@ ui.nav = function(opt) {
 				return
 			if (saving)
 				return
-			if (opt.if_filter && opt.if_filter != param_vals_filter())
+			if (opt?.if_filter && opt?.if_filter != param_vals_filter())
 				return
 			pr('reloading', rowset_name)
 		}
@@ -4145,6 +4129,17 @@ ui.nav = function(opt) {
 		e.loading = true
 		loading(true)
 		req.send()
+	}
+
+	e.reload = function(opt) {
+
+		if (!rowset_url || e.param_vals === false) {
+			// client-side rowset or param vals not available: reset it.
+			reset(opt?.event)
+			return
+		}
+
+		reload(opt)
 	}
 
 	e.download_xlsx = function() {
@@ -4190,7 +4185,7 @@ ui.nav = function(opt) {
 			return
 		rowset = rs
 		e._rowset = rs // for inspection
-		reset(this.event)
+		update_subs('reset')
 	}
 
 	// saving changes ---------------------------------------------------------
