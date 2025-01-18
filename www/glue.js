@@ -148,9 +148,9 @@ HASH MAPS
 	empty_obj -> obj()              global empty object, does not inherit Object
 	empty_set -> set()              global empty set, read-only!
 	keys(t) -> [k1, ...]
-	assign(dt, t1, ...)             dump t1, ... into dt
+	assign(dt, t1, ...) -> dt       dump t1, ... into dt
 	entries(t) -> *[k,v]            iterate hash map entries
-	assign_opt(dt, t1, ...)         dump t1, ... into dt, skips undefined values
+	assign_opt(dt, t1, ...) -> dt   dump t1, ... into dt, skips undefined values
 	clone(t) -> t1                  deep clone
 	attr(t, k[, cons])              t[k] = t[k] || cons(); cons defaults to obj
 	memoize(f) -> mf                memoize single-arg function

@@ -345,7 +345,7 @@ const {
 	assert, warn, pr, debug, trace,
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str, json, json_arg,
-	obj, set, map, array,
+	set, map, array,
 	assign, entries, insert, map_assign, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter,
@@ -465,7 +465,7 @@ ui.scrollbar_thickness_active = 12
 function array_of_objs(n) {
 	let a = []
 	for (let i = 0; i < n; i++)
-		a.push(obj())
+		a.push({})
 	return a
 }
 
@@ -478,10 +478,10 @@ function theme_make(name, is_dark) {
 		fg     : array_of_objs(255),
 		border : array_of_objs(255),
 		bg     : array_of_objs(255),
-		shadow : obj(),
+		shadow : {},
 	}
 }
-let themes = obj()
+let themes = {}
 ui.themes = themes
 theme_make('light', false)
 theme_make('dark' , true)
@@ -873,7 +873,7 @@ ui.pointers = []
 
 ui.add_pointer = function() {
 
-	let p = obj()
+	let p = {}
 
 	p.mx = null
 	p.my = null
@@ -935,7 +935,7 @@ function reset_pointer_state(p) {
 }
 
 function diff_pointer_state(d, s) {
-	let o = obj()
+	let o = {}
 
 }
 
@@ -1551,7 +1551,7 @@ function free_recs() {
 // z-layers ------------------------------------------------------------------
 
 let layer_freelist = obj_freelist()
-let layer_map = obj() // {name->layer}
+let layer_map = {} // {name->layer}
 let layer_arr = [] // [layer1,...]
 
 let layers = [] // [layer1,...]
@@ -3984,7 +3984,7 @@ function see(m) {
 
 let measure_text; {
 let tm = map()
-let TSM = obj()
+let TSM = {}
 measure_text = function(cx, s) {
 	let fm = tm.get(cx.font)
 	if (!fm) { fm = map(); tm.set(cx.font, fm); fm.set(TSM, map()) }
@@ -4540,7 +4540,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 			answer_con.frame = await unpack_frame(cb)
 			ui.animate()
 		}
-		answer_con.pointer = obj()
+		answer_con.pointer = {}
 	}
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
@@ -4633,8 +4633,8 @@ ui.box_widget('shared_screen', ss)
 
 // template widget -----------------------------------------------------------
 
-let targs  = obj()
-let tprops = obj()
+let targs  = {}
+let tprops = {}
 
 targs.text  = function(t) { return [t.id, t.s, t.align, t.valign, t.fr] }
 targs.h     = function(t) { return [t.fr, t.gap, t.align, t.valign, t.min_w, t.min_h] }
@@ -5031,8 +5031,8 @@ function split(hv, id, size, unit, fixed_side,
 	let fixed = unit == 'px'
 	size = s.get('size') ?? size
 	let fr = fixed ? 0 : (size ?? 0.5)
-	let min_size = fixed ? size ?? 0 : 0
 	if (state && state != 'hover') {
+	let min_size = fixed ? size ?? 0 : 0
 		if (state == 'drag')
 			cs.set(W, s.get(W))
 		let size_px = fixed ? min_size : round(fr * max_size)

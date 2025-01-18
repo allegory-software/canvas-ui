@@ -450,7 +450,7 @@ const {
 	num, bool, isarray, isstr,
 	assert,
 	strict_sign, round, abs, clamp,
-	obj, set, map, words,
+	set, map, words,
 	do_before, do_after, property, override,
 	assign, assign_opt, attr, empty,
 	remove, insert,
@@ -475,9 +475,9 @@ function map_keys_different(m1, m2) {
 
 // global field defs ---------------------------------------------------------
 
-G.field_types = obj() // {TYPE->{K: V}}
-G.all_field_types = obj() // {K: V}
-G.rowset_col_attrs = obj() // {ROWSET.COL->{K:V}}
+G.field_types = {} // {TYPE->{K: V}}
+G.all_field_types = {} // {K: V}
+G.rowset_col_attrs = {} // {ROWSET.COL->{K:V}}
 
 // ref-counted garbage-collected shared navs for lookup rowsets.
 {
@@ -485,8 +485,7 @@ let max_unused_nav_count = 20
 let max_unused_row_count =  1000000
 let max_unused_val_count = 10000000
 
-let shared_navs = obj() // {name: nav}
-
+let shared_navs = {} // {name: nav}
 let gclist = []
 let oldest_last = function(nav1, nav2) {
 	let t1 = nav1.last_used_time
@@ -620,17 +619,29 @@ ui.nav = function(opt) {
 	// partial update of internal state based on multiple prop changes --------
 
 	let prop_parts = { // {prop->'sub_name1 ...'}
-		rowset       : 'reload',
-		rowset_name  : 'reload',
-		rowset_url   : 'reload',
-		cols         : 'fields',
-		order_by     : 'row_order',
-		group_by     : 'fields rows',
-		flat         : 'rows',
-		col_attrs    : 'fields',
+		rowset          : 'reload',
+		rowset_name     : 'reload',
+		rowset_url      : 'reload',
+		cols            : 'fields',
+		val_col         : '',
+		pos_col         : '',
+		name_col        : '',
+		display_col     : '',
+		quicksearch_col : '',
+		id_col          : '',
+		parent_col      : '',
+		tree_col        : '',
+		order_by        : 'row_order',
+		group_by        : 'fields rows',
+		flat            : 'rows',
+		col_attrs       : 'fields',
 	}
-	for (let sub in prop_parts)
-		prop_parts[sub] = words(prop_parts[sub])
+	for (let sub in prop_parts) {
+		let t = {}
+		for (let s of words(prop_parts[sub]))
+			t[s] = true
+		prop_parts[sub] = t
+	}
 
 	e.update = function(prop_vals, ev) {
 		let parts = {}
@@ -643,15 +654,7 @@ ui.nav = function(opt) {
 		update(parts, ev)
 	}
 
-	function update(parts, ev) {
-		if (parts.reload)
-			update_reload(ev)
-
-	}
-
-	// state ------------------------------------------------------------------
-
-	// behavior options
+	// behavior options -------------------------------------------------------
 
 	e.can_add_rows               = true
 	e.can_remove_rows            = true
@@ -677,20 +680,11 @@ ui.nav = function(opt) {
 	e.save_row_states            = false
 	e.action_band_visible        = 'auto' // auto | always | no
 
-	// model
+	// init/update/free -------------------------------------------------------
 
 	e.ready = false
 
-	let rowset, loaded_rowset, rowset_name, rowset_url
-
-	e.all_fields = [] // all fields in rowset order
-	e.all_rows   = [] // all rows in rowset order
-
-	// dynamic methods
-
-	e.find_row = return_false
-
-	// init/update/free -------------------------------------------------------
+	let rowset, rowset_name, rowset_url
 
 	function bind_rowset_name(name, on) {
 		if (!name)
@@ -709,52 +703,50 @@ ui.nav = function(opt) {
 	}
 
 	e.free = function() {
-		update({free: true})
+		update({free: true, reload: true})
 	}
 
 	function update(ev) {
 
 		ev ??= empty
 
-		// parse rowset options
+		if (ev.reload) {
 
-		let new_rowset      = !ev.free && e.rowset || ev.rowset || null
-		let new_rowset_url  = !ev.free && !e.rowset && e.rowset_url || null
-		let new_rowset_name = !ev.free && !e.rowset && !e.rowset_url && e.rowset_name || null
-		new_rowset_url ??= new_rowset_name && '/rowset.json/' + new_rowset_name
+			let old_rowset_name = rowset_name
 
-		if (!e.param_vals)
-			new_rowset_url = null
+			rowset      = !ev.free && e.rowset || ev.rowset || null
+			rowset_url  = !ev.free && !e.rowset && e.rowset_url || null
+			rowset_name = !ev.free && !e.rowset && !e.rowset_url && e.rowset_name || null
+			rowset_url ??= rowset_name && '/rowset.json/' + rowset_name
 
-		// rebind named rowset
+			if (!e.param_vals)
+				rowset_url = null
 
-		if (new_rowset_name != rowset_name) {
-			bind_rowset_name(rowset_name, false)
-			rowset_name = new_rowset_name
-			bind_rowset_name(rowset_name, true)
-		}
-
-		// reload rowset if url changed
-
-		if (new_rowset_url != rowset_url || ev.reload) {
+			// rebind named rowset if the name changed
+			if (rowset_name != old_rowset_name) {
+				bind_rowset_name(old_rowset_name, false)
+				bind_rowset_name(rowset_name, true)
+			}
+			// reload rowset if url is present
 			abort_all_requests()
-			rowset_url = new_rowset_url
 			if (rowset_url) {
 				reload(ev && {event: ev})
 				return
 			}
+
 		}
 
-		let reset = new_rowset != rowset || ev.reset
-		let update_fields = ev.fields
-		let update_rows = ev.rows
+		// decide which parts to update
+
+		let update_all       = ev.reset || ev.reload
+		let update_fields    = ev.fields
+		let update_rows      = ev.rows
 		let update_row_order = ev.row_order
+		let update_row_visibility = ev.row_visibility
+
 		let refocus_state
 
-		// update rowset
-		if (reset) {
-
-			rowset = new_rowset
+		if (update_all) {
 
 			if (!rowset && e.ready) {
 				e.ready = false
@@ -775,26 +767,26 @@ ui.nav = function(opt) {
 
 			// free all fields
 
-			for (let field of e.all_fields)
-				free_field(field)
-			e.all_fields.length = 0
-			e.all_fields_map = obj() // {col->field}
+			if (e.all_fields)
+				for (let field of e.all_fields)
+					free_field(field)
 
 			// init all fields
 
-			let rs = rowset
+			e.all_fields = []
+			e.all_fields_map = {} // {col->field}
 
-			if (rs.fields) {
-				for (let fi = 0; fi < rs.fields.length; fi++)
-					init_field(rs.fields[fi], fi)
-				init_field({hidden: true, name: '$$group', label: 'Group'}, rs.fields.length)
+			if (rowset?.fields) {
+				for (let fi = 0; fi < rowset.fields.length; fi++)
+					init_field(rowset.fields[fi], fi)
+				init_field({hidden: true, name: '$$group', label: 'Group'}, rowset.fields.length)
 			}
 
 			update_field_sort_order()
 
 			// init pk field and find_row function
 
-			e.pk = isarray(rs.pk) ? rs.pk.join(' ') : rs.pk
+			e.pk = rowset && (isarray(rowset.pk) ? rowset.pk.join(' ') : rowset.pk)
 			e.pk_fields = optflds(e.pk)
 
 			if (!e.pk_fields) {
@@ -814,8 +806,8 @@ ui.nav = function(opt) {
 			// init other functional fields
 
 			e.val_field = check_field('val_col', e.val_col)
-			e.pos_field = check_field('pos_col', rs.pos_col)
-			e.name_field = check_field('name_col', e.name_col ?? rs.name_col)
+			e.pos_field = check_field('pos_col', rowset?.pos_col)
+			e.name_field = check_field('name_col', e.name_col ?? rowset?.name_col)
 			if (!e.name_field && e.pk_fields && e.pk_fields.length == 1)
 				e.name_field = e.pk_fields[0]
 			e.display_field = check_field('display_col', e.display_col) || e.name_field
@@ -823,11 +815,11 @@ ui.nav = function(opt) {
 
 			// init tree fields
 
-			e.id_field = check_field('id_col', rs.id_col)
+			e.id_field = check_field('id_col', rowset?.id_col)
 			if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
 				e.id_field = e.pk_fields[0]
-			e.parent_field = check_field('parent_col', rs.parent_col)
-			e.tree_field = check_field('tree_col', e.tree_col ?? rs.tree_col) || e.name_field
+			e.parent_field = check_field('parent_col', rowset?.parent_col)
+			e.tree_field = check_field('tree_col', e.tree_col ?? rowset?.tree_col) || e.name_field
 
 			// init field validators
 
@@ -853,10 +845,9 @@ ui.nav = function(opt) {
 
 			// free all rows
 
-			if (e.free_row)
+			if (e.free_row && e.all_rows)
 				for (let row of e.all_rows)
 					e.free_row(row)
-			e.all_rows.length = 0
 
 			// init all rows
 
@@ -865,8 +856,8 @@ ui.nav = function(opt) {
 			e.all_rows = rowset && (
 						e.deserialize_all_row_states(e.row_states)
 					|| e.deserialize_all_row_vals(e.row_vals)
-					|| e.deserialize_all_row_vals(rowset.row_vals)
-					|| rowset.rows
+					|| e.deserialize_all_row_vals(rowset?.row_vals)
+					|| rowset?.rows
 				) || []
 
 			// validate all rows
@@ -896,28 +887,44 @@ ui.nav = function(opt) {
 
 			update_fields = true
 			update_rows = true
-
 		}
 
 		// init visible fields
+
+		let update_tree
+
 		if (update_fields) {
 
-			e.fields.length = 0
+			e.fields = []
 
-			// parse group_by
+			// init group-by view mode
+			let was_grouped = e.is_grouped
 			e.groups = parse_group_defs(e.group_by)
-
-			// add group field
-			if (e.groups.fields) {
+			e.is_grouped = !!e.groups.fields
+			if (e.is_grouped) {
 				e.tree_field = fld('$$group')
 				e.fields.push(e.tree_field)
 			}
+			if (was_grouped != e.is_grouped)
+				update_rows = true
+
+			// init tree view mode
+			let was_tree = e.is_tree
+			e.can_be_tree = !!(
+				e.id_field && e.parent_field && e.tree_field
+				&& !e.tree_field.hidden
+			)
+			e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped
+			if (was_tree != e.is_tree)
+				update_rows = true
 
 			// add visible fields
 			for (let col of cols_array()) {
 				let field = check_field('col', col)
-				if (field && !field.internal && !e.groups.cols.includes(field.name))
-					e.fields.push(field)
+				if (!field) continue
+				if (field.internal) continue
+				if (e.groups.cols.includes(field.name)) continue
+				e.fields.push(field)
 			}
 			update_field_index()
 
@@ -938,9 +945,11 @@ ui.nav = function(opt) {
 							if (field && field.index == null)
 								sel_fields.delete(field)
 
+			update_rows = true
 		}
 
 		// init visible rows
+
 		if (update_rows) {
 
 			e.focused_row = null
@@ -950,50 +959,55 @@ ui.nav = function(opt) {
 			init_filters()
 			e.rows = null
 
+			update_row_order = true
 		}
 
-		let must_create_rows = !e.rows || !order_by_map.size
-		let must_sort = !!order_by_map.size
 
 		if (update_row_order) {
 
 			// if the rows are not going to be sorted, then they need to be
 			// recreated to achieve rowset order.
+			let must_create_rows = !e.rows || !order_by_map.size
+
 			let cmp = row_comparator(order_by_map)
-			if (e.is_tree || e.is_grouped) {
-				if (must_create_rows && !must_sort)
-					if (e.is_tree)
+
+			if (must_create_rows) {
+				if (e.is_grouped || e.is_tree) {
+					if (e.is_grouped) {
+						init_group_tree()
+					} else if (e.is_tree) {
 						init_tree()
-					else
-						init_groups()
-				if (cmp)
-					sort_child_rows(e.child_rows, cmp)
-				e.rows = []
-				add_visible_child_rows(e.child_rows)
-			} else {
-				if (must_create_rows) {
-					e.rows = []
-					for (let row of e.all_rows)
-						if (e.is_row_visible(row))
-							e.rows.push(row)
+					}
+				} else {
+					reset_tree()
 				}
-				if (cmp)
-					e.rows.sort(cmp)
 			}
+
+			if (cmp)
+				sort_child_rows(e.child_rows, cmp)
+
+			update_row_visibility = true
 		}
 
-		if (update_rows)
+		if (update_row_visibility) {
+			e.rows = []
+			add_visible_child_rows(e.child_rows)
 			update_row_index()
+		}
+
+		// set ready state
 
 		if (rowset && !e.ready) {
 			e.ready = true
 			e.announce('ready', true)
 		}
 
+		// refocus
+
 		if (refocus_state)
 			e.refocus(refocus_state)
 
-		if (reset)
+		if (ev.reset || ev.reload)
 			e.announce('reset', ev)
 
 	}
@@ -1047,14 +1061,22 @@ ui.nav = function(opt) {
 		return e.flds(cols).map(fldlabel)
 	}
 
+	function check_field(which, col) {
+		if (col == null) return
+		let field = e.optfld(col)
+		if (!field)
+			warn(which+' "'+col+'" not in rowset "'+rowset_name+'"')
+		return field
+	}
+
 	e.fld = fld
 	e.flds = flds
 	e.optfld = optfld
 	e.optflds = optflds
 
-	// fields array matching 1:1 to row contents ------------------------------
+	// field attr initializers ------------------------------------------------
 
-	let ifa = obj() // init-field-attr: {field->f(field, v)}
+	let ifa = {} // {field->f(field, v)}
 
 	ifa.label = function(field, v) {
 		if (v == null) {
@@ -1083,13 +1105,15 @@ ui.nav = function(opt) {
 		field.known_values = set(words(v))
 	}
 
+	// fields array matching 1:1 to row contents ------------------------------
+
 	function field_announce(...args) {
 		e.announce(this, ...args)
 	}
 
 	function init_field(f, fi) {
 
-		let field = obj()
+		let field = {}
 
 		// disambiguate field name.
 		let given_name = (f.name || 'f'+fi)
@@ -1183,17 +1207,7 @@ ui.nav = function(opt) {
 		e.do_after('free_field', f)
 	}
 
-	function check_field(which, col) {
-		if (col == null) return
-		let field = e.optfld(col)
-		if (!field)
-			warn(which+' "'+col+'" not in rowset "'+rowset_name+'"')
-		return field
-	}
-
 	// all_fields subset in custom order --------------------------------------
-
-	e.fields = []
 
 	e.group_by = null
 	e.groups = null
@@ -1312,7 +1326,7 @@ ui.nav = function(opt) {
 				if (!te.selected_rows.size)
 					return false
 				for (let [row] of te.selected_rows) {
-					let vals = obj()
+					let vals = {}
 					for (let [col, param] of pmap) {
 						let field = te.fld(col)
 						if (!field) {
@@ -1339,7 +1353,7 @@ ui.nav = function(opt) {
 				pv = []
 				for (let vals1 of pv1)
 					for (let vals0 of pv0) {
-						pv.push(assign(obj(), vals0, vals1))
+						pv.push(assign({}, vals0, vals1))
 					}
 			}
 		}
@@ -1508,7 +1522,7 @@ ui.nav = function(opt) {
 
 	function reinit_rows() {
 		let fs = e.refocus_state('row')
-		update.rows()
+		update({row_visibility: true})
 		e.refocus(fs)
 	}
 
@@ -1969,7 +1983,7 @@ ui.nav = function(opt) {
 	// range_defs  : {col->{freq:, unit:, offset:}}
 	function create_index(cols, range_defs, rows) {
 
-		let idx = obj()
+		let idx = {}
 
 		let tree // map(f1_val->map(f2_val->[row1,...]))
 		let cols_arr = words(cols) // [col1,...]
@@ -1979,8 +1993,8 @@ ui.nav = function(opt) {
 
 		if (range_defs) {
 
-			let range_val_funcs = obj() // {col->f}
-			let range_label_funcs = obj() // {col->text}
+			let range_val_funcs = {} // {col->f}
+			let range_label_funcs = {} // {col->text}
 
 			for (let col in range_defs) {
 				let range = range_defs[col]
@@ -2113,7 +2127,7 @@ ui.nav = function(opt) {
 		return idx
 	}
 
-	let indices = obj() // {cache_key->index}
+	let indices = {} // {cache_key->index}
 
 	e.tree_index = function(cols, range_defs, rows) {
 		cols = e.fldnames(cols)
@@ -2178,7 +2192,7 @@ ui.nav = function(opt) {
 		let col_groups = []
 		let range_defs = {}
 		let index = 0
-		for (let col_group_expr of col_groups_expr.split(/\s*>\s*/)) {
+		for (let col_group_expr of (col_groups_expr ?? '').split(/\s*>\s*/)) {
 			let col_group = []
 			for (let col of words(col_group_expr)) {
 				let t = {group_level: level, index: index++}
@@ -2258,19 +2272,12 @@ ui.nav = function(opt) {
 		return {...group_defs, root: group_rows(group_defs, rows, group_label_sep)}
 	}
 
-	function init_groups() {
+	function init_group_tree() {
 
 		e.groups.root = group_rows(e.groups, e.rows)
 
 		// convert index tree to row tree
-
-		e.rows = []
-		function push_row(row, parent_row, depth) {
-			row.parent_row = parent_row
-			row.depth = depth
-			e.rows.push(row)
-		}
-		let group_fi = e.group_field.val_index
+		let group_fi = e.tree_field.val_index
 		function push_group_or_row(group, parent_row, depth) {
 			let row
 			if (group.key_vals) { // it's a group
@@ -2285,7 +2292,8 @@ ui.nav = function(opt) {
 				}
 				row[group_fi] = row[group_fi].join(' / ')
 
-				push_row(row, parent_row, depth)
+				row.parent_row = parent_row
+				row.depth = depth
 				row.child_rows = []
 				row.collapsed = false
 				row.is_group_row = true
@@ -2296,35 +2304,32 @@ ui.nav = function(opt) {
 			} else { // it's a row
 				row = group
 				row.child_rows = []
-				push_row(row, parent_row, depth)
+				row.parent_row = parent_row
+				row.depth = depth
 			}
 			assert(row)
 			return row
 		}
 
 		e.child_rows = []
-		for (let group of e.group_root) {
+		for (let group of e.groups.root) {
 			let row = push_group_or_row(group, null, 0)
 			e.child_rows.push(row)
 		}
-
-		update_row_index()
 
 	}
 
 	// tree -------------------------------------------------------------------
 
 	function reset_tree() {
-		if (e.is_tree || e.is_grouped) {
-			for (let row of e.all_rows) {
-				row.child_rows = null
-				row.parent_row = null
-				row.depth = null
-			}
-			e.child_rows = null
-			e.is_tree = false
-			e.is_grouped = false
+		for (let row of e.all_rows) {
+			row.child_rows = null
+			row.parent_row = null
+			row.depth = null
 		}
+		e.child_rows = e.all_rows
+		e.is_tree = false
+		e.is_grouped = false
 	}
 
 	e.flat = false
@@ -2398,17 +2403,6 @@ ui.nav = function(opt) {
 	}
 
 	function init_tree() {
-
-		e.can_be_tree = true
-		if (!e.id_field || !e.parent_field || !e.tree_field || e.tree_field.hidden)
-			e.can_be_tree = false
-
-		if (!e.can_be_tree || e.flat) {
-			reset_tree()
-			return
-		}
-
-		e.is_tree = true
 
 		e.child_rows = []
 		for (let row of e.all_rows) {
@@ -2500,7 +2494,7 @@ ui.nav = function(opt) {
 		else
 			for (let row of e.child_rows)
 				set_collapsed(row, collapsed, recursive)
-		reinit_rows()
+		update({row_visibility: true})
 	}
 
 	e.toggle_collapsed = function(row, recursive) {
@@ -2571,7 +2565,7 @@ ui.nav = function(opt) {
 	function sort_child_rows(rows, cmp) {
 		rows.sort(cmp)
 		for (let row of rows)
-			if (row.child_rows.length > 1)
+			if (row.child_rows)
 				sort_child_rows(row.child_rows, cmp)
 	}
 
@@ -2579,7 +2573,8 @@ ui.nav = function(opt) {
 		for (let row of rows)
 			if (e.is_row_visible(row)) {
 				e.rows.push(row)
-				add_visible_child_rows(row.child_rows)
+				if (row.child_rows)
+					add_visible_child_rows(row.child_rows)
 			}
 	}
 
@@ -2857,7 +2852,7 @@ ui.nav = function(opt) {
 	// get/set cell & row state (storage api) ---------------------------------
 
 	let next_key_index = 0
-	let key_index = obj() // {key->i}
+	let key_index = {} // {key->i}
 
 	function cell_state_key_index(key, allocate) {
 		let i = key_index[key]
@@ -2906,7 +2901,7 @@ ui.nav = function(opt) {
 			return
 		}
 		csc = map() // {field->{key->[val, old_val]}}
-		rsc = obj() // {key->old_val}
+		rsc = {} // {key->old_val}
 		row = row1
 		ev = ev1
 		depth = 1
@@ -3018,7 +3013,7 @@ ui.nav = function(opt) {
 
 	function add_validation_errors(validator, errors) {
 		for (let result of validator.results)
-			errors.push(assign(obj(), result))
+			errors.push(assign({}, result))
 	}
 
 	e.validate_cell = function(field, val) {
@@ -4111,7 +4106,7 @@ ui.nav = function(opt) {
 		let filter = param_vals_filter()
 		if (filter) {
 			let u = url_parse(s)
-			u.args = u.args || obj()
+			u.args = u.args || {}
 			u.args.filter = filter
 			s = url_format(u)
 		}
@@ -4260,7 +4255,7 @@ ui.nav = function(opt) {
 			if (!e.validate_row(row))
 				continue
 			if (row.is_new) {
-				let t = {type: 'new', values: obj()}
+				let t = {type: 'new', values: {}}
 				for (let field of e.all_fields) {
 					if (field.nosave)
 						continue
@@ -4271,13 +4266,13 @@ ui.nav = function(opt) {
 				packed_rows.push(t)
 				source_rows.push(row)
 			} else if (row.removed) {
-				let t = {type: 'remove', values: obj()}
+				let t = {type: 'remove', values: {}}
 				for (let f of e.pk_fields)
 					t.values[f.name+':old'] = e.cell_val(row, f)
 				packed_rows.push(t)
 				source_rows.push(row)
 			} else if (row.modified) {
-				let t = {type: 'update', values: obj()}
+				let t = {type: 'update', values: {}}
 				let has_values
 				for (let field of e.all_fields) {
 					if (field.nosave)
@@ -4503,14 +4498,14 @@ ui.nav = function(opt) {
 	}
 
 	e.row_state_map = function(row, key) {
-		let t = obj()
+		let t = {}
 		for (let field of e.all_fields)
 			t[field.name] = e.cell_state(row, field, key)
 		return t
 	}
 
 	e.serialize_row_vals = function(row) {
-		let vals = obj()
+		let vals = {}
 		for (let field of e.all_fields) {
 			let v = e.cell_input_val(row, field)
 			if (v !== field.default && !field.nosave)
@@ -4555,7 +4550,7 @@ ui.nav = function(opt) {
 		let rows = []
 		for (let row of e.all_rows) {
 			if (!row.nosave) {
-				let state = obj()
+				let state = {}
 				if (row.is_new)
 					state.is_new = true
 				if (row.removed)
@@ -4978,7 +4973,9 @@ ui.nav = function(opt) {
 				e.fire('val_picked', ev)
 	}
 
-	e.update(opt)
+	update({reset: true})
+	assign(e, opt)
+	update({reload: true})
 
 	return e
 }
@@ -5533,7 +5530,7 @@ field_types.private_key = {
 
 // reload push-notifications -------------------------------------------------
 
-G.rowset_navs = obj() // {rowset_name -> set(nav)}
+G.rowset_navs = {} // {rowset_name -> set(nav)}
 
 let init_rowset_events = memoize(function() {
 	let es = new EventSource('/xrowset.events')

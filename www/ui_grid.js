@@ -43,7 +43,7 @@ ui.widget('treegrid_indent', {
 
 // cell view -----------------------------------------------------------------
 
-function init_nav(id, e) {
+function init_nav_view(id, e) {
 
 	let horiz = true
 	let line_height = 22
@@ -665,7 +665,7 @@ function init_nav(id, e) {
 						last_level = level
 						i++
 					}
-					e.group_cols = t.join('')
+					e.update({group_by: t.join('')})
 					cols = e.groups?.cols || empty_array // reload cols
 
 				} else if (drop_pos != null) { // put it back in grid
@@ -867,7 +867,8 @@ function init_nav(id, e) {
 		ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
 	}
 
-	e.update = function(opt) {
+	// TODO:
+	e.xupdate = function(opt) {
 		if (opt.scroll_to_focused_cell)
 			e.scroll_to_focused_cell()
 	}
@@ -1345,12 +1346,10 @@ ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 	let s = ui.state(id)
 	let nav = s.get('nav')
 	if (!nav) {
-		nav = ui.nav(opt)
+		nav = ui.nav(opt, s)
 		ui.on_free(id, () => nav.free())
-		init_nav(id, nav)
+		init_nav_view(id, nav)
 		s.set('nav', nav)
-	} else {
-		nav.update(opt)
 	}
 	nav.render(fr, align, valign, min_w, min_h)
 
