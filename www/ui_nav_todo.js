@@ -1,3 +1,40 @@
+
+	// tabname ----------------------------------------------------------------
+
+	/*
+	e.prop('tabname_template', {slot: 'lang', default: '{0}'})
+
+	let tabname
+	e.prop('tabname', {slot: 'lang'})
+
+	e.set_tabname(
+	function() {
+		if (tabname)
+			return tabname
+		// TODO: use param nav's selected_rows_tabname()
+		let view = rowset_name || 'Nav'
+		return subst(e.tabname_template, view)
+	}, function(s) {
+		tabname = s
+		e.announce('tabname_changed')
+	})
+
+	e.row_tabname = function(row) {
+		return e.draw_row(row, div())
+	}
+
+	e.selected_rows_tabname = function() {
+		if (!e.selected_rows)
+			return S('no_rows_selected', 'No rows selected')
+		let caps = []
+		for (let [row, sel_fields] of e.selected_rows)
+			caps.push(e.row_tabname(row))
+		return caps.join(', ')
+	}
+	*/
+
+
+
 /* view-less nav -------------------------------------------------------------
 
 */

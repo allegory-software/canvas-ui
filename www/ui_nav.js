@@ -194,7 +194,7 @@ Indexing:
 		ix.tree() -> index_tree
 		ix.lookup(vals) -> [row1,...]
 		e.lookup(cols, vals, [range_defs]) -> [row1, ...]
-		e.group_rows({col_groups:, [range_defs:], [rows:], [group_label_sep:]}) -> [row1, ...]
+		e.group_rows(group_by, [range_defs], rows, [group_label_sep]) -> {root:,...}
 
 Master-detail:
 	needs:
@@ -625,12 +625,12 @@ ui.nav = function(opt) {
 		cols            : 'fields',
 		val_col         : '',
 		pos_col         : '',
-		name_col        : '',
+		name_col        : 'reset',
 		display_col     : '',
 		quicksearch_col : '',
-		id_col          : '',
-		parent_col      : '',
-		tree_col        : '',
+		id_col          : 'reset',
+		parent_col      : 'reset',
+		tree_col        : 'reset',
 		order_by        : 'row_order',
 		group_by        : 'fields rows',
 		flat            : 'rows',
@@ -681,8 +681,6 @@ ui.nav = function(opt) {
 	e.action_band_visible        = 'auto' // auto | always | no
 
 	// init/update/free -------------------------------------------------------
-
-	e.ready = false
 
 	let rowset, rowset_name, rowset_url
 
@@ -738,7 +736,7 @@ ui.nav = function(opt) {
 
 		// decide which parts to update
 
-		let update_all       = ev.reset || ev.reload
+		let reset            = ev.reset || ev.reload
 		let update_fields    = ev.fields
 		let update_rows      = ev.rows
 		let update_row_order = ev.row_order
@@ -746,7 +744,7 @@ ui.nav = function(opt) {
 
 		let refocus_state
 
-		if (update_all) {
+		if (reset) {
 
 			if (!rowset && e.ready) {
 				e.ready = false
@@ -891,8 +889,6 @@ ui.nav = function(opt) {
 
 		// init visible fields
 
-		let update_tree
-
 		if (update_fields) {
 
 			e.fields = []
@@ -945,7 +941,6 @@ ui.nav = function(opt) {
 							if (field && field.index == null)
 								sel_fields.delete(field)
 
-			update_rows = true
 		}
 
 		// init visible rows
@@ -966,12 +961,8 @@ ui.nav = function(opt) {
 		if (update_row_order) {
 
 			// if the rows are not going to be sorted, then they need to be
-			// recreated to achieve rowset order.
-			let must_create_rows = !e.rows || !order_by_map.size
-
-			let cmp = row_comparator(order_by_map)
-
-			if (must_create_rows) {
+			// recreated to show them in original rowset order.
+			if (!e.rows || !order_by_map.size) {
 				if (e.is_grouped || e.is_tree) {
 					if (e.is_grouped) {
 						init_group_tree()
@@ -983,6 +974,7 @@ ui.nav = function(opt) {
 				}
 			}
 
+			let cmp = row_comparator(order_by_map)
 			if (cmp)
 				sort_child_rows(e.child_rows, cmp)
 
@@ -1007,7 +999,7 @@ ui.nav = function(opt) {
 		if (refocus_state)
 			e.refocus(refocus_state)
 
-		if (ev.reset || ev.reload)
+		if (reset)
 			e.announce('reset', ev)
 
 	}
@@ -1209,9 +1201,6 @@ ui.nav = function(opt) {
 
 	// all_fields subset in custom order --------------------------------------
 
-	e.group_by = null
-	e.groups = null
-
 	e.field_index = function(field) {
 		return field && field.index
 	}
@@ -1224,8 +1213,6 @@ ui.nav = function(opt) {
 	}
 
 	// visible cols list ------------------------------------------------------
-
-	e.cols = null // null means all
 
 	let user_cols = () =>
 		e.cols != null &&
@@ -1452,61 +1439,6 @@ ui.nav = function(opt) {
 		}
 	})
 	*/
-
-	// tabname ----------------------------------------------------------------
-
-	/*
-	e.prop('tabname_template', {slot: 'lang', default: '{0}'})
-
-	let tabname
-	e.prop('tabname', {slot: 'lang'})
-
-	e.set_tabname(
-	function() {
-		if (tabname)
-			return tabname
-		// TODO: use param nav's selected_rows_tabname()
-		let view = rowset_name || 'Nav'
-		return subst(e.tabname_template, view)
-	}, function(s) {
-		tabname = s
-		e.announce('tabname_changed')
-	})
-
-	e.row_tabname = function(row) {
-		return e.draw_row(row, div())
-	}
-
-	e.selected_rows_tabname = function() {
-		if (!e.selected_rows)
-			return S('no_rows_selected', 'No rows selected')
-		let caps = []
-		for (let [row, sel_fields] of e.selected_rows)
-			caps.push(e.row_tabname(row))
-		return caps.join(', ')
-	}
-	*/
-
-	// all rows in load order -------------------------------------------------
-
-	// parse & validate cells & rows silently and without making too much
-	// garbage and without getting the error messages, just the failed state.
-	function validate_all_rows_of(field) {
-		if (field.readonly)
-			return
-		if (!field.validator)
-			return
-		for (let row of e.all_rows) {
-			let iv = e.cell_input_val(row, field)
-			let failed = !field.validator.validate(iv, false)
-			if (!field.validator.parse_failed)
-				row[field.val_index] = field.validator.value
-			if (failed) {
-				e.set_cell_state_for(row, field, 'errors', errors_no_messages)
-				e.set_row_state_for(row, 'invalid', true)
-			}
-		}
-	}
 
 	// filtered and custom-sorted subset of all_rows --------------------------
 
@@ -3430,6 +3362,25 @@ ui.nav = function(opt) {
 	}
 
 	/*
+	// parse & validate cells & rows silently and without making too much
+	// garbage and without getting the error messages, just the failed state.
+	function validate_all_rows_of(field) {
+		if (field.readonly)
+			return
+		if (!field.validator)
+			return
+		for (let row of e.all_rows) {
+			let iv = e.cell_input_val(row, field)
+			let failed = !field.validator.validate(iv, false)
+			if (!field.validator.parse_failed)
+				row[field.val_index] = field.validator.value
+			if (failed) {
+				e.set_cell_state_for(row, field, 'errors', errors_no_messages)
+				e.set_row_state_for(row, 'invalid', true)
+			}
+		}
+	}
+
 	e.listen('reset', function(ln) {
 		for (let field of e.all_fields) {
 			if (ln == field.lookup_nav) {
@@ -4919,8 +4870,6 @@ ui.nav = function(opt) {
 		e.quicksearch_text = ''
 		e.quicksearch_field = null
 	}
-
-	reset_quicksearch()
 
 	e.quicksearch = function(s, start_row, ri_offset) {
 
