@@ -240,7 +240,7 @@ function init_nav_view(id, e) {
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.bb('', bg, bgs, 't', 'light')
+			ui.bb('', bg, bgs, 'b', 'light')
 			ui.color(fg)
 			if (has_children) {
 				ui.p(indent_x - ui.sp2(), 0, ui.sp2(), 0)
@@ -779,7 +779,7 @@ function init_nav_view(id, e) {
 				ui.m(field._x, 0, 0, 0)
 				ui.p(ui.sp2(), 0)
 				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * ui.sp2(), header_h)
-					ui.bb('', 'bg1', null, 'r', 'intense')
+					ui.bb('', 'bg1', null, 'br', 'intense')
 
 					let max_min_w = noclip ? null : max(0,
 						field._w
@@ -821,7 +821,7 @@ function init_nav_view(id, e) {
 
 					let col_move = hit_state == 'col_moving' || hit_state == 'col_move'
 
-					ui.bb('', 'bg1')
+					ui.bb('', 'bg1', null, 'b', 'intense')
 					for (let field of e.fields) {
 						if (col_move && hit_fi === field.index)
 							continue
