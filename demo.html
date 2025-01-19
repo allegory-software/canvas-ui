@@ -371,6 +371,7 @@ ui.stack('', 0, 'c', 'c', 500, 500)
 		tree_col: 'name',
 		cols: 'name id color type good climate',
 		order_by: 'color type:desc',
+		order_by: 'name id:desc',
 		group_by: 'climate > type good > color',
 		group_by: 'good type > climate color',
 		col_attrs: {'$$group': {w: 200}},

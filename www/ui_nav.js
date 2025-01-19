@@ -179,7 +179,7 @@ Visible fields:
 	publishes:
 		e.fields[fi] -> field
 		e.field_index(field) -> fi
-		e.show_field(field, on, at_fi)
+		e.showhide_field(field, on, at_fi)
 		e.move_field(fi, over_fi)
 
 Rows:
@@ -779,11 +779,9 @@ ui.nav = function(opt) {
 				for (let fi = 0; fi < rowset.fields.length; fi++)
 					init_field(rowset.fields[fi], fi)
 				e.group_field = init_field({
-					hidden: true, movable: false, name: '$group', label: 'Group'
+					hidden: true, name: '$group', label: 'Group'
 				}, rowset.fields.length)
 			}
-
-			update_field_sort_order()
 
 			// init pk field and find_row function
 
@@ -967,6 +965,9 @@ ui.nav = function(opt) {
 
 
 		if (update_row_order) {
+
+			update_field_sort_order()
+			pr(e.order_by)
 
 			// if the rows are not going to be sorted, then they need to be
 			// recreated to show them in original rowset order.
@@ -1215,7 +1216,7 @@ ui.nav = function(opt) {
 			e.fields[i].index = i
 	}
 
-	// visible cols list ------------------------------------------------------
+	// visible cols list ops --------------------------------------------------
 
 	function cols_from_fields(fields) {
 		let cols = fields
@@ -1232,25 +1233,57 @@ ui.nav = function(opt) {
 		return cols == all_cols ? null : cols
 	}
 
-	e.show_field = function(field, on, at_fi) {
+	function showhide_field(field, show, at_fi) {
+		field = fld(field)
+		if (e.fields.includes(field) == !!show)
+			return
 		let fields = [...e.fields]
-		if (on) {
-			if (fields.includes(field))
-				return
-			insert(fields, min(at_fi || 1/0, fields.length), field.name)
-		} else {
-			if (remove_value(fields, field) == -1)
-				return
-		}
-		e.update({cols: cols_from_fields(fields)})
+		if (show)
+			insert(fields, clamp(at_fi ?? 1/0, 0, fields.length), field)
+		else
+			remove(fields, field.index)
+		return fields
 	}
 
-	e.move_field = function(fi, over_fi) {
+	function move_field(fi, over_fi) {
 		if (fi == over_fi)
 			return
 		let fields = [...e.fields]
-		array_move(fields, fi, 1, over_fi, true)
-		e.update({cols: cols_from_fields(fields)})
+		array_move(fields, fi, 1, clamp(over_fi ?? 1/0, 0, fields.length), true)
+		return fiels
+	}
+
+	e.showhide_field = function(field, on, at_fi) {
+		let fields = showhide_field(field, on, at_fi)
+		if (fields)
+			e.update({cols: cols_from_fields(fields)})
+	}
+
+	e.move_field = function(fi, over_fi) {
+		let fields = move_field(fi, over_fi)
+		if (fields)
+			e.update({cols: cols_from_fields(fields)})
+	}
+
+	e.group_col = function(col, over_fi) {
+		let fields = showhide_field(col, false)
+		let col_groups = e.groups.col_groups
+			.map(cg => cg.filter(c => c != col))
+			.filter(cg => cg.length)
+		let group_by = format_group_defs(col_groups, e.groups.range_defs)
+		let cols = cols_from_fields(fields)
+		e.update({group_by, cols})
+	}
+
+	e.ungroup_col = function(col, over_fi) {
+		assert(e.groups.cols.includes(col))
+		let fields = showhide_field(col, true, over_fi)
+		let col_groups = e.groups.col_groups
+			.map(cg => cg.filter(c => c != col))
+			.filter(cg => cg.length)
+		let group_by = format_group_defs(col_groups, e.groups.range_defs)
+		let cols = cols_from_fields(fields)
+		e.update({group_by, cols})
 	}
 
 	/* params -----------------------------------------------------------------
@@ -2144,11 +2177,11 @@ ui.nav = function(opt) {
 				if (def.offset != null) t.push('/', def.offset)
 				if (def.unit   != null) t.push('/', def.unit)
 				if (def.freq   != null) t.push('/', def.freq)
-				if (j < col_group.length)
+				if (j < col_group.length-1)
 					t.push(' ')
 			}
-			if (i < col_groups.length)
-				t.push('> ')
+			if (i < col_groups.length-1)
+				t.push(' > ')
 		}
 		return t.join('')
 	}
@@ -2549,6 +2582,7 @@ ui.nav = function(opt) {
 	e.order_by = null // null = natural order
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
+		field = fld(field)
 		if (!field.sortable)
 			return
 		if (dir == 'toggle') {

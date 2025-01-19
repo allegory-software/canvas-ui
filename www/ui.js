@@ -574,7 +574,6 @@ let CC_STAR  = '*'.charCodeAt(0) // prefix for dark colors
 function lookup_color_func(hsl_color) {
 	return function(name, state, theme) {
 		if (name.charCodeAt(0) == CC_COLON) { // custom color
-			assert(!state)
 			return name.slice(1)
 		}
 		return hsl_color(name, state, theme)[0]
@@ -631,7 +630,6 @@ ui.fg_style('light', 'label'  , 'hover'  ,   0, 0.00, 0.00, 0.9)
 ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
 ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
 ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
-ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
 
 ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
 ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
@@ -641,10 +639,15 @@ ui.fg_style('dark' , 'label'  , 'hover'  ,   0, 0.00, 0.90, 0.9)
 ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
 ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
-ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
+
+ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
+ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
 
 ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
+
+ui.fg_style('light', 'faint' , 'normal' ,  0, 0.00, 0.70)
+ui.fg_style('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 
 // border colors -------------------------------------------------------------
 

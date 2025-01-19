@@ -670,7 +670,8 @@ function init_nav_view(id, e) {
 
 				} else if (drop_pos != null) { // put it back in grid
 
-					//
+					e.ungroup_col(drag_col, drop_pos)
+					cols = e.groups.cols
 
 				}
 
@@ -683,6 +684,9 @@ function init_nav_view(id, e) {
 				levels = null
 				min_levels = null
 				max_levels = null
+				drop_level = null
+				drop_pos = null
+
 			}
 
 			// generate columns
@@ -780,20 +784,27 @@ function init_nav_view(id, e) {
 					let max_min_w = noclip ? null : max(0,
 						field._w
 							- 2 * ui.sp2()
-							- (field.sort_dir ? 2 * ui.sp2() : 0)
+							- (field.sortable ? 2 * ui.sp2() : 0)
 					)
 					let pri = field.sort_priority
 
 					if (field.align != 'right')
 						ui.text('', field.label, 1, field.align, 'c', max_min_w)
 
-					if (field.sort_dir) {
+					let icon_id = id+'.sort_icon.'+field.name
+
+					if (field.sortable) {
 						ui.scope()
 						ui.font('fas')
-						ui.text(id+'.sort', field.sort_dir == 'asc'
-							? (pri ? '\uf106' : '\uf102')
-							: (pri ? '\uf107' : '\uf103'),
-						0)
+						ui.color(field.sort_dir ? 'label' : 'faint', ui.hit(icon_id) ? 'hover' : null)
+
+
+						ui.text(icon_id,
+							field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||
+							field.sort_dir          && (pri ? '\uf175' : '\uf175') ||
+							'\uf07d'
+						, 0)
+
 						ui.end_scope()
 					}
 
@@ -841,7 +852,6 @@ function init_nav_view(id, e) {
 								ui.end_scope()
 							ui.end_popup()
 						ui.end_stack()
-						drop_pos = null
 					}
 
 				ui.end_stack()
@@ -881,9 +891,17 @@ function init_nav_view(id, e) {
 
 	process_mouse = function() {
 
-		if (ui.capture(id+'.sort')) {
-			pr('here')
-			//e.set_order_by_dir(field, 'toggle', shift)
+		// check click on sort icons
+		for (let field of e.fields) {
+
+			let icon_id = id+'.sort_icon.'+field.name
+
+			let [drag_state] = ui.drag(icon_id)
+			if (drag_state)
+				ui.set_cursor('pointer')
+			if (drag_state == 'drop')
+				e.set_order_by_dir(field, 'toggle', shift)
+
 		}
 
 		let [state, dx, dy] = ui.drag(id+'.header_cells')
