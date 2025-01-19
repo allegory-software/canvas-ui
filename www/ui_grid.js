@@ -929,10 +929,10 @@ function init_nav_view(id, e) {
 			}
 		}
 
-		if (state == 'dragging' && abs(dx) > 10 && hit_state == 'col_resize') {
+		if (state == 'dragging' && hit_state == 'col_resize') {
+			ui.set_cursor('ew-resize')
 			let field = e.fields[hit_fi]
 			col_resize_field_w0 = field.w
-			ui.set_cursor('ew-resize')
 			hit_state = 'col_resizing'
 		}
 

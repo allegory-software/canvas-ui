@@ -1250,7 +1250,7 @@ ui.nav = function(opt) {
 			return
 		let fields = [...e.fields]
 		array_move(fields, fi, 1, clamp(over_fi ?? 1/0, 0, fields.length), true)
-		return fiels
+		return fields
 	}
 
 	e.showhide_field = function(field, on, at_fi) {
