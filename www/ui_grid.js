@@ -902,7 +902,7 @@ function init_nav_view(id, e) {
 					ui.set_cursor('ew-resize')
 					break
 				}
-				if (ui.mx >= x && ui.mx <= x + w) {
+				if (ui.mx >= x && ui.mx <= x + w && field.movable != false) {
 					hit_state = 'col_move'
 					hit_fi = field.index
 					col_move_dx = ui.mx - x0 - field._x

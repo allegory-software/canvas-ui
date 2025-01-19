@@ -773,11 +773,14 @@ ui.nav = function(opt) {
 
 			e.all_fields = []
 			e.all_fields_map = {} // {col->field}
+			e.group_field = null
 
 			if (rowset?.fields) {
 				for (let fi = 0; fi < rowset.fields.length; fi++)
 					init_field(rowset.fields[fi], fi)
-				init_field({hidden: true, name: '$$group', label: 'Group'}, rowset.fields.length)
+				e.group_field = init_field({
+					hidden: true, movable: false, name: '$group', label: 'Group'
+				}, rowset.fields.length)
 			}
 
 			update_field_sort_order()
@@ -817,7 +820,7 @@ ui.nav = function(opt) {
 			if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
 				e.id_field = e.pk_fields[0]
 			e.parent_field = check_field('parent_col', rowset?.parent_col)
-			e.tree_field = check_field('tree_col', e.tree_col ?? rowset?.tree_col) || e.name_field
+			e.tree_field = check_field('tree_col', e.tree_col ?? rowset?.tree_col)
 
 			// init field validators
 
@@ -898,7 +901,7 @@ ui.nav = function(opt) {
 			e.groups = parse_group_defs(e.group_by)
 			e.is_grouped = !!e.groups.fields
 			if (e.is_grouped) {
-				e.tree_field = fld('$$group')
+				e.tree_field = fld('$group')
 				e.fields.push(e.tree_field)
 			}
 			if (was_grouped != e.is_grouped)
@@ -906,20 +909,25 @@ ui.nav = function(opt) {
 
 			// init tree view mode
 			let was_tree = e.is_tree
-			e.can_be_tree = !!(
-				e.id_field && e.parent_field && e.tree_field
-				&& !e.tree_field.hidden
-			)
+			e.can_be_tree = !!(e.id_field && e.parent_field && !e.tree_field?.hidden)
 			e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped
 			if (was_tree != e.is_tree)
 				update_rows = true
+			if (e.is_tree && !e.tree_field)
+				e.tree_field = e.fields[0]
 
 			// add visible fields
-			for (let col of cols_array()) {
+			for (let col of words(e.cols ?? rowset?.cols ?? '')) {
+
 				let field = check_field('col', col)
 				if (!field) continue
+
+				// never show internal fields
 				if (field.internal) continue
-				if (e.groups.cols.includes(field.name)) continue
+
+				// exclude grouped fields
+				if (e.groups.fields.includes(field)) continue
+
 				e.fields.push(field)
 			}
 			update_field_index()
@@ -1006,14 +1014,6 @@ ui.nav = function(opt) {
 
 	// fields utils -----------------------------------------------------------
 
-	function fld(col) {
-		if (isstr(col))
-			return assert(e.all_fields_map[col], e.id, ' has no col: ', col)
-		else if (isnum(col))
-			return assert(e.all_fields[col], e.id, ' has no col: ', col)
-		else
-			return col
-	}
 	function optfld(col) {
 		if (isstr(col))
 			return e.all_fields_map[col]
@@ -1021,6 +1021,9 @@ ui.nav = function(opt) {
 			return e.all_fields[col]
 		else
 			return col
+	}
+	function fld(col) {
+		return assert(optfld(col), e.id, ' has no col: ', col)
 	}
 	let fldname = col => fld(col).name
 
@@ -1214,52 +1217,40 @@ ui.nav = function(opt) {
 
 	// visible cols list ------------------------------------------------------
 
-	let user_cols = () =>
-		e.cols != null &&
-		words(e.cols).filter(function(col) {
-			let f = e.all_fields_map[col]
-			return f && !f.internal
-		})
-
-	let rowset_cols = () =>
-		rowset && rowset.cols &&
-		words(rowset.cols).filter(function(col) {
-			let f = e.all_fields_map[col]
-			return f && !f.internal
-		})
-
-	let all_cols = () =>
-		e.all_fields.filter(function(f) {
-			return !f.internal && !f.hidden
-		}).map(f => f.name)
-
-	let cols_array = function() {
-		return user_cols() || rowset_cols() || all_cols()
-	}
-
-	function cols_from_array(cols) {
-		cols = cols.join(' ')
-		return cols == all_cols() ? null : cols
+	function cols_from_fields(fields) {
+		let cols = fields
+			.filter(f =>
+				f != e.group_field
+			).map(f => f.name).join(' ')
+		let all_cols = e.all_fields
+			.filter(f =>
+				!f.internal
+				&& !f.hidden
+				&& !e.groups.fields.includes(f)
+				&& f != e.group_field
+			).map(f => f.name)
+		return cols == all_cols ? null : cols
 	}
 
 	e.show_field = function(field, on, at_fi) {
-		let cols = cols_array()
-		if (on)
-			insert(cols, min(at_fi || 1/0, e.fields.length), field.name)
-		else
-			remove_value(cols, field.name)
-		e.update({cols: cols_from_array(cols)})
+		let fields = [...e.fields]
+		if (on) {
+			if (fields.includes(field))
+				return
+			insert(fields, min(at_fi || 1/0, fields.length), field.name)
+		} else {
+			if (remove_value(fields, field) == -1)
+				return
+		}
+		e.update({cols: cols_from_fields(fields)})
 	}
 
 	e.move_field = function(fi, over_fi) {
 		if (fi == over_fi)
 			return
-		// todo: use array_move
-		let insert_fi = over_fi - (over_fi > fi ? 1 : 0)
-		let cols = cols_array()
-		let col = remove(cols, fi)
-		insert(cols, insert_fi, col)
-		e.cols = cols_from_array(cols)
+		let fields = [...e.fields]
+		array_move(fields, fi, 1, over_fi, true)
+		e.update({cols: cols_from_fields(fields)})
 	}
 
 	/* params -----------------------------------------------------------------
