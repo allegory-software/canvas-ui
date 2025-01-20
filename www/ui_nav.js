@@ -779,7 +779,7 @@ ui.nav = function(opt) {
 				for (let fi = 0; fi < rowset.fields.length; fi++)
 					init_field(rowset.fields[fi], fi)
 				e.group_field = init_field({
-					hidden: true, name: '$group', label: 'Group'
+					hidden: true, name: '$group', label: 'Group', w: 160,
 				}, rowset.fields.length)
 			}
 
@@ -967,7 +967,6 @@ ui.nav = function(opt) {
 		if (update_row_order) {
 
 			update_field_sort_order()
-			pr(e.order_by)
 
 			// if the rows are not going to be sorted, then they need to be
 			// recreated to show them in original rowset order.
@@ -1266,7 +1265,8 @@ ui.nav = function(opt) {
 	}
 
 	e.group_col = function(col, over_fi) {
-		let fields = showhide_field(col, false)
+		assert(!e.groups.cols.includes(col))
+		let fields = showhide_field(col, true)
 		let col_groups = e.groups.col_groups
 			.map(cg => cg.filter(c => c != col))
 			.filter(cg => cg.length)
@@ -2230,7 +2230,7 @@ ui.nav = function(opt) {
 
 	function init_group_tree() {
 
-		e.groups.root = group_rows(e.groups, e.rows)
+		e.groups.root = group_rows(e.groups, e.all_rows)
 
 		// convert index tree to row tree
 		let group_fi = e.tree_field.val_index
@@ -2578,8 +2578,6 @@ ui.nav = function(opt) {
 			a.push(field.name + (dir == 'asc' ? '' : ':desc'))
 		return a.length ? a.join(' ') : undefined
 	}
-
-	e.order_by = null // null = natural order
 
 	e.set_order_by_dir = function(field, dir, keep_others) {
 		field = fld(field)

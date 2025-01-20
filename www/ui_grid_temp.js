@@ -1,3 +1,60 @@
+
+	/*
+	cells_w = bx + col_x
+
+	// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
+	if (col_resizing && !e.auto_expand)
+		cells_w = max(cells_w, last_cells_w)
+
+	vrn = floor(cells_view_h / cell_h) + 2 // 2 is right, think it!
+
+	function measure_cell_width(row, field) {
+		cx.measure = true
+		e.draw_cell(row, field, cx)
+		cx.measure = false
+		return cx.measured_width
+	}
+
+	function draw_cell_border(cx, w, h, bx, by, color_x, color_y, draw_stage) {
+		let bw = w - .5
+		let bh = h - .5
+		let zz = -.5
+		if (by && color_y != null) { // horizontals
+			cx.beginPath()
+			cx.lineWidth = by
+			cx.strokeStyle = color_y
+
+			// top line
+			if (!horiz && draw_stage == 'moving_cols') {
+				cx.moveTo(zz, zz)
+				cx.lineTo(bw, zz)
+			}
+			// bottom line
+			cx.moveTo(zz, bh)
+			cx.lineTo(bw, bh)
+
+			cx.stroke()
+		}
+		if (bx && color_x != null) { // verticals
+			cx.beginPath()
+			cx.lineWidth = bx
+			cx.strokeStyle = color_x
+
+			// left line
+			if (horiz && draw_stage == 'moving_cols') {
+				cx.moveTo(zz, zz)
+				cx.lineTo(zz, bh)
+			}
+			// right line
+			cx.moveTo(bw, zz)
+			cx.lineTo(bw, bh)
+
+			cx.stroke()
+		}
+	}
+	*/
+
+
 // grid view -----------------------------------------------------------------
 
 function grid_view(nav) {
