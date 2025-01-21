@@ -48,10 +48,13 @@ function init_nav_view(id, e) {
 	let horiz = true
 	let line_height = 22
 
+	let group_col_w = 80
+	let gap = 1
+	let group_col_h = line_height + ui.sp()
+
 	let cells_w
 	let page_row_count
 
-	let shift, ctrl
 	let hit_state // this affects both rendering and behavior in many ways.
 	let hit_mx, hit_my // last mouse coords, needed on scroll event.
 	let hit_target // last mouse target, needed on click events.
@@ -452,250 +455,38 @@ function init_nav_view(id, e) {
 
 	}
 
-	// group-by bar -----------------------------------------------------------
-
-	let render_group_by_bar
-	let drop_pos
-	{
-	let drag_col, drag_col_def, drop_level
-	let mover, xs, is, x0, y0
-	let levels, min_levels, max_levels
-
-	render_group_by_bar = function() {
-		let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, cell_h * 2)
-			ui.bb('', 'bg2', null, 'tb', 'light')
-
-			let w = 80
-			let gap = 1
-			let h = line_height + ui.sp()
-			let cols = e.groups?.cols || empty_array
-
-			// check group-bar columns for the one that is dragging.
-			// sets: drag_state, dx, dy, drag_col, drag_col_def
-			let drag_state, dx, dy
-			for (let col of cols) {
-				let col_id = id+'.group_col.'+col
-				;[drag_state, dx, dy] = ui.drag(col_id)
-				if (drag_state) {
-					drag_col = col
-					drag_col_def = e.groups.range_defs[col]
-					break
-				}
-			}
-
-			// start dragging the group-bar column using a live_move_mixin to help
-			// computing the x-coord of the other columns while dragging over them.
-			// sets: mover, xs, is, x0, y0, levels, min_levels, max_levels
-			if (drag_state == 'drag') {
-
-				let x = drag_col_def.index * (w + 1)
-				let y = drag_col_def.group_level * 10
-
-				mover = ui.live_move_mixin()
-				xs = [] // col_index -> col_x
-				is = [] // col_index -> col_visual_index
-				mover.movable_element_size = function() {
-					return w + gap
-				}
-				mover.set_movable_element_pos = function(i, x, moving, vi) {
-					xs[i] = x
-					if (vi != null)
-						is[i] = vi
-				}
-				mover.move_element_start(drag_col_def.index, 1, 0, e.groups.cols.length)
-				x0 = x
-				y0 = y
-
-				// compute the allowed level ranges that the dragged column is
-				// allowed to move vertically in each horizontal position that
-				// it finds itself in (since it can move in both directions).
-				// these ranges remain fixed while the col is moving.
-				let last_level = 0
-				let i = 0
-				levels = []
-				min_levels = []
-				max_levels = []
-				for (let col of cols) {
-					let def = e.groups.range_defs[col]
-					let level = def.group_level
-					levels    [i] = level
-					min_levels[i] = level
-					max_levels[i] = level
-					if (level != last_level) {
-						min_levels[i]--
-						if (i > 0)
-							max_levels[i-1]++
-					} else if (i == 1) {
-						min_levels[i-1]--
-					} else if (i > 0 && i == e.groups.cols.length-1) {
-						max_levels[i]++
-					}
-					last_level = level
-					i++
-				}
-
-			}
-
-			// drag column over the group-by header or over the grid's column header.
-			// sets: drop_level, drop_pos
-			if (drag_state == 'drag' || drag_state == 'dragging') {
-				mover.move_element_update(x0 + dx)
-				let vi = is[drag_col_def.index]
-				let level = levels[vi]
-				let min_level = min_levels[vi]
-				let max_level = max_levels[vi]
-				let mx = x0 + dx
-				let my = y0 + dy
-				level = clamp(round(my / 10), min_level, max_level)
-				let min_y = min_level * 10 - ui.sp4()
-				let max_y = max_level * 10 + ui.sp4()
-				let min_x = (-0.5) * (w + gap)
-				let max_x = (cols.length-1 + 0.5) * (w + gap)
-				drop_level = null
-				drop_pos = null
-				if (
-					my >= min_y && my <= max_y &&
-					mx >= min_x && mx <= max_x &&
-					ui.hovers(id+'.group_bar')
-				) { // move
-					drop_level = level
-				} else { // put back in grid
-					mover.move_element_update(null)
-					if (ui.hovers(id+'.header_cells')) {
-						let hx = ui.state(id+'.header_cells').get('x')
-						for (let field of e.fields) {
-							let x = field._x + hx
-							let w = field._w
-							let d = w / 2
-							if (ui.mx >= x && ui.mx <= x + d) {
-								drop_pos = field.index
-								break
-							} else if (ui.mx >= x + w - d && ui.mx <= x + w) {
-								drop_pos = field.index+1
-								break
-							}
-						}
-					}
-				}
-			}
-
-			if (drag_state == 'drop') {
-
-				if (drop_level != null) { // move it between other group columns
-
-					// create a temp array with drag_col moved to its new position.
-					let over_i = mover.move_element_stop()
-					let a = []
-					for (let col of e.groups.cols) {
-						let def = e.groups.range_defs[col]
-						let vi = is[def.index]
-						let level = col == drag_col ? drop_level : levels[vi]
-						a.push([col, level])
-					}
-					array_move(a, drag_col_def.index, 1, over_i, true)
-
-					// format group_cols and set it.
-					let t = []
-					let last_level = a[0][1] // can be -1..1 from dragging
-					let i = 0
-					for (let [col, level] of a) {
-						if (level != last_level)
-							t.push(' > ')
-						t.push(col)
-						let def = e.groups.range_defs[col]
-						if (def.offset != null) t.push('/', def.offset)
-						if (def.unit   != null) t.push('/', def.unit)
-						if (def.freq   != null) t.push('/', def.freq)
-						t.push(' ')
-						last_level = level
-						i++
-					}
-					e.update({group_by: t.join('')})
-					cols = e.groups?.cols || empty_array // reload cols
-
-				} else if (drop_pos != null) { // put it back in grid
-
-					e.ungroup_col(drag_col, drop_pos)
-					cols = e.groups.cols
-
-				}
-
-				// reset all drag state
-				drag_col = null
-				drag_col_def = null
-				mover = null
-				xs = null
-				is = null
-				levels = null
-				min_levels = null
-				max_levels = null
-				drop_level = null
-				drop_pos = null
-
-			}
-
-			// generate columns
-			for (let col of cols) {
-
-				let def = e.groups.range_defs[col]
-				let x = def.index * (w + 1)
-				let y = def.group_level * 10
-
-				if (mover) {
-					let vi = is[def.index]
-					let level = col == drag_col ? drop_level : levels[vi]
-					x = xs[def.index]
-					y = level * 10
-					if (col == drag_col) {
-						if (drop_level == null) {
-							// dragging outside the columns area
-							x = x0 + dx
-							y = y0 + dy
-						} else {
-							let place_x = vi * (w + 1)
-							ui.m(ui.sp2() + place_x - 1, ui.sp2() + y - 1, 0, 0)
-							ui.stack('', 0, 'l', 't', w + 2, h + 2)
-								ui.bb('', null, null, 1, 'marker', null, 0, 'dashes')
-							ui.end_stack()
-							x = x0 + dx
-							y = y0 + dy
-						}
-					}
-				}
-
-				if (mover && col == drag_col) {
-					ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
-					ui.nohit()
-				}
-
-				let col_id = id+'.group_col.'+col
-				ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
-				ui.stack(col_id, 0, 'l', 't', w, h)
-					ui.bb('', 'bg1',
-							drag_col == col && (
-								drag_state == 'hover'    && 'hover' ||
-								drag_state == 'dragging' && 'active' ||
-								drag_state == 'drag'     && 'active') || null,
-						1, 'intense')
-					ui.m(ui.sp2(), ui.sp075())
-					ui.text('', col, 1, 'l', 'c', w - 2 * ui.sp2())
-				ui.end_stack()
-
-				if (mover && col == drag_col)
-					ui.end_popup()
-
-			}
-
-		ui.end_sb()
+	e.scroll_to_cell = function(ri, fi) {
+		let [x, y, w, h] = cell_rect(ri, fi)
+		ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
 	}
-
-	} // render_group_by_bar scope
 
 	// render grid ------------------------------------------------------------
 
+	// col resize state
+	let col_resize_field_w0
+	// col move state
+	let col_move_dx
+	let col_mover
+
+	// group drag state
+	let drop_pos
+	let drag_group_cols, drag_col, drag_col_def, drop_level
+	let group_col_mover, xs, is, x0, y0
+	let levels, min_levels, max_levels
+
+	// keyboard state
+	let focused, shift, ctrl
+	let keydown = key => focused && ui.keydown(key)
+
 	e.render = function(fr, align, valign, min_w, min_h) {
 
-		// layout fields and compute cell grid size.
+		// set keyboard state
+
+		focused = ui.focused(id)
+		shift = focused && ui.key('shift')
+		ctrl  = focused && ui.key('control')
+
+		// layout fields and compute cell grid size
 
 		cells_w = 0
 		for (let field of e.fields) {
@@ -707,18 +498,686 @@ function init_nav_view(id, e) {
 			cells_w += cw
 		}
 
-		process_mouse()
+		// process mouse input -------------------------------------------------
 
-		if (ui.focused(id))
-			keydown()
+		// check drag on group-bar columns
+
+		let group_drag_cols = e.groups.cols || empty_array
+
+		let drag_state, dx, dy
+		for (let col of group_drag_cols) {
+			let col_id = id+'.group_col.'+col
+			;[drag_state, dx, dy] = ui.drag(col_id)
+			if (drag_state) {
+				drag_col = col
+				drag_col_def = e.groups.range_defs[col]
+				break
+			}
+		}
+
+		// start dragging the group-bar column using a live_move_mixin to help
+		// computing the x-coord of the other columns while dragging over them.
+		if (drag_state == 'drag') {
+
+			let x = drag_col_def.index * (group_col_w + 1)
+			let y = drag_col_def.group_level * 10
+
+			group_col_mover = ui.live_move_mixin()
+			xs = [] // col_index -> col_x
+			is = [] // col_index -> col_visual_index
+			group_col_mover.movable_element_size = function() {
+				return group_col_w + gap
+			}
+			group_col_mover.set_movable_element_pos = function(i, x, moving, vi) {
+				xs[i] = x
+				if (vi != null)
+					is[i] = vi
+			}
+			group_col_mover.move_element_start(drag_col_def.index, 1, 0, group_drag_cols.length)
+			x0 = x
+			y0 = y
+
+			// compute the allowed level ranges that the dragged column is
+			// allowed to move vertically in each horizontal position that
+			// it finds itself in (since it can move in both directions).
+			// these ranges remain fixed while the col is moving.
+			let last_level = 0
+			let i = 0
+			levels = []
+			min_levels = []
+			max_levels = []
+			for (let col of group_drag_cols) {
+				let def = e.groups.range_defs[col]
+				let level = def.group_level
+				levels    [i] = level
+				min_levels[i] = level
+				max_levels[i] = level
+				if (level != last_level) {
+					min_levels[i]--
+					if (i > 0)
+						max_levels[i-1]++
+				} else if (i == 1) {
+					min_levels[i-1]--
+				} else if (i > 0 && i == group_drag_cols.length-1) {
+					max_levels[i]++
+				}
+				last_level = level
+				i++
+			}
+
+		}
+
+		// drag column over the group-by header or over the grid's column header.
+		// sets: drop_level, drop_pos
+		if (drag_state == 'drag' || drag_state == 'dragging') {
+			group_col_mover.move_element_update(x0 + dx)
+			let vi = is[drag_col_def.index]
+			let level = levels[vi]
+			let min_level = min_levels[vi]
+			let max_level = max_levels[vi]
+			let mx = x0 + dx
+			let my = y0 + dy
+			level = clamp(round(my / 10), min_level, max_level)
+			let min_y = min_level * 10 - ui.sp4()
+			let max_y = max_level * 10 + ui.sp4()
+			let min_x = (-0.5) * (group_col_w + gap)
+			let max_x = (group_drag_cols.length-1 + 0.5) * (group_col_w + gap)
+			drop_level = null
+			drop_pos = null
+			if (
+				my >= min_y && my <= max_y &&
+				mx >= min_x && mx <= max_x &&
+				ui.hovers(id+'.group_bar')
+			) { // move
+				drop_level = level
+			} else { // put back in grid
+				group_col_mover.move_element_update(null)
+				if (ui.hovers(id+'.header_cells')) {
+					let hx = ui.state(id+'.header_cells').get('x')
+					for (let field of e.fields) {
+						let x = field._x + hx
+						let w = field._w
+						let d = w / 2
+						if (ui.mx >= x && ui.mx <= x + d) {
+							drop_pos = field.index
+							break
+						} else if (ui.mx >= x + w - d && ui.mx <= x + w) {
+							drop_pos = field.index+1
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if (drag_state == 'drop') {
+
+			if (drop_level != null) { // move it between other group columns
+
+				// create a temp array with drag_col moved to its new position.
+				let over_i = group_col_mover.move_element_stop()
+				let a = []
+				for (let col of group_drag_cols) {
+					let def = e.groups.range_defs[col]
+					let vi = is[def.index]
+					let level = col == drag_col ? drop_level : levels[vi]
+					a.push([col, level])
+				}
+				array_move(a, drag_col_def.index, 1, over_i, true)
+
+				// format group_cols and set it.
+				let t = []
+				let last_level = a[0][1] // can be -1..1 from dragging
+				let i = 0
+				for (let [col, level] of a) {
+					if (level != last_level)
+						t.push(' > ')
+					t.push(col)
+					let def = e.groups.range_defs[col]
+					if (def.offset != null) t.push('/', def.offset)
+					if (def.unit   != null) t.push('/', def.unit)
+					if (def.freq   != null) t.push('/', def.freq)
+					t.push(' ')
+					last_level = level
+					i++
+				}
+				e.update({group_by: t.join('')})
+				group_drag_cols = e.groups?.cols || empty_array // reload cols
+
+			} else if (drop_pos != null) { // put it back in grid
+
+				e.ungroup_col(drag_col, drop_pos)
+				group_drag_cols = e.groups.cols
+
+			}
+
+			// reset all drag state
+			drag_col = null
+			drag_col_def = null
+			group_col_mover = null
+			xs = null
+			is = null
+			levels = null
+			min_levels = null
+			max_levels = null
+			drop_level = null
+			drop_pos = null
+
+		}
+
+		// check click on sort icons
+
+		for (let field of e.fields) {
+
+			let icon_id = id+'.sort_icon.'+field.name
+
+			let [drag_state] = ui.drag(icon_id)
+			if (drag_state)
+				ui.set_cursor('pointer')
+			if (drag_state == 'drop')
+				e.set_order_by_dir(field, 'toggle', shift)
+
+		}
+
+		// check drag on columns header
+
+		;[drag_state, dx, dy] = ui.drag(id+'.header_cells')
+		if (drag_state == 'hover' || drag_state == 'drag') {
+			hit_state = null
+			hit_fi = null
+			let hs = ui.hit(id+'.header_cells')
+			let x0 = ui.state(id+'.header_cells').get('x')
+			for (let field of e.fields) {
+				let x = field._x + x0
+				let w = field._w
+				if (ui.mx >= x + w - 5 && ui.mx <= x + w + 5) {
+					hit_state = 'col_resize'
+					hit_fi = field.index
+					ui.set_cursor('ew-resize')
+					break
+				}
+				if (ui.mx >= x && ui.mx <= x + w && field.movable != false) {
+					hit_state = 'col_move'
+					hit_fi = field.index
+					col_move_dx = ui.mx - x0 - field._x
+					break
+				}
+			}
+		}
+
+		if (drag_state == 'dragging' && hit_state == 'col_resize') {
+			ui.set_cursor('ew-resize')
+			let field = e.fields[hit_fi]
+			col_resize_field_w0 = field.w
+			hit_state = 'col_resizing'
+		}
+
+		if (drag_state == 'dragging' && hit_state == 'col_resizing') {
+			let field = e.fields[hit_fi]
+			field.w = clamp(col_resize_field_w0 + dx, field.min_w, field.max_w)
+			ui.set_cursor('ew-resize')
+		}
+
+		if (drag_state == 'dragging' && dy < -10 && hit_state == 'col_move') {
+
+			let field = e.fields[hit_fi]
+			hit_state = 'col_group'
+
+			//e.group_col(field.name)
+
+		}
+
+		if (hit_state == 'col_group') {
+			ui.set_cursor('pointer')
+		}
+
+		if (drag_state == 'dragging' && abs(dx) > 10 && hit_state == 'col_move') {
+
+			let field = e.fields[hit_fi]
+
+			let cs = ui.captured(id+'.header_cells')
+
+			col_mover = ui.live_move_mixin()
+
+			col_mover.movable_element_size = function(fi) {
+				let [x, y, w, h] = cell_rect(0, fi)
+				return horiz ? e.fields[fi]._w : h
+			}
+
+			col_mover.set_movable_element_pos = function(fi, x, moving) {
+				e.fields[fi]._x = x
+			}
+
+			col_mover.move_element_start(hit_fi, 1, 0, e.fields.length)
+
+			hit_state = 'col_moving'
+		}
+
+
+		if (hit_state == 'col_moving') {
+
+			let x0 = ui.state(id+'.header_cells').get('x')
+			let mx = ui.mx - x0 - col_move_dx
+
+			col_mover.move_element_update(horiz ? mx : my)
+			e.scroll_to_cell(hit_ri, hit_fi)
+
+			ui.set_cursor('grabbing')
+
+			if (drag_state == 'drop') {
+				let over_fi = col_mover.move_element_stop() // sets x of moved element.
+				e.move_field(hit_fi, over_fi)
+			}
+
+		}
+
+		if (drag_state == 'drop') {
+			col_mover = null
+			hit_state = null
+		}
+
+		;[drag_state, dx, dy] = ui.drag(id+'.cells')
+
+		if (drag_state == 'hover' || drag_state == 'drag') {
+			hit_state = null
+			hit_ri = null
+			hit_fi = null
+			let s = ui.state(id+'.cells')
+			let x0 = s.get('x')
+			let y0 = s.get('y')
+			hit_ri = floor((ui.my - y0) / cell_h)
+			let row = e.rows[hit_ri]
+			for (let fi = 0; fi < e.fields.length; fi++) {
+				let [x1, y1, w, h] = cell_rect(hit_ri, fi)
+				let hit_dx = ui.mx - x1 - x0
+				let hit_dy = ui.my - y1 - y0
+				if (hit_dx >= 0 && hit_dx <= w) {
+					let field = e.fields[fi]
+					hit_state = 'cell'
+					hit_fi = fi
+					hit_indent = false
+					if (row && field_has_indent(field)) {
+						let has_children = (row.child_rows?.length ?? 0) > 0
+						if (has_children) {
+							let indent_x = indent_offset(row_indent(row))
+							hit_indent = hit_dx <= indent_x
+						}
+					}
+					break
+				}
+			}
+		}
+
+		// if (!hit_state) {
+		// 	if (ev.target == e.cells_view) // clicked on empty space.
+		// 		e.exit_edit()
+		// 	return
+		// }
+
+		if (drag_state == 'drag' && hit_state == 'cell') {
+
+			ui.focus(id)
+
+			let row = e.rows[hit_ri]
+			let field = e.fields[hit_fi]
+
+			if (hit_indent)
+				e.toggle_collapsed(row, shift)
+
+			let already_on_it =
+				hit_ri == e.focused_row_index &&
+				hit_fi == e.focused_field_index
+
+			let click =
+				!e.enter_edit_on_click
+				&& !e.stay_in_edit_mode
+				&& !e.editor
+				&& e.cell_clickable(row, field)
+
+			if (e.focus_cell(hit_ri, hit_fi, 0, 0, {
+				must_not_move_col: true,
+				must_not_move_row: true,
+				enter_edit: !hit_indent
+					&& !ctrl && !shift
+					&& ((e.enter_edit_on_click || click)
+						|| (e.enter_edit_on_click_focused && already_on_it)),
+				focus_editor: true,
+				focus_non_editable_if_not_found: true,
+				editor_state: click ? 'click' : 'select_all',
+				expand_selection: shift,
+				invert_selection: ctrl,
+				input: e,
+			})) {
+				hit_state = 'row_dragging'
+			}
+
+		}
+
+		// process keyboard input ----------------------------------------------
+
+		let left_arrow  =  horiz ? 'arrowleft'  : 'arrowup'
+		let right_arrow =  horiz ? 'arrowright' : 'arrowdown'
+		let up_arrow    = !horiz ? 'arrowleft'  : 'arrowup'
+		let down_arrow  = !horiz ? 'arrowright' : 'arrowdown'
+
+		// same-row field navigation.
+		if (keydown(left_arrow) || keydown(right_arrow)) {
+
+			let cols = keydown(left_arrow) ? -1 : 1
+
+			let move = !e.editor
+				|| (e.auto_jump_cells && !shift && (!horiz || ctrl)
+					&& (!horiz
+						|| !e.editor.editor_state
+						|| ctrl
+							&& (e.editor.editor_state(cols < 0 ? 'left' : 'right')
+							|| e.editor.editor_state('all_selected'))
+						))
+
+			if (move)
+				if (e.focus_next_cell(cols, {
+					editor_state: horiz
+						? (((e.editor && e.editor.editor_state) ? e.editor.editor_state('all_selected') : ctrl)
+							? 'select_all'
+							: cols > 0 ? 'left' : 'right')
+						: 'select_all',
+					expand_selection: shift,
+					input: e,
+				}))
+					return false
+
+		}
+
+		// Tab/Shift+Tab cell navigation.
+		if (keydown('tab') && e.tab_navigation) {
+
+			let cols = shift ? -1 : 1
+
+			if (e.focus_next_cell(cols, {
+				auto_advance_row: true,
+				editor_state: cols > 0 ? 'left' : 'right',
+				input: e,
+			}))
+				return false
+
+		}
+
+		// insert with the arrow down key on the last focusable row.
+		if (keydown(down_arrow) && !shift) {
+			if (!e.save_on_add_row) { // not really compatible behavior...
+				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
+					if (e.insert_rows(1, {
+						input: e,
+						focus_it: true,
+					})) {
+						return false
+					}
+				}
+			}
+		}
+
+		// remove last row with the arrow up key if not edited.
+		if (keydown(up_arrow)) {
+			if (e.is_last_row_focused() && e.focused_row) {
+				let row = e.focused_row
+				if (row.is_new && !e.is_row_user_modified(row)) {
+					let editing = !!e.editor
+					if (e.remove_row(row, {input: e, refocus: true})) {
+						if (editing)
+							e.enter_edit('select_all')
+						return false
+					}
+				}
+			}
+		}
+
+		// row navigation.
+		let rows
+		if      (keydown(up_arrow  )) rows = -1
+		else if (keydown(down_arrow)) rows =  1
+		else if (keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
+		else if (keydown('pagedown')) rows =  (ctrl ? 1/0 : page_row_count)
+		else if (keydown('home'    )) rows = -1/0
+		else if (keydown('end'     )) rows =  1/0
+		if (rows) {
+
+			let move = !e.editor
+				|| (e.auto_jump_cells && !shift
+					&& (horiz
+						|| !e.editor.editor_state
+						|| (ctrl
+							&& (e.editor.editor_state(rows < 0 ? 'left' : 'right')
+							|| e.editor.editor_state('all_selected')))
+						))
+
+			if (move)
+				if (e.focus_cell(true, true, rows, 0, {
+					editor_state: e.editor && e.editor.editor_state
+						&& (horiz ? e.editor.editor_state() : 'select_all'),
+					expand_selection: shift,
+					input: e,
+				}))
+					return false
+
+		}
+
+		// F2: enter edit mode
+		if (!e.editor && keydown('f2')) {
+			e.enter_edit('select_all')
+			return false
+		}
+
+		// Enter: toggle edit mode, and navigate on exit
+		if (keydown('enter')) {
+			if (e.quicksearch_text) {
+				e.quicksearch(e.quicksearch_text, e.focused_row, shift ? -1 : 1)
+				return false
+			} else if (e.hasclass('picker')) {
+				e.pick_val()
+				return false
+			} else if (!e.editor) {
+				e.enter_edit('click')
+				return false
+			} else {
+				if (e.advance_on_enter == 'next_row')
+					e.focus_cell(true, true, 1, 0, {
+						input: e,
+						enter_edit: e.stay_in_edit_mode,
+						editor_state: 'select_all',
+						must_move: true,
+					})
+				else if (e.advance_on_enter == 'next_cell')
+					e.focus_next_cell(shift ? -1 : 1, {
+						input: e,
+						enter_edit: e.stay_in_edit_mode,
+						editor_state: 'select_all',
+						must_move: true,
+					})
+				else if (e.exit_edit_on_enter)
+					e.exit_edit()
+				return false
+			}
+		}
+
+		// Esc: exit edit mode.
+		if (keydown('escape')) {
+			if (e.quicksearch_text) {
+				e.quicksearch('')
+				return false
+			}
+			if (e.editor) {
+				if (e.exit_edit_on_escape) {
+					e.exit_edit()
+					e.focus()
+					return false
+				}
+			} else if (e.focused_row && e.focused_field) {
+				let row = e.focused_row
+				if (row.is_new && !e.is_row_user_modified(row, true))
+					e.remove_row(row, {input: e, refocus: true})
+				else
+					e.revert_cell(row, e.focused_field)
+				return false
+			}
+		}
+
+		// insert key: insert row
+		if (keydown('insert')) {
+			let insert_arg = 1 // add one row
+
+			if (ctrl && e.focused_row) { // add a row filled with focused row's values
+				let row = e.serialize_row_vals(e.focused_row)
+				e.pk_fields.map((f) => delete row[f.name])
+				insert_arg = [row]
+			}
+
+			if (e.insert_rows(insert_arg, {
+				input: e,
+				at_focused_row: true,
+				focus_it: true,
+			})) {
+				return false
+			}
+		}
+
+		if (keydown('delete')) {
+
+			if (e.editor && e.editor.input_val == null)
+				e.exit_edit({cancel: true})
+
+			// delete: toggle-delete selected rows
+			if (!ctrl && !e.editor && e.remove_selected_rows({
+						input: e, refocus: true, toggle: true, confirm: true
+					}))
+				return false
+
+			// ctrl_delete: set selected cells to null.
+			if (ctrl) {
+				e.set_null_selected_cells({input: e})
+				return false
+			}
+
+		}
+
+		if (!e.editor && keydown(' ') && !e.quicksearch_text) {
+			if (e.focused_row && (!e.can_focus_cells || e.focused_field == e.tree_field))
+				e.toggle_collapsed(e.focused_row, shift)
+			else if (e.focused_row && e.focused_field && e.cell_clickable(e.focused_row, e.focused_field))
+				e.enter_edit('click')
+			return false
+		}
+
+		if (!e.editor && ctrl && keydown('a')) {
+			e.select_all_cells()
+			return false
+		}
+
+		if (!e.editor && keydown('backspace')) {
+			if (e.quicksearch_text)
+				e.quicksearch(e.quicksearch_text.slice(0, -1), e.focused_row)
+			return false
+		}
+
+		if (ctrl && keydown('s')) {
+			e.save()
+			return false
+		}
+
+		if (ctrl && !e.editor) {
+			if (keydown('c')) {
+				let row = e.focused_row
+				let fld = e.focused_field
+				if (row && fld)
+					copy_to_clipboard(e.cell_text_val(row, fld))
+				return false
+			} else if (keydown('x')) {
+
+				return false
+			} else if (keydown('v')) {
+
+				return false
+			}
+		}
+
+		// TODO:
+		// printable characters: enter quick edit mode.
+		function keypress(c) {
+			if (e.quick_edit) {
+				if (!e.editor && e.focused_row && e.focused_field) {
+					e.enter_edit('select_all')
+					let v = e.focused_field.from_text(c)
+					e.set_cell_val(e.focused_row, e.focused_field, v)
+					return false
+				}
+			} else if (!e.editor) {
+				e.quicksearch(e.quicksearch_text + c, e.focused_row)
+				return false
+			}
+		}
+
+		// draw ----------------------------------------------------------------
 
 		ui.v(fr, 0, align, valign, min_w, min_h)
 
 			// group-by bar
 
-			render_group_by_bar()
+			let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, cell_h * 2)
+				ui.bb('', 'bg2', null, 'tb', 'light')
 
-			// header cell
+				for (let col of group_drag_cols ?? e.groups.cols ?? empty_array) {
+
+					let def = e.groups.range_defs[col]
+					let x = def.index * (w + 1)
+					let y = def.group_level * 10
+
+					if (mover) {
+						let vi = is[def.index]
+						let level = col == drag_col ? drop_level : levels[vi]
+						x = xs[def.index]
+						y = level * 10
+						if (col == drag_col) {
+							if (drop_level == null) {
+								// dragging outside the columns area
+								x = x0 + dx
+								y = y0 + dy
+							} else {
+								let place_x = vi * (w + 1)
+								ui.m(ui.sp2() + place_x - 1, ui.sp2() + y - 1, 0, 0)
+								ui.stack('', 0, 'l', 't', w + 2, h + 2)
+									ui.bb('', null, null, 1, 'marker', null, 0, 'dashes')
+								ui.end_stack()
+								x = x0 + dx
+								y = y0 + dy
+							}
+						}
+					}
+
+					if (mover && col == drag_col) {
+						ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
+						ui.nohit()
+					}
+
+					let col_id = id+'.group_col.'+col
+					ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
+					ui.stack(col_id, 0, 'l', 't', w, h)
+						ui.bb('', 'bg1',
+								drag_col == col && (
+									drag_state == 'hover'    && 'hover' ||
+									drag_state == 'dragging' && 'active' ||
+									drag_state == 'drag'     && 'active') || null,
+							1, 'intense')
+						ui.m(ui.sp2(), ui.sp075())
+						ui.text('', col, 1, 'l', 'c', w - 2 * ui.sp2())
+					ui.end_stack()
+
+					if (mover && col == drag_col)
+						ui.end_popup()
+
+				}
+
+			ui.end_sb()
+
+			// column header
 
 			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
@@ -813,483 +1272,6 @@ function init_nav_view(id, e) {
 
 		ui.end_v()
 
-	}
-
-	// mouse interaction ------------------------------------------------------
-
-	e.scroll_to_cell = function(ri, fi) {
-		let [x, y, w, h] = cell_rect(ri, fi)
-		ui.scroll_to_view(id+'.cells_scrollbox', x, y, w, h)
-	}
-
-	// TODO:
-	e.xupdate = function(opt) {
-		if (opt.scroll_to_focused_cell)
-			e.scroll_to_focused_cell()
-	}
-
-	let process_mouse
-	{
-	let col_resize_field_w0
-	let col_move_dx
-	let col_mover
-
-	process_mouse = function() {
-
-		// check click on sort icons
-		for (let field of e.fields) {
-
-			let icon_id = id+'.sort_icon.'+field.name
-
-			let [drag_state] = ui.drag(icon_id)
-			if (drag_state)
-				ui.set_cursor('pointer')
-			if (drag_state == 'drop')
-				e.set_order_by_dir(field, 'toggle', shift)
-
-		}
-
-		let [state, dx, dy] = ui.drag(id+'.header_cells')
-
-		if (state == 'hover' || state == 'drag') {
-			hit_state = null
-			hit_fi = null
-			let hs = ui.hit(id+'.header_cells')
-			let x0 = ui.state(id+'.header_cells').get('x')
-			for (let field of e.fields) {
-				let x = field._x + x0
-				let w = field._w
-				if (ui.mx >= x + w - 5 && ui.mx <= x + w + 5) {
-					hit_state = 'col_resize'
-					hit_fi = field.index
-					ui.set_cursor('ew-resize')
-					break
-				}
-				if (ui.mx >= x && ui.mx <= x + w && field.movable != false) {
-					hit_state = 'col_move'
-					hit_fi = field.index
-					col_move_dx = ui.mx - x0 - field._x
-					break
-				}
-			}
-		}
-
-		if (state == 'dragging' && hit_state == 'col_resize') {
-			ui.set_cursor('ew-resize')
-			let field = e.fields[hit_fi]
-			col_resize_field_w0 = field.w
-			hit_state = 'col_resizing'
-		}
-
-		if (state == 'dragging' && hit_state == 'col_resizing') {
-			let field = e.fields[hit_fi]
-			field.w = clamp(col_resize_field_w0 + dx, field.min_w, field.max_w)
-			ui.set_cursor('ew-resize')
-		}
-
-		if (state == 'dragging' && dy < -10 && hit_state == 'col_move') {
-
-			let field = e.fields[hit_fi]
-			hit_state = 'col_group'
-
-			//e.group_col(field.name)
-
-		}
-
-		if (hit_state == 'col_group') {
-			ui.set_cursor('pointer')
-		}
-
-		if (state == 'dragging' && abs(dx) > 10 && hit_state == 'col_move') {
-
-			let field = e.fields[hit_fi]
-
-			let cs = ui.captured(id+'.header_cells')
-
-			col_mover = ui.live_move_mixin()
-
-			col_mover.movable_element_size = function(fi) {
-				let [x, y, w, h] = cell_rect(0, fi)
-				return horiz ? e.fields[fi]._w : h
-			}
-
-			col_mover.set_movable_element_pos = function(fi, x, moving) {
-				e.fields[fi]._x = x
-			}
-
-			col_mover.move_element_start(hit_fi, 1, 0, e.fields.length)
-
-			hit_state = 'col_moving'
-		}
-
-
-		if (hit_state == 'col_moving') {
-
-			let x0 = ui.state(id+'.header_cells').get('x')
-			let mx = ui.mx - x0 - col_move_dx
-
-			col_mover.move_element_update(horiz ? mx : my)
-			e.scroll_to_cell(hit_ri, hit_fi)
-
-			ui.set_cursor('grabbing')
-
-			if (state == 'drop') {
-				let over_fi = col_mover.move_element_stop() // sets x of moved element.
-				e.move_field(hit_fi, over_fi)
-			}
-
-		}
-
-		if (state == 'drop') {
-			col_mover = null
-			hit_state = null
-		}
-
-		;[state, dx, dy] = ui.drag(id+'.cells')
-
-		if (state == 'hover' || state == 'drag') {
-			hit_state = null
-			hit_ri = null
-			hit_fi = null
-			let s = ui.state(id+'.cells')
-			let x0 = s.get('x')
-			let y0 = s.get('y')
-			hit_ri = floor((ui.my - y0) / cell_h)
-			let row = e.rows[hit_ri]
-			for (let fi = 0; fi < e.fields.length; fi++) {
-				let [x1, y1, w, h] = cell_rect(hit_ri, fi)
-				let hit_dx = ui.mx - x1 - x0
-				let hit_dy = ui.my - y1 - y0
-				if (hit_dx >= 0 && hit_dx <= w) {
-					let field = e.fields[fi]
-					hit_state = 'cell'
-					hit_fi = fi
-					hit_indent = false
-					if (row && field_has_indent(field)) {
-						let has_children = (row.child_rows?.length ?? 0) > 0
-						if (has_children) {
-							let indent_x = indent_offset(row_indent(row))
-							hit_indent = hit_dx <= indent_x
-						}
-					}
-					break
-				}
-			}
-		}
-
-		// if (!hit_state) {
-		// 	if (ev.target == e.cells_view) // clicked on empty space.
-		// 		e.exit_edit()
-		// 	return
-		// }
-
-		if (state == 'drag' && hit_state == 'cell') {
-
-			ui.focus(id)
-
-			let row = e.rows[hit_ri]
-			let field = e.fields[hit_fi]
-
-			if (hit_indent)
-				e.toggle_collapsed(row, shift)
-
-			let already_on_it =
-				hit_ri == e.focused_row_index &&
-				hit_fi == e.focused_field_index
-
-			let click =
-				!e.enter_edit_on_click
-				&& !e.stay_in_edit_mode
-				&& !e.editor
-				&& e.cell_clickable(row, field)
-
-			if (e.focus_cell(hit_ri, hit_fi, 0, 0, {
-				must_not_move_col: true,
-				must_not_move_row: true,
-				enter_edit: !hit_indent
-					&& !ctrl && !shift
-					&& ((e.enter_edit_on_click || click)
-						|| (e.enter_edit_on_click_focused && already_on_it)),
-				focus_editor: true,
-				focus_non_editable_if_not_found: true,
-				editor_state: click ? 'click' : 'select_all',
-				expand_selection: shift,
-				invert_selection: ctrl,
-				input: e,
-			})) {
-				hit_state = 'row_dragging'
-			}
-
-		}
-
-	}
-	} // process_mouse scope
-
-	// keyboard interaction ---------------------------------------------------
-
-	function keydown() {
-
-		shift = ui.key('shift')
-		ctrl  = ui.key('control')
-
-		let left_arrow  =  horiz ? 'arrowleft'  : 'arrowup'
-		let right_arrow =  horiz ? 'arrowright' : 'arrowdown'
-		let up_arrow    = !horiz ? 'arrowleft'  : 'arrowup'
-		let down_arrow  = !horiz ? 'arrowright' : 'arrowdown'
-
-		// same-row field navigation.
-		if (ui.keydown(left_arrow) || ui.keydown(right_arrow)) {
-
-			let cols = ui.keydown(left_arrow) ? -1 : 1
-
-			let move = !e.editor
-				|| (e.auto_jump_cells && !shift && (!horiz || ctrl)
-					&& (!horiz
-						|| !e.editor.editor_state
-						|| ctrl
-							&& (e.editor.editor_state(cols < 0 ? 'left' : 'right')
-							|| e.editor.editor_state('all_selected'))
-						))
-
-			if (move)
-				if (e.focus_next_cell(cols, {
-					editor_state: horiz
-						? (((e.editor && e.editor.editor_state) ? e.editor.editor_state('all_selected') : ctrl)
-							? 'select_all'
-							: cols > 0 ? 'left' : 'right')
-						: 'select_all',
-					expand_selection: shift,
-					input: e,
-				}))
-					return false
-
-		}
-
-		// Tab/Shift+Tab cell navigation.
-		if (ui.keydown('tab') && e.tab_navigation) {
-
-			let cols = shift ? -1 : 1
-
-			if (e.focus_next_cell(cols, {
-				auto_advance_row: true,
-				editor_state: cols > 0 ? 'left' : 'right',
-				input: e,
-			}))
-				return false
-
-		}
-
-		// insert with the arrow down key on the last focusable row.
-		if (ui.keydown(down_arrow) && !shift) {
-			if (!e.save_on_add_row) { // not really compatible behavior...
-				if (e.is_last_row_focused() && e.can_actually_add_rows()) {
-					if (e.insert_rows(1, {
-						input: e,
-						focus_it: true,
-					})) {
-						return false
-					}
-				}
-			}
-		}
-
-		// remove last row with the arrow up key if not edited.
-		if (ui.keydown(up_arrow)) {
-			if (e.is_last_row_focused() && e.focused_row) {
-				let row = e.focused_row
-				if (row.is_new && !e.is_row_user_modified(row)) {
-					let editing = !!e.editor
-					if (e.remove_row(row, {input: e, refocus: true})) {
-						if (editing)
-							e.enter_edit('select_all')
-						return false
-					}
-				}
-			}
-		}
-
-		// row navigation.
-		let rows
-		if      (ui.keydown(up_arrow  )) rows = -1
-		else if (ui.keydown(down_arrow)) rows =  1
-		else if (ui.keydown('pageup'  )) rows = -(ctrl ? 1/0 : page_row_count)
-		else if (ui.keydown('pagedown')) rows =  (ctrl ? 1/0 : page_row_count)
-		else if (ui.keydown('home'    )) rows = -1/0
-		else if (ui.keydown('end'     )) rows =  1/0
-		if (rows) {
-
-			let move = !e.editor
-				|| (e.auto_jump_cells && !shift
-					&& (horiz
-						|| !e.editor.editor_state
-						|| (ctrl
-							&& (e.editor.editor_state(rows < 0 ? 'left' : 'right')
-							|| e.editor.editor_state('all_selected')))
-						))
-
-			if (move)
-				if (e.focus_cell(true, true, rows, 0, {
-					editor_state: e.editor && e.editor.editor_state
-						&& (horiz ? e.editor.editor_state() : 'select_all'),
-					expand_selection: shift,
-					input: e,
-				}))
-					return false
-
-		}
-
-		// F2: enter edit mode
-		if (!e.editor && ui.keydown('f2')) {
-			e.enter_edit('select_all')
-			return false
-		}
-
-		// Enter: toggle edit mode, and navigate on exit
-		if (ui.keydown('enter')) {
-			if (e.quicksearch_text) {
-				e.quicksearch(e.quicksearch_text, e.focused_row, shift ? -1 : 1)
-				return false
-			} else if (e.hasclass('picker')) {
-				e.pick_val()
-				return false
-			} else if (!e.editor) {
-				e.enter_edit('click')
-				return false
-			} else {
-				if (e.advance_on_enter == 'next_row')
-					e.focus_cell(true, true, 1, 0, {
-						input: e,
-						enter_edit: e.stay_in_edit_mode,
-						editor_state: 'select_all',
-						must_move: true,
-					})
-				else if (e.advance_on_enter == 'next_cell')
-					e.focus_next_cell(shift ? -1 : 1, {
-						input: e,
-						enter_edit: e.stay_in_edit_mode,
-						editor_state: 'select_all',
-						must_move: true,
-					})
-				else if (e.exit_edit_on_enter)
-					e.exit_edit()
-				return false
-			}
-		}
-
-		// Esc: exit edit mode.
-		if (ui.keydown('escape')) {
-			if (e.quicksearch_text) {
-				e.quicksearch('')
-				return false
-			}
-			if (e.editor) {
-				if (e.exit_edit_on_escape) {
-					e.exit_edit()
-					e.focus()
-					return false
-				}
-			} else if (e.focused_row && e.focused_field) {
-				let row = e.focused_row
-				if (row.is_new && !e.is_row_user_modified(row, true))
-					e.remove_row(row, {input: e, refocus: true})
-				else
-					e.revert_cell(row, e.focused_field)
-				return false
-			}
-		}
-
-		// insert key: insert row
-		if (ui.keydown('insert')) {
-			let insert_arg = 1 // add one row
-
-			if (ctrl && e.focused_row) { // add a row filled with focused row's values
-				let row = e.serialize_row_vals(e.focused_row)
-				e.pk_fields.map((f) => delete row[f.name])
-				insert_arg = [row]
-			}
-
-			if (e.insert_rows(insert_arg, {
-				input: e,
-				at_focused_row: true,
-				focus_it: true,
-			})) {
-				return false
-			}
-		}
-
-		if (ui.keydown('delete')) {
-
-			if (e.editor && e.editor.input_val == null)
-				e.exit_edit({cancel: true})
-
-			// delete: toggle-delete selected rows
-			if (!ctrl && !e.editor && e.remove_selected_rows({
-						input: e, refocus: true, toggle: true, confirm: true
-					}))
-				return false
-
-			// ctrl_delete: set selected cells to null.
-			if (ctrl) {
-				e.set_null_selected_cells({input: e})
-				return false
-			}
-
-		}
-
-		if (!e.editor && ui.keydown(' ') && !e.quicksearch_text) {
-			if (e.focused_row && (!e.can_focus_cells || e.focused_field == e.tree_field))
-				e.toggle_collapsed(e.focused_row, shift)
-			else if (e.focused_row && e.focused_field && e.cell_clickable(e.focused_row, e.focused_field))
-				e.enter_edit('click')
-			return false
-		}
-
-		if (!e.editor && ctrl && ui.keydown('a')) {
-			e.select_all_cells()
-			return false
-		}
-
-		if (!e.editor && ui.keydown('backspace')) {
-			if (e.quicksearch_text)
-				e.quicksearch(e.quicksearch_text.slice(0, -1), e.focused_row)
-			return false
-		}
-
-		if (ctrl && ui.keydown('s')) {
-			e.save()
-			return false
-		}
-
-		if (ctrl && !e.editor)
-			if (ui.keydown('c')) {
-				let row = e.focused_row
-				let fld = e.focused_field
-				if (row && fld)
-					copy_to_clipboard(e.cell_text_val(row, fld))
-				return false
-			} else if (ui.keydown('x')) {
-
-				return false
-			} else if (ui.keydown('v')) {
-
-				return false
-			}
-
-	}
-
-	// printable characters: enter quick edit mode.
-	function keypress(c) {
-		if (e.quick_edit) {
-			if (!e.editor && e.focused_row && e.focused_field) {
-				e.enter_edit('select_all')
-				let v = e.focused_field.from_text(c)
-				e.set_cell_val(e.focused_row, e.focused_field, v)
-				return false
-			}
-		} else if (!e.editor) {
-			e.quicksearch(e.quicksearch_text + c, e.focused_row)
-			return false
-		}
 	}
 
 }
