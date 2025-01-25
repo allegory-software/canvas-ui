@@ -991,8 +991,8 @@ ui.nav = function(opt) {
 
 		if (update_row_visibility) {
 			e.rows = []
-			add_visible_child_rows(e.child_rows)
 			update_row_index()
+			add_visible_child_rows(e.child_rows)
 		}
 
 		// set ready state

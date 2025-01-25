@@ -1,5 +1,66 @@
 
-	/*
+
+		for (let ri = ri1; ri < ri2; ri++) {
+			let row = rows[ri]
+			if (row.errors && row.errors.failed) {
+				let ry = ri * e.cell_h
+				draw_row_invalid_border(row, ri, rx, ry, rw, rh, draw_stage)
+			}
+		}
+
+		if (draw_cell_w != null) {
+			let [x, y, w, h] = cell_rect(hit_ri, hit_fi, draw_stage)
+			x = draw_cell_x
+			w = draw_cell_w
+			draw_hover_outline(x, y, w, h)
+		}
+
+
+
+
+		if (!editing) {
+
+			cx.save()
+
+			// clip
+			cx.beginPath()
+			cx.translate(px, py)
+			let cw = w - px - px
+			let ch = h - py - py
+			cx.cw = cw
+			cx.ch = ch
+			cx.rect(0, 0, cw, ch)
+			cx.clip()
+
+			let y = round(ch / 2)
+
+			// tree node sign
+			if (collapsed != null) {
+				cx.fillStyle = selected ? fg : e.bg_focused_selected
+				cx.font = cx.icon_font
+				let x = indent_x - e.font_size - 4
+				cx.textBaseline = 'middle'
+				cx.fillText(collapsed ? '\uf0fe' : '\uf146', x, y)
+			}
+
+			// text
+			cx.translate(indent_x, 0)
+			cx.fg_text = fg
+			cx.quicksearch_len = cell_focused && e.quicksearch_text.length || 0
+			e.draw_val(row, field, input_val, cx)
+
+			cx.restore()
+		}
+
+		cx.restore()
+
+		if (ri != null && focused)
+			update_editor(
+				 horiz ? null : xy,
+				!horiz ? null : xy, hit_indent)
+	}
+
+
 	cells_w = bx + col_x
 
 	// prevent cells_w shrinking while col resizing to prevent scroll_x changes.
@@ -52,7 +113,37 @@
 			cx.stroke()
 		}
 	}
-	*/
+
+
+	function draw_hover_outline(x, y, w, h) {
+
+		let bx = e.cell_border_v_width
+		let by = e.cell_border_h_width
+		let bw = w - .5
+		let bh = h - .5
+
+		cx.save()
+		cx.translate(x, y)
+
+		cx.lineWidth = bx || by
+
+		// add a background to override the borders.
+		cx.strokeStyle = e.bg
+		cx.setLineDash(empty_array)
+		cx.beginPath()
+		cx.rect(-.5, -.5, bw + .5, bh + .5)
+		cx.stroke()
+
+		// draw the actual hover outline.
+		cx.strokeStyle = e.fg
+		cx.setLineDash([1, 3])
+		cx.beginPath()
+		cx.rect(-.5, -.5, bw + .5, bh + .5)
+		cx.stroke()
+
+		cx.restore()
+	}
+
 
 
 // grid view -----------------------------------------------------------------

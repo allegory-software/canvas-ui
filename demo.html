@@ -793,8 +793,8 @@ let demos_array; {
 let t = {}
 for (let k in tuts)
 	t['tutorial_'+k] = tuts[k]
-Object.assign(demos, t)
-demos_array = Object.keys(demos)
+assign(demos, t)
+demos_array = keys(demos)
 }
 
 let a_length = 0
@@ -909,7 +909,7 @@ ui.main = function() {
 										continue
 									ui.ml(ui.sp2())
 									ui.h(0, ui.sp())
-										let s = isobject(v) || isfunc(v) ? typeof v : str(v)
+										let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
 										ui.color('text')
 										ui.text('', k, 1, 'l', 'c', 1/0, 0)
 										if (isobject(v) || isfunc(v))
@@ -937,7 +937,7 @@ ui.main = function() {
 								for (let [k, v] of m) {
 									ui.ml(ui.sp2())
 									ui.h(0, ui.sp())
-										let s = isobject(v) || isfunc(v) ? typeof v : str(v)
+										let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
 										ui.color('text')
 										ui.text('', k, 1, 'l', 'c', 1/0, 0)
 										if (isobject(v) || isfunc(v))
@@ -961,7 +961,7 @@ ui.main = function() {
 								for (let [k, v] of ui.captured(ui.captured_id)) {
 									ui.ml(ui.sp2())
 									ui.h(1, ui.sp())
-										let s = isobject(v) || isfunc(v) ? typeof v : str(v)
+										let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
 										ui.color('text')
 										ui.text('', k, 1, 'l', 'c', 1/0, 0)
 										if (isobject(v) || isfunc(v))

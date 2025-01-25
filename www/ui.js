@@ -1068,33 +1068,34 @@ ui.captured = captured
 // drag & drop ---------------------------------------------------------------
 
 {
-let out = [null, 0, 0]
+let out = [null, 0, 0, null]
 ui.drag = function(id, axis) {
 	let move_x = !axis || axis == 'x' || axis == 'xy'
 	let move_y = !axis || axis == 'y' || axis == 'xy'
-	let dx = 0
-	let dy = 0
 	let cs = captured(id)
 	let state = null
+	let dx = 0
+	let dy = 0
 	if (cs) {
-		if (move_x) { dx = cs.get('drag_x0') + (ui.mx - ui.mx0) }
-		if (move_y) { dy = cs.get('drag_y0') + (ui.my - ui.my0) }
+		if (move_x) { dx = ui.mx - ui.mx0 }
+		if (move_y) { dy = ui.my - ui.my0 }
 		state = ui.clickup ? 'drop' : 'dragging'
 		cs.set('drag_state', state)
-	} else if (hit(id)) {
-		if (ui.click) {
-			let cs = ui.capture(id)
-			if (cs) {
-				if (move_x) cs.set('drag_x0', dx)
-				if (move_y) cs.set('drag_y0', dy)
-				state = 'drag'
-			}
-		} else
-			state = 'hover'
+	} else {
+		cs = hit(id)
+		if (cs) {
+			if (ui.click) {
+				cs = ui.capture(id)
+				if (cs)
+					state = 'drag'
+			} else
+				state = 'hover'
+		}
 	}
 	out[0] = state
 	out[1] = dx
 	out[2] = dy
+	out[3] = cs
 	return out
 }
 }
