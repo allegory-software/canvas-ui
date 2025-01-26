@@ -40,7 +40,7 @@ function init(id, e) {
 	e.auto_expand = false
 
 	let horiz = true
-	let group_col_w = 80
+	let gcol_w = 80 // group-bar column width
 	let gap = 1
 
 	// context-sensitive thus set on each frame
@@ -52,8 +52,8 @@ function init(id, e) {
 	// cells-view-height-sensitive thus set on frame callback
 	let page_row_count = 1
 
-	// hover & drag state
-	let hit_zone // sort_icon, col_divider, col, group_col, cell
+	// mouse state
+	let hit_zone // sort_icon, col_divider, col, gcol, cell
 	let drag_op  // col_move, col_group, row_move
 	let hit_ri // row index
 	let hit_fi // field index
@@ -340,7 +340,7 @@ function init(id, e) {
 			let s = row_move_state
 			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, fi1, fi2, 'non_moving_rows')
 			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, fi1, fi2, 'moving_rows')
-		} else if (drag_op == 'col_move') { // draw fixed cols first and moving cols above them.
+		} else if (drag_op == 'col_move' || drag_op == 'col_group') { // draw fixed cols first and moving cols above them.
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, 'non_moving_cols')
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
 		} else {
@@ -360,12 +360,14 @@ function init(id, e) {
 
 	e.render = function(fr, align, valign, min_w, min_h) {
 
-		// set layout state
+		// set layout vars
 
 		font_size = ui.get_font_size()
 		line_height = font_size * 1.5
 		cell_h = round(line_height + 2 * ui.sp1() + e.cell_border_h_width)
 		header_h = cell_h
+
+		let group_bar_h = cell_h * 2
 
 		// set keyboard state
 
@@ -482,60 +484,81 @@ function init(id, e) {
 
 		}
 
-		// hover or drag group-bar column
-		let hit_col
-		if (!hit_zone) {
-			for (let col of e.groups.cols || empty_array) {
-				let col_id = id+'.group_col.'+col
-				;[drag_state, dx, dy, cs] = ui.drag(col_id)
-				if (drag_state) {
-					hit_zone = 'group_col'
-					hit_col = col
-					break
-				}
-			}
-		}
-
-		let group_col_mover
-
-		// column drag vertically towards group-bar => column add to group
+		// drag column vertically towards group-bar => column move to group
 		let col_group_start
-		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging' && dy < -10) {
+		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging' && ui.hovers(id+'.group_bar')) {
 			col_group_start = true
 			drag_op = 'col_group'
 			cs.set('op', drag_op)
 		}
 
-		// drag group-bar column
-		if (hit_zone == 'group_col' || drag_op == 'col_group') {
-
-			let mover
-			let start, cols, col_def
-
-			if (hit_zone == 'group_col' && drag_state == 'drag') {
-				cols = e.groups.cols || empty_array
-				col_def = e.groups.range_defs[hit_col]
-				start = true
-			} else if (col_group_start) {
-				cols = [...(e.groups.cols || empty_array), hit_col]
-				col_def = {index: cols.length-1, group_level: 0}
-				start = true
+		// hover or drag group-bar column
+		let hit_gcol
+		if (!hit_zone) {
+			for (let col of e.groups.cols || empty_array) {
+				let col_id = id+'.gcol.'+col
+				;[drag_state, dx, dy, cs] = ui.drag(col_id)
+				if (drag_state) {
+					hit_zone = 'gcol'
+					hit_gcol = col
+					break
+				}
 			}
+		}
+
+		if (drag_op == 'col_group')
+			hit_gcol = e.fields[hit_fi].name
+
+		let gcol_mover
+
+		// move group-bar column OR drag header column over the group-bar
+		if (hit_zone == 'gcol' || drag_op == 'col_group') {
+
+			let gcol_move_start = hit_zone == 'gcol' && drag_state == 'drag'
+			let start = gcol_move_start || col_group_start
+			let mover
 
 			if (start) {
 
-				mover = ui.live_move_mixin()
+				gcol_mover = ui.live_move_mixin()
+				mover = gcol_mover
+				cs.set('mover', gcol_mover)
 
-				mover.cols = cols
-				mover.col_def = col_def
+				mover.cols = [...(e.groups.cols || empty_array)]
+				mover.range_defs = assign({}, e.groups.range_defs)
 
-				let x = mover.col_def.index * (group_col_w + 1)
-				let y = mover.col_def.group_level * 10
+				if (gcol_move_start) {
+
+					mover.col_def = mover.range_defs[hit_gcol]
+
+					let x = mover.col_def.index * (gcol_w + 1)
+					let y = mover.col_def.group_level * 10
+					mover.x0 = x
+					mover.y0 = y
+
+				} else if (col_group_start) {
+
+					let max_level = e.groups.col_groups.length
+					mover.cols.push(hit_gcol)
+					mover.col_def = {
+						index: mover.cols.length-1,
+						group_level: max_level,
+					}
+					mover.range_defs[hit_gcol] = mover.col_def
+
+					let field = e.fld(hit_gcol)
+					let hs = ui.state(id+'.header')
+					let hx = hs.get('x')
+					let hy = hs.get('y')
+					mover.x0 = field._x - ui.sp2()
+					mover.y0 = group_bar_h
+
+				}
 
 				mover.xs = [] // col_index -> col_x
 				mover.is = [] // col_index -> col_visual_index
 				mover.movable_element_size = function() {
-					return group_col_w + gap
+					return gcol_w + gap
 				}
 				mover.set_movable_element_pos = function(i, x, moving, vi) {
 					this.xs[i] = x
@@ -543,8 +566,6 @@ function init(id, e) {
 						this.is[i] = vi
 				}
 				mover.move_element_start(mover.col_def.index, 1, 0, mover.cols.length)
-				mover.x0 = x
-				mover.y0 = y
 
 				// compute the allowed level ranges that the dragged column is
 				// allowed to move vertically in each horizontal position that
@@ -556,7 +577,7 @@ function init(id, e) {
 				let last_level = 0
 				let i = 0
 				for (let col of mover.cols) {
-					let def = e.groups.range_defs[col] ?? col_def
+					let def = mover.range_defs[col]
 					let level = def.group_level
 					mover.levels    [i] = level
 					mover.min_levels[i] = level
@@ -574,18 +595,12 @@ function init(id, e) {
 					i++
 				}
 
-				cs.set('mover', mover)
-				group_col_mover = mover
-
 			} else {
-				mover = cs.get('mover')
-				group_col_mover = mover
+				gcol_mover = cs.get('mover')
+				mover = gcol_mover
 			}
 
 			if (drag_state != 'hover') {
-
-				let mover = cs.get('mover')
-				group_col_mover = mover
 
 				// drag column over the group-by header or over the grid's column header.
 				mover.move_element_update(mover.x0 + dx)
@@ -598,8 +613,8 @@ function init(id, e) {
 				level = clamp(round(my / 10), min_level, max_level)
 				let min_y = min_level * 10 - ui.sp4()
 				let max_y = max_level * 10 + ui.sp4()
-				let min_x = (-0.5) * (group_col_w + gap)
-				let max_x = (mover.cols.length-1 + 0.5) * (group_col_w + gap)
+				let min_x = (-0.5) * (gcol_w + gap)
+				let max_x = (mover.cols.length-1 + 0.5) * (gcol_w + gap)
 				mover.drop_level = null
 				mover.drop_pos = null
 				if (
@@ -608,20 +623,23 @@ function init(id, e) {
 					ui.hovers(id+'.group_bar')
 				) { // move
 					mover.drop_level = level
-				} else if (drag_op != 'col_group') { // put back in grid
+				} else {
 					mover.move_element_update(null)
-					if (ui.hovers(id+'.header')) {
-						let hx = ui.state(id+'.header').get('x')
-						for (let field of e.fields) {
-							let x = field._x + hx
-							let w = field._w
-							let d = w / 2
-							if (ui.mx >= x && ui.mx <= x + d) {
-								mover.drop_pos = field.index
-								break
-							} else if (ui.mx >= x + w - d && ui.mx <= x + w) {
-								mover.drop_pos = field.index+1
-								break
+					if (drag_op != 'col_group') { // put back in grid
+						mover.move_element_update(null)
+						if (ui.hovers(id+'.header')) {
+							let hx = ui.state(id+'.header').get('x')
+							for (let field of e.fields) {
+								let x = field._x + hx
+								let w = field._w
+								let d = w / 2
+								if (ui.mx >= x && ui.mx <= x + d) {
+									mover.drop_pos = field.index
+									break
+								} else if (ui.mx >= x + w - d && ui.mx <= x + w) {
+									mover.drop_pos = field.index+1
+									break
+								}
 							}
 						}
 					}
@@ -631,18 +649,18 @@ function init(id, e) {
 
 					if (mover.drop_level != null) { // move it between other group columns
 
-						// create a temp array with drag_col moved to its new position.
+						// create a temp array with the dragged column moved to its new position.
 						let over_i = mover.move_element_stop()
 						let a = []
 						for (let col of mover.cols) {
-							let def = e.groups.range_defs[col]
+							let def = mover.range_defs[col]
 							let vi = mover.is[def.index]
-							let level = col == hit_col ? mover.drop_level : mover.levels[vi]
+							let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
 							a.push([col, level])
 						}
 						array_move(a, mover.col_def.index, 1, over_i, true)
 
-						// format group_cols and set it.
+						// format group-bar cols and set it.
 						let t = []
 						let last_level = a[0][1] // can be -1..1 from dragging
 						let i = 0
@@ -650,7 +668,7 @@ function init(id, e) {
 							if (level != last_level)
 								t.push(' > ')
 							t.push(col)
-							let def = e.groups.range_defs[col]
+							let def = mover.range_defs[col]
 							if (def.offset != null) t.push('/', def.offset)
 							if (def.unit   != null) t.push('/', def.unit)
 							if (def.freq   != null) t.push('/', def.freq)
@@ -662,7 +680,7 @@ function init(id, e) {
 
 					} else if (mover.drop_pos != null) { // put it back in grid
 
-						e.ungroup_col(hit_col, mover.drop_pos)
+						e.ungroup_col(hit_gcol, mover.drop_pos)
 
 					}
 
@@ -1033,25 +1051,25 @@ function init(id, e) {
 
 			// group-by bar
 
-			let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, cell_h * 2)
+			let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h)
 				ui.bb('', 'bg2', null, 'tb', 'light')
 
 				let h = line_height + ui.sp()
-				let mover = group_col_mover
+				let mover = gcol_mover
 
-				for (let col of mover?.cols ?? e.groups.cols ?? empty_array) {
+				for (let col of (mover ?? e.groups).cols ?? empty_array) {
 
-					let def = e.groups.range_defs[col] ?? mover.col_def
-					let x = def.index * (group_col_w + 1)
+					let def = (mover ?? e.groups).range_defs[col]
+					let x = def.index * (gcol_w + 1)
 					let y = def.group_level * 10
-					let w = group_col_w
+					let w = gcol_w
 
 					if (mover) {
 						let vi = mover.is[def.index]
-						let level = col == hit_col ? mover.drop_level : mover.levels[vi]
+						let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
 						x = mover.xs[def.index]
 						y = level * 10
-						if (col == hit_col) {
+						if (col == hit_gcol) {
 							if (mover.drop_level == null) {
 								// dragging outside the columns area
 								x = mover.x0 + dx
@@ -1068,25 +1086,25 @@ function init(id, e) {
 						}
 					}
 
-					if (mover && col == hit_col) {
+					if (mover && col == hit_gcol) {
 						ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
 						ui.nohit()
 					}
 
-					let col_id = id+'.group_col.'+col
+					let col_id = id+'.gcol.'+col
 					ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
 					ui.stack(col_id, 0, 'l', 't', w, h)
 						ui.bb('', 'bg1',
-								hit_col == col && (
+								hit_gcol == col && (
 									drag_state == 'hover'    && 'hover' ||
 									drag_state == 'dragging' && 'active' ||
 									drag_state == 'drag'     && 'active') || null,
 							1, 'intense')
 						ui.m(ui.sp2(), ui.sp075())
-						ui.text('', col, 1, 'l', 'c', w - 2 * ui.sp2())
+						ui.text('', e.fld(col).label, 1, 'l', 'c', w - 2 * ui.sp2())
 					ui.end_stack()
 
-					if (mover && col == hit_col)
+					if (mover && col == hit_gcol)
 						ui.end_popup()
 
 				}
@@ -1099,7 +1117,17 @@ function init(id, e) {
 				ui.m(field._x, 0, 0, 0)
 				ui.p(ui.sp2(), 0)
 				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * ui.sp2(), header_h)
-					ui.bb('', 'bg1', null, 'br', 'intense')
+
+					let borders =
+						drag_op == 'col_move' && (
+							field.index == cs.get('mover').over_i   && 'blr' ||
+							field.index == hit_fi                   && 'blr' ||
+							field.index == cs.get('mover').over_i-1 && 'br'
+						) || 'br'
+					ui.bb('', 'bg1', null, borders, 'intense')
+
+				if (drag_op == 'col_group' && hit_gcol == field.name)
+						ui.color('faint')
 
 					let max_min_w = noclip ? null : max(0,
 						field._w
@@ -1146,16 +1174,15 @@ function init(id, e) {
 							continue
 						draw_header_cell(field)
 					}
-
-					if (col_move && hit_fi != null) {
+					if (col_move) {
 						let field = e.fields[hit_fi]
-						draw_header_cell(field, hit_zone == 'col')
+						draw_header_cell(field)
 					}
 
 					// group column drop arrows
 
-					if (group_col_mover?.drop_pos != null) {
-						let x = e.fields[group_col_mover.drop_pos]?._x ?? cells_w
+					if (gcol_mover?.drop_pos != null) {
+						let x = e.fields[gcol_mover.drop_pos]?._x ?? cells_w
 						ui.ml(x)
 						ui.stack('', 0, 'l', 't', 0, header_h)
 							ui.popup('', 'overlay', null, 't', 'c')
