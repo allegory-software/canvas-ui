@@ -117,7 +117,7 @@ function init(id, e) {
 					collapsed = false
 
 				// shift indent on moving rows so it gets under the adopting parent.
-				if (draw_stage == 'moving_rows')
+				if (draw_stage == 'row_move')
 					indent_x += s.hit_indent_x - s.indent_x
 			}
 		}
@@ -126,8 +126,10 @@ function init(id, e) {
 		// drawing a background is slow, so we avoid it when we can.
 		let bg, bgs
 
-		if (draw_stage == 'moving_cols' || draw_stage == 'moving_rows')
+		if (draw_stage == 'col_move' || draw_stage == 'row_move')
 			bg = 'bg2'
+		else if (draw_stage == 'col_group')
+			bg = 'bg0'
 		if (editing) {
 			bg = 'item'
 			bgs = grid_focused ? 'item-focused focused' : 'item-focused'
@@ -167,7 +169,9 @@ function init(id, e) {
 		}
 
 		let fg
-		if (is_null || is_empty || disabled)
+		if (draw_stage == 'col_group')
+			fg = 'faint'
+		else if (is_null || is_empty || disabled)
 			fg = 'label'
 		else
 			fg = 'text'
@@ -176,7 +180,7 @@ function init(id, e) {
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.bb('', bg, bgs, 'b', 'light')
+			ui.bb('', bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
 			ui.color(fg)
 			if (has_children) {
 				ui.p(indent_x - ui.sp2(), 0, ui.sp2(), 0)
@@ -238,7 +242,7 @@ function init(id, e) {
 				foc_cell = null
 
 		}
-		let skip_moving_col // = hit_zone == 'col_moving' && draw_stage == 'non_moving_cols'
+		let skip_moving_col = drag_op == 'col_move' && draw_stage == 'col'
 
 		for (let ri = ri1; ri < ri2; ri++) {
 
@@ -336,13 +340,15 @@ function init(id, e) {
 		x = bx + sx
 		y = by + sy
 
-		if (drag_op == 'row_move') { // draw fixed rows first and moving rows above them.
+		if (drag_op == 'row_move') {
+			// draw fixed rows first and moving rows above them.
 			let s = row_move_state
-			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, fi1, fi2, 'non_moving_rows')
-			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, fi1, fi2, 'moving_rows')
-		} else if (drag_op == 'col_move' || drag_op == 'col_group') { // draw fixed cols first and moving cols above them.
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, 'non_moving_cols')
-			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, 'moving_cols')
+			draw_cells_range(a, x, y, e.rows, s.vri1, s.vri2, fi1, fi2, 'row')
+			draw_cells_range(s.rows, s.move_vri1, s.move_vri2, fi1, fi2, 'row_move')
+		} else if (drag_op == 'col_move' || drag_op == 'col_group') {
+			// draw fixed cols first and moving cols above them.
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2, 'col')
+			draw_cells_range(a, x, y, e.rows, ri1, ri2, hit_fi, hit_fi + 1, drag_op)
 		} else {
 			draw_cells_range(a, x, y, e.rows, ri1, ri2, fi1, fi2)
 		}
@@ -357,6 +363,15 @@ function init(id, e) {
 	}
 
 	// render grid ------------------------------------------------------------
+
+	function reset_state() {
+		hit_zone = null
+		drag_op = null
+		hit_fi = null
+		hit_ri = null
+		hit_indent = null
+		row_move_state = null
+	}
 
 	e.render = function(fr, align, valign, min_w, min_h) {
 
@@ -379,12 +394,7 @@ function init(id, e) {
 
 		let drag_state, dx, dy, cs
 
-		hit_zone = null
-		drag_op = null
-		hit_fi = null
-		hit_ri = null
-		hit_indent = null
-		row_move_state = null
+		reset_state()
 
 		// hover or click on sort icons
 		if (!hit_zone) {
@@ -413,7 +423,7 @@ function init(id, e) {
 						hit_zone = 'col_divider'
 						hit_fi = field.index
 						break
-					} else if (ui.mx >= x && ui.mx <= x + w && field.movable != false) {
+					} else if (ui.mx >= x && ui.mx <= x + w) {
 						hit_zone = 'col'
 						hit_fi = field.index
 						if (drag_state == 'drag')
@@ -444,7 +454,10 @@ function init(id, e) {
 		}
 
 		// column drag horizontally => start column move
-		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging' && abs(dx) > 10) {
+		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging'
+			&& abs(dx) > 10
+			&& e.fields[hit_fi].movable
+		) {
 
 			let mover = ui.live_move_mixin()
 
@@ -457,7 +470,8 @@ function init(id, e) {
 				e.fields[fi]._x = x
 			}
 
-			mover.move_element_start(hit_fi, 1, 0, e.fields.length)
+			mover.move_element_start(hit_fi, 1,
+				e.fields[0].is_group_field ? 1 : 0, e.fields.length)
 
 			drag_op = 'col_move'
 			cs.set('op', drag_op)
@@ -480,13 +494,17 @@ function init(id, e) {
 			if (drag_state == 'drop') {
 				let over_fi = mover.move_element_stop() // sets x of moved element.
 				e.move_field(hit_fi, over_fi)
+				reset_state()
 			}
 
 		}
 
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
-		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging' && ui.hovers(id+'.group_bar')) {
+		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging'
+			&& ui.hovers(id+'.group_bar')
+			&& e.fields[hit_fi].groupable
+		) {
 			col_group_start = true
 			drag_op = 'col_group'
 			cs.set('op', drag_op)
@@ -586,8 +604,6 @@ function init(id, e) {
 						mover.min_levels[i]--
 						if (i > 0)
 							mover.max_levels[i-1]++
-					} else if (i == 1) {
-						mover.min_levels[i-1]--
 					} else if (i > 0 && i == mover.cols.length-1) {
 						mover.max_levels[i]++
 					}
@@ -633,10 +649,11 @@ function init(id, e) {
 								let x = field._x + hx
 								let w = field._w
 								let d = w / 2
-								if (ui.mx >= x && ui.mx <= x + d) {
+								let is_last = field.index == e.fields.length-1
+								if (ui.mx >= x && ui.mx <= x + d && !field.is_group_field) {
 									mover.drop_pos = field.index
 									break
-								} else if (ui.mx >= x + w - d && ui.mx <= x + w) {
+								} else if (ui.mx >= x + w - d && (is_last || ui.mx <= x + w)) {
 									mover.drop_pos = field.index+1
 									break
 								}
@@ -683,6 +700,8 @@ function init(id, e) {
 						e.ungroup_col(hit_gcol, mover.drop_pos)
 
 					}
+
+					reset_state()
 
 				}
 
@@ -778,7 +797,8 @@ function init(id, e) {
 				invert_selection: ctrl,
 				input: e,
 			})) {
-				drag_op = 'row_move'
+				// TODO:
+				//drag_op = 'row_move'
 			}
 
 		}
@@ -1118,15 +1138,14 @@ function init(id, e) {
 				ui.p(ui.sp2(), 0)
 				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * ui.sp2(), header_h)
 
-					let borders =
-						drag_op == 'col_move' && (
-							field.index == cs.get('mover').over_i   && 'blr' ||
-							field.index == hit_fi                   && 'blr' ||
-							field.index == cs.get('mover').over_i-1 && 'br'
-						) || 'br'
-					ui.bb('', 'bg1', null, borders, 'intense')
+					let col_move  = drag_op == 'col_move'  && hit_fi == field.index
+					let col_group = drag_op == 'col_group' && hit_gcol == field.name
 
-				if (drag_op == 'col_group' && hit_gcol == field.name)
+					ui.bb('',
+						col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
+						col_move ? 'blr' : 'br', 'intense')
+
+					if (col_group)
 						ui.color('faint')
 
 					let max_min_w = noclip ? null : max(0,
@@ -1143,8 +1162,10 @@ function init(id, e) {
 
 					if (field.sortable) {
 						ui.scope()
+
 						ui.font('fas')
-						ui.color(field.sort_dir ? 'label' : 'faint', ui.hit(icon_id) ? 'hover' : null)
+						if (!col_group)
+							ui.color(field.sort_dir ? 'label' : 'faint', ui.hit(icon_id) ? 'hover' : null)
 
 						ui.text(icon_id,
 							field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||

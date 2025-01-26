@@ -143,6 +143,13 @@ Field attributes:
 		compare_types  : f(v1, v2) -> -1|0|1  (for sorting)
 		compare_vals   : f(v1, v2) -> -1|0|1  (for sorting and setting values)
 
+	moving:
+
+		movable        : field position can be changed (true)
+
+	grouping:
+
+		groupable      : field can be used in group-by (true)
 
 NAV API ----------------------------------------------------------------------
 
@@ -780,6 +787,7 @@ ui.nav = function(opt) {
 					init_field(rowset.fields[fi], fi)
 				e.group_field = init_field({
 					hidden: true, name: '$group', label: 'Group', w: 160,
+					is_group_field: true, movable: false, groupable: false,
 				}, rowset.fields.length)
 			}
 
@@ -897,7 +905,7 @@ ui.nav = function(opt) {
 			// init group-by view mode
 			let was_grouped = e.is_grouped
 			e.groups = parse_group_defs(e.group_by)
-			e.is_grouped = !!e.groups.fields
+			e.is_grouped = e.groups.fields.length > 0
 			if (e.is_grouped) {
 				e.tree_field = fld('$group')
 				e.fields.push(e.tree_field)
@@ -2162,7 +2170,7 @@ ui.nav = function(opt) {
 			col_groups.push(col_group)
 			level++
 		}
-		let fields = optflds(cols)
+		let fields = optflds(cols) ?? []
 		return {cols, fields, col_groups, range_defs}
 	}
 
@@ -5015,6 +5023,8 @@ assign(all_field_types, {
 	not_null: false,
 	required: false,
 	sortable: true,
+	movable: true,
+	groupable: true,
 	maxlen: 256,
 	null_text : S('null_text', ''),
 	empty_text: S('empty_text', 'empty text'),

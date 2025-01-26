@@ -710,7 +710,7 @@ ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
 ui.bg_style('light', 'input' , 'active' ,   0, 0.00, 0.90)
 
-ui.bg_style('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.80)
+ui.bg_style('dark' , 'bg0'   , 'normal' , 216, 0.28, 0.08)
 ui.bg_style('dark' , 'bg'    , 'normal' , 216, 0.28, 0.10)
 ui.bg_style('dark' , 'bg'    , 'hover'  , 216, 0.28, 0.12)
 ui.bg_style('dark' , 'bg'    , 'active' , 216, 0.28, 0.14)
@@ -6726,8 +6726,9 @@ ui.live_move_mixin = function(e) {
 		for (let i = i1; i < i2; i++)
 			sizes[i] = e.movable_element_size(i)
 		if (i1x == null) {
-			assert(i1 == 0)
 			i1x = 0
+			for (let i = 0; i < i1; i++)
+				i1x += e.movable_element_size(i)
 			i2x = i1x
 			for (let i = i1; i < i2; i++) {
 				if (i < move_i1 || i >= move_i2)
