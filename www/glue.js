@@ -76,7 +76,6 @@ DEBUGGING
 	warn(...)
 	debug(...)
 	log(...)
-	gen_id(prefix) -> id
 	check(v, ...) -> v
 	log_if(cond, ...)
 	push_log(...)
@@ -156,6 +155,7 @@ HASH MAPS
 	memoize(f) -> mf                memoize single-arg function
 	count_keys(t, [max_n]) -> n     count keys in t up-to max_n
 	first_key(t) -> k               get the first key out of an object
+	gen_id(prefix) -> id            generate autoincrement id
 
 TYPED ARRAYS
 
@@ -447,18 +447,6 @@ let pr    = console.error
 let warn  = console.warn
 let debug = console.debug
 let trace = console.trace
-
-let next_id = {}
-G.DEBUG_GEN_ID = 1
-function gen_id(k) {
-	if (!DEBUG_GEN_ID)
-		return null
-	if (!next_id[k])
-		next_id[k] = 1
-	else
-		next_id[k]++
-	return next_id[k]
-}
 
 G.DEBUG_SNAP_NUMS = 1
 function snap_nums(a) {
@@ -997,6 +985,20 @@ function first_key(t) {
 	for (let k in t)
 		if (t.hasOwnProperty(k))
 			return k
+}
+
+// autoincrement ids ---------------------------------------------------------
+
+let next_id = {}
+G.DEBUG_GEN_ID = 1
+function gen_id(k) {
+	if (!DEBUG_GEN_ID)
+		return null
+	if (!next_id[k])
+		next_id[k] = 1
+	else
+		next_id[k]++
+	return next_id[k]
 }
 
 // typed arrays --------------------------------------------------------------
@@ -2433,14 +2435,14 @@ PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
 pr, warn, debug, trace, trace_if, assert,
-push_log, push_log_if, pop_log, log, log_if, check, gen_id,
+push_log, push_log_if, pop_log, log, log_if, check,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
 subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
 array, empty_array, range, extend, array_set,
 insert, remove, remove_value, replace_value, remove_values, array_move, array_equals,
 binsearch, uniq_sorted, group_sorted, remove_duplicates,
-map, map_first_key, map_assign,
+map, map_first_key, gen_id, map_assign,
 set, set_addset, set_set, set_toarray, set_equals, empty_set,
 obj, empty, empty_obj,  keys, assign, entries, assign_opt, clone, count_keys, first_key, attr,
 memoize,

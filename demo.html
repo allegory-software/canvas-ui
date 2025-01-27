@@ -16,6 +16,8 @@
 
 ui.DEBUG = 1
 
+SELECTED_DEMO = 10
+
 const {
 	isnum, isobject, isfunc, isstr,
 	assert,
@@ -277,14 +279,14 @@ for (let j = 1; j < 100; j++) {
 		row.push('Cell '+j+','+i)
 	rows.push(row)
 }
-rowset1 = {
+grid_rowset = {
 	pk: 'id', can_change_rows: false,
 	fields: fields,
 	rows: rows,
 }
 demos.grid = `
 ui.stack('', 0, 'c', 'c', 500, 500)
-	ui.grid('grid1', {rowset: rowset1})
+	ui.grid('grid1', {rowset: grid_rowset})
 ui.end_stack()
 `
 }
@@ -840,7 +842,7 @@ ui.main = function() {
 
 			ui.stack('', 0, 's', 's', ui.em(10))
 				ui.bb('', null, null, 'r', 'light')
-				ui.state_init('demos_list', 'focused_item_i', 12)
+				ui.state_init('demos_list', 'focused_item_i', SELECTED_DEMO)
 				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)

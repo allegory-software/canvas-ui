@@ -623,6 +623,11 @@ ui.nav = function(opt) {
 		return property(this, name, get, set)
 	}
 
+	function warn (...args) { G.warn (e.id, ':', ...args) }
+	function debug(...args) { G.debug(e.id, ':', ...args) }
+	e.warn  = warn
+	e.debug = debug
+
 	// partial update of internal state based on multiple prop changes --------
 
 	let prop_parts = { // {prop->'sub_name1 ...'}
@@ -923,7 +928,7 @@ ui.nav = function(opt) {
 				e.tree_field = e.fields[0]
 
 			// add visible fields
-			for (let col of words(e.cols ?? rowset?.cols ?? '')) {
+			for (let col of words(rowset && (e.cols ?? rowset.cols)) ?? empty_array) {
 
 				let field = check_field('col', col)
 				if (!field) continue
@@ -1065,10 +1070,11 @@ ui.nav = function(opt) {
 	}
 
 	function check_field(which, col) {
+		if (!rowset) return
 		if (col == null) return
 		let field = e.optfld(col)
 		if (!field)
-			warn(which+' "'+col+'" not in rowset "'+rowset_name+'"')
+			warn('"'+col+'"', 'not in rowset:', rowset_name)
 		return field
 	}
 

@@ -35,9 +35,13 @@ ui.widget('treegrid_indent', {
 
 function init(id, e) {
 
+	e.id = id // for errors
+
 	e.cell_border_v_width = 0
 	e.cell_border_h_width = 1
-	e.auto_expand = false
+
+	e.auto_expand         = false  // expand cells instead of scrollboxing them
+	e.group_bar_visible   = 'auto' // auto | always | no
 
 	let horiz = true
 	let gcol_w = 80 // group-bar column width
@@ -502,7 +506,7 @@ function init(id, e) {
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
 		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging'
-			&& ui.hovers(id+'.group_bar')
+			&& ui.hovers(id+'.group_bar') || -dy > 10
 			&& e.fields[hit_fi].groupable
 		) {
 			col_group_start = true
@@ -1071,65 +1075,72 @@ function init(id, e) {
 
 			// group-by bar
 
-			let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h)
-				ui.bb('', 'bg2', null, 'tb', 'light')
+			if (e.group_bar_visible == 'always'
+				|| e.group_bar_visible == 'auto' && e.groups.cols.length
+				|| drag_op == 'col_group'
+			) {
 
-				let h = line_height + ui.sp()
-				let mover = gcol_mover
+				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h)
+					ui.bb('', 'bg2', null, 'tb', 'light')
 
-				for (let col of (mover ?? e.groups).cols ?? empty_array) {
+					let h = line_height + ui.sp()
+					let mover = gcol_mover
 
-					let def = (mover ?? e.groups).range_defs[col]
-					let x = def.index * (gcol_w + 1)
-					let y = def.group_level * 10
-					let w = gcol_w
+					for (let col of (mover ?? e.groups).cols ?? empty_array) {
 
-					if (mover) {
-						let vi = mover.is[def.index]
-						let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
-						x = mover.xs[def.index]
-						y = level * 10
-						if (col == hit_gcol) {
-							if (mover.drop_level == null) {
-								// dragging outside the columns area
-								x = mover.x0 + dx
-								y = mover.y0 + dy
-							} else {
-								let place_x = vi * (w + 1)
-								ui.m(ui.sp2() + place_x - 1, ui.sp2() + y - 1, 0, 0)
-								ui.stack('', 0, 'l', 't', w + 2, h + 2)
-									ui.bb('', null, null, 1, 'marker', null, 0, 'dashes')
-								ui.end_stack()
-								x = mover.x0 + dx
-								y = mover.y0 + dy
+						let def = (mover ?? e.groups).range_defs[col]
+						let x = def.index * (gcol_w + 1)
+						let y = def.group_level * 10
+						let w = gcol_w
+
+						if (mover) {
+							let vi = mover.is[def.index]
+							let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
+							x = mover.xs[def.index]
+							y = level * 10
+							if (col == hit_gcol) {
+								if (mover.drop_level == null) {
+									// dragging outside the columns area
+									x = mover.x0 + dx
+									y = mover.y0 + dy
+								} else {
+									let place_x = vi * (w + 1)
+									ui.m(ui.sp2() + place_x - 1, ui.sp2() + y - 1, 0, 0)
+									ui.stack('', 0, 'l', 't', w + 2, h + 2)
+										ui.bb('', null, null, 1, 'marker', null, 0, 'dashes')
+									ui.end_stack()
+									x = mover.x0 + dx
+									y = mover.y0 + dy
+								}
 							}
 						}
+
+						if (mover && col == hit_gcol) {
+							ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
+							ui.nohit()
+						}
+
+						let col_id = id+'.gcol.'+col
+						ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
+						ui.stack(col_id, 0, 'l', 't', w, h)
+							ui.bb('', 'bg1',
+									hit_gcol == col && (
+										drag_state == 'hover'    && 'hover' ||
+										drag_state == 'dragging' && 'active' ||
+										drag_state == 'drag'     && 'active') || null,
+								1, 'intense')
+							ui.m(ui.sp2(), ui.sp075())
+							ui.text('', e.fld(col).label, 1, 'l', 'c', w - 2 * ui.sp2())
+						ui.end_stack()
+
+						if (mover && col == hit_gcol)
+							ui.end_popup()
+
 					}
 
-					if (mover && col == hit_gcol) {
-						ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
-						ui.nohit()
-					}
+				ui.end_sb()
 
-					let col_id = id+'.gcol.'+col
-					ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
-					ui.stack(col_id, 0, 'l', 't', w, h)
-						ui.bb('', 'bg1',
-								hit_gcol == col && (
-									drag_state == 'hover'    && 'hover' ||
-									drag_state == 'dragging' && 'active' ||
-									drag_state == 'drag'     && 'active') || null,
-							1, 'intense')
-						ui.m(ui.sp2(), ui.sp075())
-						ui.text('', e.fld(col).label, 1, 'l', 'c', w - 2 * ui.sp2())
-					ui.end_stack()
-
-					if (mover && col == hit_gcol)
-						ui.end_popup()
-
-				}
-
-			ui.end_sb()
+			}
 
 			// column header
 
