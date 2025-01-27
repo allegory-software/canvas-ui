@@ -105,6 +105,7 @@ KEYBOARD STATE
 	keyup           (key) -> t|f     check if a key was just depressed
 	key             (key) -> t|f     check if a key is pressed
 	key_events      -> [['down'|'up', key], ...]
+	capture_keys    ()    remove current keydown() and keyup() events
 
 LAYERS
 
@@ -1123,22 +1124,20 @@ canvas.addEventListener('keyup', function(ev) {
 	animate()
 })
 
-function capture_key(ret, key, capture) {
-	// if (ret && capture !== false)
-	// 	key_state_now.set(key, null)
-	return ret
+ui.capture_keys = function() {
+	key_state_now.clear()
 }
 
 ui.keydown = function(key, capture) {
-	return capture_key(key_state_now.get(key) == 'down', key, capture)
+	return key_state_now.get(key) == 'down'
 }
 
 ui.keyup = function(key, capture) {
-	return capture_key(key_state_now.get(key) == 'up', key, capture)
+	return key_state_now.get(key) == 'up'
 }
 
 ui.key = function(key, capture) {
-	return capture_key(key_state.has(key), key, capture)
+	return key_state.has(key)
 }
 
 // custom events -------------------------------------------------------------

@@ -572,8 +572,9 @@ function init(id, e) {
 					let hs = ui.state(id+'.header')
 					let hx = hs.get('x')
 					let hy = hs.get('y')
+					let group_bar_was_visible = !(e.group_bar_visible == 'auto' && !e.groups.cols.length)
 					mover.x0 = field._x - ui.sp2()
-					mover.y0 = group_bar_h
+					mover.y0 = group_bar_was_visible ? group_bar_h : 0
 
 				}
 
@@ -808,6 +809,9 @@ function init(id, e) {
 		}
 
 		// process keyboard input ----------------------------------------------
+
+		if (ui.key_events.length)
+			if ((function() {
 
 		let left_arrow  =  horiz ? 'arrowleft'  : 'arrowup'
 		let right_arrow =  horiz ? 'arrowright' : 'arrowdown'
@@ -1068,6 +1072,9 @@ function init(id, e) {
 				return false
 			}
 		}
+
+		})() === false) // if (ui.key_events.length) ...
+			ui.capture_keys()
 
 		// draw ----------------------------------------------------------------
 

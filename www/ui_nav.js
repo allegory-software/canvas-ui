@@ -928,9 +928,9 @@ ui.nav = function(opt) {
 				e.tree_field = e.fields[0]
 
 			// add visible fields
-			for (let col of words(rowset && (e.cols ?? rowset.cols)) ?? empty_array) {
+			for (let field of words(rowset && (e.cols ?? rowset.cols ?? e.all_fields)) ?? empty_array) {
 
-				let field = check_field('col', col)
+				field = check_field('col', field)
 				if (!field) continue
 
 				// never show internal fields
@@ -1004,8 +1004,8 @@ ui.nav = function(opt) {
 
 		if (update_row_visibility) {
 			e.rows = []
-			update_row_index()
 			add_visible_child_rows(e.child_rows)
+			update_row_index()
 		}
 
 		// set ready state
