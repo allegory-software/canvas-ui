@@ -506,7 +506,7 @@ function init(id, e) {
 		// drag column vertically towards group-bar => column move to group
 		let col_group_start
 		if (hit_zone == 'col' && !drag_op && drag_state == 'dragging'
-			&& ui.hovers(id+'.group_bar') || -dy > 10
+			&& (ui.hovers(id+'.group_bar') || -dy > 10)
 			&& e.fields[hit_fi].groupable
 		) {
 			col_group_start = true
