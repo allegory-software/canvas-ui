@@ -44,8 +44,6 @@ function init(id, e) {
 	e.group_bar_visible   = 'auto' // auto | always | no
 
 	let horiz = true
-	let gcol_w = 80 // group-bar column width
-	let gap = 1
 
 	// context-sensitive thus set on each frame
 	let font_size
@@ -181,20 +179,21 @@ function init(id, e) {
 			fg = 'text'
 
 		// drawing
+		let sp2 = ui.sp2()
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
 			ui.bb('', bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
 			ui.color(fg)
 			if (has_children) {
-				ui.p(indent_x - ui.sp2(), 0, ui.sp2(), 0)
+				ui.p(indent_x - sp2, 0, sp2, 0)
 				ui.scope()
 				ui.font('fas')
 				ui.text('', collapsed ? '\uf0fe' : '\uf146')
 				// ui.treegrid_indent(indent_x)
 				ui.end_scope()
 			}
-			ui.p(ui.sp2() + indent_x, 0, ui.sp2(), 0)
+			ui.p(sp2 + indent_x, 0, sp2, 0)
 			e.draw_val(row, field, input_val, true, full_width)
 			ui.p(0)
 		ui.end_stack()
@@ -379,6 +378,8 @@ function init(id, e) {
 
 	e.render = function(fr, align, valign, min_w, min_h) {
 
+		let sp2 = ui.sp2()
+
 		// set layout vars
 
 		font_size = ui.get_font_size()
@@ -386,7 +387,15 @@ function init(id, e) {
 		cell_h = round(line_height + 2 * ui.sp1() + e.cell_border_h_width)
 		header_h = cell_h
 
-		let group_bar_h = cell_h * 2
+		let gcol_w = 80 // group-bar column width
+		let gcol_h = line_height + ui.sp()
+		let gcol_gap = 1
+		let gcol_mover
+
+		function group_bar_h() {
+			let levels = e.groups.col_groups.length-1
+			return 2 * sp2 + gcol_h + levels * sp2
+		}
 
 		// set keyboard state
 
@@ -531,8 +540,6 @@ function init(id, e) {
 		if (drag_op == 'col_group')
 			hit_gcol = e.fields[hit_fi].name
 
-		let gcol_mover
-
 		// move group-bar column OR drag header column over the group-bar
 		if (hit_zone == 'gcol' || drag_op == 'col_group') {
 
@@ -554,17 +561,16 @@ function init(id, e) {
 					mover.col_def = mover.range_defs[hit_gcol]
 
 					let x = mover.col_def.index * (gcol_w + 1)
-					let y = mover.col_def.group_level * 10
+					let y = mover.col_def.group_level * sp2
 					mover.x0 = x
 					mover.y0 = y
 
 				} else if (col_group_start) {
 
-					let max_level = e.groups.col_groups.length
 					mover.cols.push(hit_gcol)
 					mover.col_def = {
 						index: mover.cols.length-1,
-						group_level: max_level,
+						group_level: e.groups.cols.length ? e.groups.col_groups.length : 0,
 					}
 					mover.range_defs[hit_gcol] = mover.col_def
 
@@ -573,15 +579,15 @@ function init(id, e) {
 					let hx = hs.get('x')
 					let hy = hs.get('y')
 					let group_bar_was_visible = !(e.group_bar_visible == 'auto' && !e.groups.cols.length)
-					mover.x0 = field._x - ui.sp2()
-					mover.y0 = group_bar_was_visible ? group_bar_h : 0
+					mover.x0 = field._x - sp2
+					mover.y0 = group_bar_was_visible ? group_bar_h() : 0
 
 				}
 
 				mover.xs = [] // col_index -> col_x
 				mover.is = [] // col_index -> col_visual_index
 				mover.movable_element_size = function() {
-					return gcol_w + gap
+					return gcol_w + gcol_gap
 				}
 				mover.set_movable_element_pos = function(i, x, moving, vi) {
 					this.xs[i] = x
@@ -631,11 +637,11 @@ function init(id, e) {
 				let max_level = mover.max_levels[vi]
 				let mx = mover.x0 + dx
 				let my = mover.y0 + dy
-				level = clamp(round(my / 10), min_level, max_level)
-				let min_y = min_level * 10 - ui.sp4()
-				let max_y = max_level * 10 + ui.sp4()
-				let min_x = (-0.5) * (gcol_w + gap)
-				let max_x = (mover.cols.length-1 + 0.5) * (gcol_w + gap)
+				level = clamp(round(my / sp2), min_level, max_level)
+				let min_y = min_level * sp2 - ui.sp4()
+				let max_y = max_level * sp2 + ui.sp4()
+				let min_x = (-0.5) * (gcol_w + gcol_gap)
+				let max_x = (mover.cols.length-1 + 0.5) * (gcol_w + gcol_gap)
 				mover.drop_level = null
 				mover.drop_pos = null
 				if (
@@ -723,7 +729,7 @@ function init(id, e) {
 		cells_w = 0
 		for (let field of e.fields) {
 			let w = clamp(field.w, field.min_w, field.max_w)
-			let cw = w + 2 * ui.sp2()
+			let cw = w + 2 * sp2
 			if (drag_op != 'col_move')
 				field._x = cells_w
 			field._w = cw
@@ -1087,24 +1093,24 @@ function init(id, e) {
 				|| drag_op == 'col_group'
 			) {
 
-				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h)
+				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h())
 					ui.bb('', 'bg2', null, 'tb', 'light')
 
-					let h = line_height + ui.sp()
 					let mover = gcol_mover
 
 					for (let col of (mover ?? e.groups).cols ?? empty_array) {
 
 						let def = (mover ?? e.groups).range_defs[col]
 						let x = def.index * (gcol_w + 1)
-						let y = def.group_level * 10
+						let y = def.group_level * sp2
 						let w = gcol_w
+						let h = gcol_h
 
 						if (mover) {
 							let vi = mover.is[def.index]
 							let level = col == hit_gcol ? mover.drop_level : mover.levels[vi]
 							x = mover.xs[def.index]
-							y = level * 10
+							y = level * sp2
 							if (col == hit_gcol) {
 								if (mover.drop_level == null) {
 									// dragging outside the columns area
@@ -1112,7 +1118,7 @@ function init(id, e) {
 									y = mover.y0 + dy
 								} else {
 									let place_x = vi * (w + 1)
-									ui.m(ui.sp2() + place_x - 1, ui.sp2() + y - 1, 0, 0)
+									ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
 									ui.stack('', 0, 'l', 't', w + 2, h + 2)
 										ui.bb('', null, null, 1, 'marker', null, 0, 'dashes')
 									ui.end_stack()
@@ -1128,7 +1134,7 @@ function init(id, e) {
 						}
 
 						let col_id = id+'.gcol.'+col
-						ui.m(ui.sp2() + x, ui.sp2() + y, 0, 0)
+						ui.m(sp2 + x, sp2 + y, 0, 0)
 						ui.stack(col_id, 0, 'l', 't', w, h)
 							ui.bb('', 'bg1',
 									hit_gcol == col && (
@@ -1136,8 +1142,8 @@ function init(id, e) {
 										drag_state == 'dragging' && 'active' ||
 										drag_state == 'drag'     && 'active') || null,
 								1, 'intense')
-							ui.m(ui.sp2(), ui.sp075())
-							ui.text('', e.fld(col).label, 1, 'l', 'c', w - 2 * ui.sp2())
+							ui.m(sp2, ui.sp075())
+							ui.text('', e.fld(col).label, 1, 'l', 'c', w - 2 * sp2)
 						ui.end_stack()
 
 						if (mover && col == hit_gcol)
@@ -1153,8 +1159,8 @@ function init(id, e) {
 
 			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
-				ui.p(ui.sp2(), 0)
-				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * ui.sp2(), header_h)
+				ui.p(sp2, 0)
+				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * sp2, header_h)
 
 					let col_move  = drag_op == 'col_move'  && hit_fi == field.index
 					let col_group = drag_op == 'col_group' && hit_gcol == field.name
@@ -1168,8 +1174,8 @@ function init(id, e) {
 
 					let max_min_w = noclip ? null : max(0,
 						field._w
-							- 2 * ui.sp2()
-							- (field.sortable ? 2 * ui.sp2() : 0)
+							- 2 * sp2
+							- (field.sortable ? 2 * sp2 : 0)
 					)
 					let pri = field.sort_priority
 
