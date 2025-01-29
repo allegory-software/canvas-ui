@@ -51,16 +51,35 @@ function init(id, e) {
 	let cells_w
 	let cell_h
 	let header_h
+	let gcol_w
+	let gcol_h
+	let gcol_gap
 	// cells-view-height-sensitive thus set on frame callback
 	let page_row_count = 1
 
 	// mouse state
+	let drag_state, dx, dy, cs
+	let gcol_mover
 	let hit_zone // sort_icon, col_divider, col, gcol, cell
 	let drag_op  // col_move, col_group, row_move
 	let hit_ri // row index
 	let hit_fi // field index
 	let hit_indent
 	let row_move_state
+
+	function reset_mouse_state() {
+		drag_state = null
+		dx = null
+		dy = null
+		cs = null
+		gcol_mover = null
+		hit_zone = null
+		drag_op = null
+		hit_ri = null
+		hit_fi = null
+		hit_indent = null
+		row_move_state = null
+	}
 
 	// keyboard state
 	let focused, shift, ctrl
@@ -367,35 +386,26 @@ function init(id, e) {
 
 	// render grid ------------------------------------------------------------
 
-	function reset_state() {
-		hit_zone = null
-		drag_op = null
-		hit_fi = null
-		hit_ri = null
-		hit_indent = null
-		row_move_state = null
+	function group_bar_h() {
+		let sp2 = ui.sp2()
+		let levels = e.groups.col_groups.length-1
+		return 2 * sp2 + gcol_h + levels * sp2 + 2
 	}
 
 	e.render = function(fr, align, valign, min_w, min_h) {
 
-		let sp2 = ui.sp2()
+		reset_mouse_state()
 
 		// set layout vars
 
+		let sp2 = ui.sp2()
 		font_size = ui.get_font_size()
 		line_height = font_size * 1.5
 		cell_h = round(line_height + 2 * ui.sp1() + e.cell_border_h_width)
 		header_h = cell_h
-
-		let gcol_w = 80 // group-bar column width
-		let gcol_h = line_height + ui.sp()
-		let gcol_gap = 1
-		let gcol_mover
-
-		function group_bar_h() {
-			let levels = e.groups.col_groups.length-1
-			return 2 * sp2 + gcol_h + levels * sp2
-		}
+		gcol_w = 80 // group-bar column width
+		gcol_h = line_height + ui.sp()
+		gcol_gap = 1
 
 		// set keyboard state
 
@@ -404,10 +414,6 @@ function init(id, e) {
 		ctrl  = focused && ui.key('control')
 
 		// check mouse state ---------------------------------------------------
-
-		let drag_state, dx, dy, cs
-
-		reset_state()
 
 		// hover or click on sort icons
 		if (!hit_zone) {
@@ -507,7 +513,7 @@ function init(id, e) {
 			if (drag_state == 'drop') {
 				let over_fi = mover.move_element_stop() // sets x of moved element.
 				e.move_field(hit_fi, over_fi)
-				reset_state()
+				reset_mouse_state()
 			}
 
 		}
@@ -641,7 +647,7 @@ function init(id, e) {
 				let min_y = min_level * sp2 - ui.sp4()
 				let max_y = max_level * sp2 + ui.sp4()
 				let min_x = (-0.5) * (gcol_w + gcol_gap)
-				let max_x = (mover.cols.length-1 + 0.5) * (gcol_w + gcol_gap)
+				let max_x = 1/0
 				mover.drop_level = null
 				mover.drop_pos = null
 				if (
@@ -712,7 +718,7 @@ function init(id, e) {
 
 					}
 
-					reset_state()
+					reset_mouse_state()
 
 				}
 
@@ -1094,7 +1100,7 @@ function init(id, e) {
 			) {
 
 				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h())
-					ui.bb('', 'bg2', null, 'tb', 'light')
+					ui.bb('', 'bg2', null, 'b', 'light')
 
 					let mover = gcol_mover
 

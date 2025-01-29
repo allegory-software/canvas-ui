@@ -939,6 +939,9 @@ ui.nav = function(opt) {
 				// exclude grouped fields
 				if (e.groups.fields.includes(field)) continue
 
+				// exclude group field
+				if (field.is_group_field) continue
+
 				e.fields.push(field)
 			}
 			update_field_index()
@@ -1242,7 +1245,7 @@ ui.nav = function(opt) {
 				&& !f.hidden
 				&& !e.groups.fields.includes(f)
 				&& f != e.group_field
-			).map(f => f.name)
+			).map(f => f.name).join(' ')
 		return cols == all_cols ? null : cols
 	}
 
