@@ -5034,8 +5034,8 @@ function split(hv, id, size, unit, fixed_side,
 	let fixed = unit == 'px'
 	size = s.get('size') ?? size
 	let fr = fixed ? 0 : (size ?? 0.5)
-	if (state && state != 'hover') {
 	let min_size = fixed ? size ?? 0 : 0
+	if (state && state != 'hover') {
 		if (state == 'drag')
 			cs.set(W, s.get(W))
 		let size_px = fixed ? min_size : round(fr * max_size)

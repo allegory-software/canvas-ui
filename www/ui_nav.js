@@ -831,7 +831,6 @@ ui.nav = function(opt) {
 			if (!e.id_field && e.pk_fields && e.pk_fields.length == 1)
 				e.id_field = e.pk_fields[0]
 			e.parent_field = check_field('parent_col', rowset?.parent_col)
-			e.tree_field = check_field('tree_col', e.tree_col ?? rowset?.tree_col)
 
 			// init field validators
 
@@ -924,8 +923,6 @@ ui.nav = function(opt) {
 			e.is_tree = e.can_be_tree && !e.flat && !e.is_grouped
 			if (was_tree != e.is_tree)
 				update_rows = true
-			if (e.is_tree && !e.tree_field)
-				e.tree_field = e.fields[0]
 
 			// add visible fields
 			for (let field of words(rowset && (e.cols ?? rowset.cols ?? e.all_fields)) ?? empty_array) {
@@ -945,6 +942,14 @@ ui.nav = function(opt) {
 				e.fields.push(field)
 			}
 			update_field_index()
+
+			// init tree field
+			if (e.is_tree) {
+				e.tree_field = check_field('tree_col',
+					e.tree_col ?? rowset?.tree_col)
+				if (e.is_tree && !e.tree_field)
+					e.tree_field = e.fields[0]
+			}
 
 			// remove references to invisible fields.
 			if (e.focused_field && e.focused_field.index == null)

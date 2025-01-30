@@ -394,17 +394,16 @@ function init(id, e) {
 
 	e.render = function(fr, align, valign, min_w, min_h) {
 
-		reset_mouse_state()
-
 		// set layout vars
 
+		let sp  = ui.sp1()
 		let sp2 = ui.sp2()
 		font_size = ui.get_font_size()
 		line_height = font_size * 1.5
-		cell_h = round(line_height + 2 * ui.sp1() + e.cell_border_h_width)
+		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
 		header_h = cell_h
 		gcol_w = 80 // group-bar column width
-		gcol_h = line_height + ui.sp()
+		gcol_h = line_height + sp
 		gcol_gap = 1
 
 		// set keyboard state
@@ -415,18 +414,18 @@ function init(id, e) {
 
 		// check mouse state ---------------------------------------------------
 
-		// hover or click on sort icons
-		if (!hit_zone) {
-			for (let field of e.fields) {
-				let icon_id = id+'.sort_icon.'+field.name
-				;[drag_state] = ui.drag(icon_id)
-				if (drag_state) {
-					hit_zone = 'sort_icon'
-					ui.set_cursor('pointer')
-					if (drag_state == 'drag')
-						e.set_order_by_dir(field, 'toggle', shift)
-					break
-				}
+		reset_mouse_state()
+
+		// hover or click on sort icons from colum header
+		for (let field of e.fields) {
+			let icon_id = id+'.sort_icon.'+field.name
+			;[drag_state] = ui.drag(icon_id)
+			if (drag_state) {
+				hit_zone = 'sort_icon'
+				ui.set_cursor('pointer')
+				if (drag_state == 'drag')
+					e.set_order_by_dir(field, 'toggle', shift)
+				break
 			}
 		}
 
@@ -533,8 +532,20 @@ function init(id, e) {
 		let hit_gcol
 		if (!hit_zone) {
 			for (let col of e.groups.cols || empty_array) {
+				// hit sort icon
+				let icon_id = id+'.sort_icon.'+col
+				;[drag_state, dx, dy, cs] = ui.drag(icon_id)
+				if (drag_state) {
+					hit_zone = 'sort_icon'
+					ui.set_cursor('pointer')
+					if (drag_state == 'drag')
+						e.set_order_by_dir(col, 'toggle', shift)
+					break
+				}
+				// hit group column
 				let col_id = id+'.gcol.'+col
 				;[drag_state, dx, dy, cs] = ui.drag(col_id)
+				pr(col_id, drag_state)
 				if (drag_state) {
 					hit_zone = 'gcol'
 					hit_gcol = col
@@ -1140,16 +1151,35 @@ function init(id, e) {
 						}
 
 						let col_id = id+'.gcol.'+col
+						let field = e.fld(col)
 						ui.m(sp2 + x, sp2 + y, 0, 0)
-						ui.stack(col_id, 0, 'l', 't', w, h)
+						ui.stack(col_id, 1, 'l', 't', w, h)
 							ui.bb('', 'bg1',
 									hit_gcol == col && (
 										drag_state == 'hover'    && 'hover' ||
 										drag_state == 'dragging' && 'active' ||
 										drag_state == 'drag'     && 'active') || null,
 								1, 'intense')
-							ui.m(sp2, ui.sp075())
-							ui.text('', e.fld(col).label, 1, 'l', 'c', w - 2 * sp2)
+							ui.p(sp2, ui.sp075())
+							ui.h(1, sp)
+
+								ui.text('', field.label, 1, 'l', 'c', 0)
+
+								// sort icon
+								let icon_id = id+'.sort_icon.'+field.name
+								if (field.sortable) {
+									ui.scope()
+									ui.font('fas')
+									ui.color(field.sort_dir ? 'label' : 'faint', ui.hit(icon_id) ? 'hover' : null)
+									let pri = field.sort_priority
+									ui.text(icon_id,
+										field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||
+										field.sort_dir          && (pri ? '\uf175' : '\uf175') ||
+										'\uf07d'
+									, 0)
+									ui.end_scope()
+								}
+							ui.end_h()
 						ui.end_stack()
 
 						if (mover && col == hit_gcol)
@@ -1166,7 +1196,7 @@ function init(id, e) {
 			function draw_header_cell(field, noclip) {
 				ui.m(field._x, 0, 0, 0)
 				ui.p(sp2, 0)
-				ui.h(0, ui.sp(), 'l', 't', field._w - 2 * sp2, header_h)
+				ui.h(0, sp, 'l', 't', field._w - 2 * sp2, header_h)
 
 					let col_move  = drag_op == 'col_move'  && hit_fi == field.index
 					let col_group = drag_op == 'col_group' && hit_gcol == field.name
