@@ -68,16 +68,16 @@ function init(id, e) {
 	let row_move_state
 
 	function reset_mouse_state() {
+		hit_zone = null
+		hit_ri = null
+		hit_fi = null
+		hit_indent = null
 		drag_state = null
 		dx = null
 		dy = null
 		cs = null
-		gcol_mover = null
-		hit_zone = null
 		drag_op = null
-		hit_ri = null
-		hit_fi = null
-		hit_indent = null
+		gcol_mover = null
 		row_move_state = null
 	}
 
@@ -422,6 +422,7 @@ function init(id, e) {
 			;[drag_state] = ui.drag(icon_id)
 			if (drag_state) {
 				hit_zone = 'sort_icon'
+				hit_fi = field.index
 				ui.set_cursor('pointer')
 				if (drag_state == 'drag')
 					e.set_order_by_dir(field, 'toggle', shift)
@@ -507,12 +508,12 @@ function init(id, e) {
 			mover.move_element_update(horiz ? mx : my)
 			e.scroll_to_cell(hit_ri ?? 0, hit_fi)
 
-			ui.set_cursor('grabbing')
-
 			if (drag_state == 'drop') {
 				let over_fi = mover.move_element_stop() // sets x of moved element.
 				e.move_field(hit_fi, over_fi)
-				reset_mouse_state()
+
+				// reset drag state but preserve hover state
+				drag_op = null
 			}
 
 		}
@@ -537,6 +538,7 @@ function init(id, e) {
 				;[drag_state, dx, dy, cs] = ui.drag(icon_id)
 				if (drag_state) {
 					hit_zone = 'sort_icon'
+					hit_gcol = col
 					ui.set_cursor('pointer')
 					if (drag_state == 'drag')
 						e.set_order_by_dir(col, 'toggle', shift)
@@ -545,7 +547,6 @@ function init(id, e) {
 				// hit group column
 				let col_id = id+'.gcol.'+col
 				;[drag_state, dx, dy, cs] = ui.drag(col_id)
-				pr(col_id, drag_state)
 				if (drag_state) {
 					hit_zone = 'gcol'
 					hit_gcol = col
@@ -729,7 +730,9 @@ function init(id, e) {
 
 					}
 
-					reset_mouse_state()
+					// reset drag state but preserve hover state
+					gcol_mover = null
+					drag_op = null
 
 				}
 
@@ -737,9 +740,10 @@ function init(id, e) {
 
 		}
 
-		if (drag_op == 'col_group') {
-			ui.set_cursor('pointer')
-		}
+		if (drag_op == 'col_group')
+			ui.set_cursor('grabbing')
+		else if (drag_op == 'col_move')
+			ui.set_cursor('grabbing')
 
 		// layout fields and compute cell grid size
 
@@ -784,12 +788,6 @@ function init(id, e) {
 				}
 			}
 		}
-
-		// if (!hit_zone) {
-		// 	if (ev.target == e.cells_view) // clicked on empty space.
-		// 		e.exit_edit()
-		// 	return
-		// }
 
 		if (drag_state == 'drag' && hit_zone == 'cell') {
 
@@ -1157,8 +1155,9 @@ function init(id, e) {
 							ui.bb('', 'bg1',
 									hit_gcol == col && (
 										drag_state == 'hover'    && 'hover' ||
-										drag_state == 'dragging' && 'active' ||
-										drag_state == 'drag'     && 'active') || null,
+										drag_state == 'drop'     && 'hover' ||
+										drag_state == 'dragging' && (hit_zone != 'sort_icon' ? 'active' : 'hover') ||
+										drag_state == 'drag'     && (hit_zone != 'sort_icon' ? 'active' : 'hover')) || null,
 								1, 'intense')
 							ui.p(sp2, ui.sp075())
 							ui.h(1, sp)
@@ -1166,11 +1165,12 @@ function init(id, e) {
 								ui.text('', field.label, 1, 'l', 'c', 0)
 
 								// sort icon
-								let icon_id = id+'.sort_icon.'+field.name
+								let icon_id = id+'.sort_icon.'+col
 								if (field.sortable) {
 									ui.scope()
 									ui.font('fas')
-									ui.color(field.sort_dir ? 'label' : 'faint', ui.hit(icon_id) ? 'hover' : null)
+									ui.color(field.sort_dir ? 'label' : 'faint',
+										(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
 									let pri = field.sort_priority
 									ui.text(icon_id,
 										field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||
@@ -1225,7 +1225,8 @@ function init(id, e) {
 
 						ui.font('fas')
 						if (!col_group)
-							ui.color(field.sort_dir ? 'label' : 'faint', ui.hit(icon_id) ? 'hover' : null)
+							ui.color(field.sort_dir ? 'label' : 'faint',
+								(hit_zone == 'sort_icon' && hit_fi == field.index) ? 'hover' : null)
 
 						ui.text(icon_id,
 							field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||
