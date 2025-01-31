@@ -210,7 +210,7 @@ Master-detail:
 Tree:
 	state:
 		e.child_rows -> [row1,...]
-		row.child_rows -> [row1,...]
+		row.child_rows -> [row1,...] | null
 		row.depth -> parent_row_count
 		row.parent_row -> row
 	needs:
@@ -2264,9 +2264,10 @@ ui.nav = function(opt) {
 				let i = 0
 				row[group_fi] = []
 				for (let col of words(group.key_cols)) {
-					let val = group.key_vals[i++]
 					let field = fld(col)
+					let val = group.key_vals[i++]
 					row[group_fi].push(field.draw_text(val))
+					row[field.val_index] = val // for sorting of group rows
 				}
 				row[group_fi] = row[group_fi].join(' / ')
 
@@ -2281,7 +2282,7 @@ ui.nav = function(opt) {
 				}
 			} else { // it's a row
 				row = group
-				row.child_rows = []
+				row.child_rows = null
 				row.parent_row = parent_row
 				row.depth = depth
 			}
@@ -2313,7 +2314,7 @@ ui.nav = function(opt) {
 	e.flat = false
 
 	e.each_child_row = function(row, f) {
-		if (e.is_tree)
+		if (e.is_tree && row.child_rows)
 			for (let child_row of row.child_rows) {
 				e.each_child_row(child_row, f) // depth-first
 				f(child_row)
@@ -2367,7 +2368,7 @@ ui.nav = function(opt) {
 		if (!child_rows)
 			return
 		remove_value(child_rows, row)
-		if (row.parent_row && row.parent_row.child_rows.length == 0)
+		if (row.parent_row && !row.parent_row.child_rows?.length)
 			row.parent_row.collapsed = null
 		row.parent_row = null
 		row.child_rows = null
@@ -2384,7 +2385,7 @@ ui.nav = function(opt) {
 
 		e.child_rows = []
 		for (let row of e.all_rows) {
-			row.child_rows = []
+			row.child_rows = null
 			row.parent_row = null
 			row.depth = null
 		}
@@ -2436,6 +2437,8 @@ ui.nav = function(opt) {
 	// row collapsing ---------------------------------------------------------
 
 	function set_parent_collapsed(row, collapsed) {
+		if (!row.child_rows)
+			return
 		for (let child_row of row.child_rows) {
 			child_row.parent_collapsed = collapsed
 			if (!child_row.collapsed)
@@ -2444,17 +2447,17 @@ ui.nav = function(opt) {
 	}
 
 	function set_collapsed_all(row, collapsed) {
-		if (row.child_rows.length > 0) {
-			row.collapsed = collapsed
-			for (let child_row of row.child_rows) {
-				child_row.parent_collapsed = collapsed
-				set_collapsed_all(child_row, collapsed)
-			}
+		if (!row.child_rows)
+			return
+		row.collapsed = collapsed
+		for (let child_row of row.child_rows) {
+			child_row.parent_collapsed = collapsed
+			set_collapsed_all(child_row, collapsed)
 		}
 	}
 
 	function set_collapsed(row, collapsed, recursive) {
-		if (!row.child_rows.length)
+		if (!row.child_rows)
 			return
 		if (recursive)
 			set_collapsed_all(row, collapsed)
@@ -2497,8 +2500,8 @@ ui.nav = function(opt) {
 
 	function cell_comparator(field) {
 
-		let compare_types = field.compare_types  || e.compare_types
-		let compare_vals = field.compare_vals || e.compare_vals
+		let compare_types = field.compare_types || e.compare_types
+		let compare_vals  = field.compare_vals  || e.compare_vals
 		let input_val_index = cell_state_val_index('input_val', field)
 		let val_index = field.val_index
 
