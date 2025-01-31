@@ -2355,11 +2355,12 @@ ui.nav = function(opt) {
 	}
 
 	function init_depth_for_rows(rows, depth) {
-		for (let row of rows) {
-			depth = init_depth_for_row(row, depth)
-			if (depth == null)
-				return // circular ref: abort.
-		}
+		if (rows)
+			for (let row of rows) {
+				depth = init_depth_for_row(row, depth)
+				if (depth == null)
+					return // circular ref: abort.
+			}
 		return depth
 	}
 
@@ -2393,7 +2394,11 @@ ui.nav = function(opt) {
 		let p_fi = e.parent_field.val_index
 		for (let row of e.all_rows) {
 			let parent_id = row[p_fi]
-			let parent_row = parent_id != null ? e.lookup(e.id_field.name, [parent_id])[0] : null
+			let parent_row
+			if (parent_id != null)
+				parent_row = e.lookup(e.id_field.name, [parent_id])[0]
+			if (parent_row && !parent_row?.child_rows)
+				parent_row.child_rows = []
 			add_row_to_tree(row, parent_row)
 		}
 

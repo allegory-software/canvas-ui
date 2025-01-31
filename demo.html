@@ -296,7 +296,7 @@ function starts_with_a(s) {
 	return s.lower().starts('a') || 'Name must start with "A"'
 }
 let fields = [
-	{name: 'id'        , w:  50, min_w:  30, type: 'number', editable: false},
+	{name: 'id'        , w:  80, min_w:  30, type: 'number', editable: false},
 	{name: 'index'     , w:  50, type: 'number', editable: false},
 	{name: 'active'    , w:  30, type: 'bool', true_text: 'x', false_text: ''},
 	{name: 'name'      , w: 150, min_w:  50, max_w: 400, validate: starts_with_a, filter_by: true},
@@ -308,7 +308,7 @@ let rows = []
 for (let i = 0; i <= 10000; i++) {
 	let id         = i
 	let name       = 'record '+i
-	let parent_id  = i > 1 ? (i-1) % 3 : null
+	let parent_id  = i > 4 ? (i-1) % 5 : null
 	let random_num = floor(random() * 1e9)
 	let random_date = clamp(i * 24 * 3600 * 10, 0, time(3000, 0))
 	let active = i % 5 == 0
