@@ -83,7 +83,7 @@ MOUSE STATE
 	mx0 my0         = mouse position when started dragging
 	update_mouse    ()   update mouse coords to current transform
 	hit_rect        (x, y, w, h) -> t|f
-	hit_bb          (x1, y1, x2, y2) -> t|f
+	hit_bb          (x1, y1, x2, y2) -> t|f  ; bb means boundingbox
 	hit_box         (a, i) -> t|f
 
 	captured_id     = id of widget that captured the mouse
@@ -166,7 +166,7 @@ COMMAND RECORDING
 
 	record          ()
 	end_record      () -> a1
-	record_play     (a1)
+	play_record     (a1)
 
 WIDGET DEFINITIONS
 
@@ -235,8 +235,8 @@ CONTAINERS
 
 BORDER & BACKGROUND
 
-	bb              (id, bg_color, bg_color_state, sides, border_color, border_color_state, border_radius)
-	bb_tooltip      (id, bg_color, bg_color_state,        border_color, border_color_state, border_radius)
+	bb              (bg_color, bg_color_state, sides, border_color, border_color_state, border_radius)
+	bb_tooltip      (bg_color, bg_color_state,        border_color, border_color_state, border_radius)
 	shadow          (x, y, blur, spread, inset, color)
 
 	bg_dots         (id, speed)
@@ -642,7 +642,12 @@ ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
 ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
-ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
+ui.fg_style('light', 'marker' , 'hover'  ,  61, 1.00, 0.57) // TODO
+ui.fg_style('light', 'marker' , 'active' ,  61, 1.00, 0.57) // TODO
+
+ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
+ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) // TODO
+ui.fg_style('dark' , 'marker' , 'active' ,  61, 1.00, 0.57) // TODO
 
 ui.fg_style('light', 'button-danger', 'normal', 0, 0.54, 0.43)
 ui.fg_style('dark' , 'button-danger', 'normal', 0, 0.54, 0.43)
@@ -705,7 +710,7 @@ ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
 ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
 ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
 ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 1.08)
+ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 1.08) // bg alternate for grid cells
 ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
 ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
@@ -731,10 +736,9 @@ ui.bg_style('dark' , 'input' , 'active' , 216, 0.28, 0.25)
 
 // TODO: see if we can find a declarative way to copy fg colors to bg in bulk.
 for (let theme of ['light', 'dark']) {
-	for (let state of ['normal', 'hover', 'active']) {
-		ui.bg_style(theme, 'text', state, fg_color_hsl('text', state, theme))
-		ui.bg_style(theme, 'link', state, fg_color_hsl('link', state, theme))
-	}
+	for (let state of ['normal', 'hover', 'active'])
+		for (let fg of ['text', 'link', 'marker'])
+			ui.bg_style(theme, fg, state, fg_color_hsl(fg, state, theme))
 }
 
 ui.bg_style('light', 'scrollbar', 'normal' ,   0, 0.00, 0.70, 0.5)
@@ -1503,7 +1507,7 @@ ui.end_record = function() {
 
 let reindex = []
 
-ui.record_play = function(a1) {
+ui.play_record = function(a1) {
 
 	// fix all indexes in a1 to fit into their new place in a.
 	let offset = a.length
@@ -1605,6 +1609,12 @@ function begin_layer(layer, i) {
 function end_layer() {
 	layer_i = layer_stack.pop()
 }
+
+ui.begin_layer = function(name) {
+	begin_layer(ui_layer(name), a.length+2)
+}
+
+ui.end_layer = end_layer
 
 function layer_stack_check() {
 	if (layer_stack.length) {
@@ -3403,12 +3413,14 @@ function tooltip_path(cx, x1, y1, x2, y2, side, tx, ty, b1x, b1y, b2x, b2y, r, d
 	cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r)
 }
 
+const BB_TOOLTIP_CT_I = 0
+
 const CMD_BB_TOOLTIP = cmd('bb_tooltip')
 
-ui.bb_tooltip = function(id, bg_color, bg_color_state, border_color, border_color_state, border_radius) {
+ui.bb_tooltip = function(bg_color, bg_color_state, border_color, border_color_state, border_radius) {
 	let ct_i = ui.ct_i()
 	assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
-	return ui_cmd(CMD_BB_TOOLTIP, id, ct_i, bg_color ?? 0, parse_state(bg_color_state),
+	return ui_cmd(CMD_BB_TOOLTIP, ct_i, bg_color ?? 0, parse_state(bg_color_state),
 		border_color ?? 0, parse_state(border_color_state),
 		round((border_radius ?? 0) * 128),
 	)
@@ -3421,7 +3433,7 @@ reindex[CMD_BB_TOOLTIP] = function(a, i, offset) {
 cx.fillStyle = bg_color
 
 draw[CMD_BB_TOOLTIP] = function(a, i) {
-	let ct_i = a[i+1]
+	let ct_i = a[i+BB_TOOLTIP_CT_I]
 
 	let px1 = a[ct_i+PX1+0]
 	let py1 = a[ct_i+PX1+1]
@@ -3629,8 +3641,7 @@ function parse_border_sides(s) {
 	return b
 }
 
-const BB_ID   = 0
-const BB_CT_I = 1
+const BB_CT_I = 0
 
 const CMD_BB = cmd('bb') // border-background
 
@@ -3639,17 +3650,22 @@ let border_dashes = {
 	dashes : [2, 6],
 }
 
-ui.bb = function(id,
+ui.bb = function(
 	bg_color, bg_color_state,
 	border_sides, border_color, border_color_state, border_radius, border_dash
 ) {
 	if (border_dash)
 		assert(border_dashes[border_dash], 'invalid border dash ', border_dash)
-	ui_cmd(CMD_BB, id ?? 0, ui.ct_i(), bg_color ?? 0, parse_state(bg_color_state),
+	ui_cmd(CMD_BB, ui.ct_i(), bg_color ?? 0, parse_state(bg_color_state),
 		parse_border_sides(border_sides), border_color ?? 0, parse_state(border_color_state),
 		round((border_radius ?? 0) * 128),
 		border_dash ?? null,
 	)
+}
+
+ui.border = function(border_sides, border_color, border_color_state, border_radius, border_dash) {
+	return ui.bb(null, null, border_sides ?? true, border_color,
+		border_color_state, border_radius, border_dash)
 }
 
 reindex[CMD_BB] = function(a, i, offset) {
@@ -3721,22 +3737,26 @@ function border_path(cx, x1, y1, x2, y2, sides, r) {
 }
 
 draw[CMD_BB] = function(a, i) {
-	let ct_i = a[i+1]
+	let ct_i = a[i+BB_CT_I]
+
 	let px1 = a[ct_i+PX1+0]
 	let py1 = a[ct_i+PX1+1]
 	let px2 = a[ct_i+PX2+0]
 	let py2 = a[ct_i+PX2+1]
-	let x   = a[ct_i+0] - px1
-	let y   = a[ct_i+1] - py1
-	let w   = a[ct_i+2] + px1 + px2
-	let h   = a[ct_i+3] + py1 + py2
-	let bg_color           = a[i+2]
-	let bg_color_state     = a[i+3]
-	let border_sides       = a[i+4]
-	let border_color       = a[i+5]
-	let border_color_state = a[i+6]
-	let border_radius      = a[i+7] / 128
-	let border_dash        = a[i+8]
+
+	let x = a[ct_i+0] - px1
+	let y = a[ct_i+1] - py1
+	let w = a[ct_i+2] + px1 + px2
+	let h = a[ct_i+3] + py1 + py2
+
+	let bg_color           = a[i+1]
+	let bg_color_state     = a[i+2]
+	let border_sides       = a[i+3]
+	let border_color       = a[i+4]
+	let border_color_state = a[i+5]
+	let border_radius      = a[i+6] / 128
+	let border_dash        = a[i+7]
+
 	if (bg_color) {
 		set_bg_color(bg_color, bg_color_state)
 		bg_path(cx, x, y, x + w, y + h, border_sides, border_radius)
@@ -3754,16 +3774,6 @@ draw[CMD_BB] = function(a, i) {
 		cx.lineCap = 'butt'
 		if (border_dash)
 			cx.setLineDash(empty_array)
-	}
-}
-
-hittest[CMD_BB] = function(a, i) {
-	let ct_i     = a[i+1]
-	let bg_color = a[i+2]
-	if (bg_color && hit_box(a, ct_i)) {
-		hover(a[i+BB_ID])
-		hit_template(a, i)
-		return true
 	}
 }
 
@@ -4814,7 +4824,7 @@ function draw_node(id, t_t, t, depth) {
 			template_select_node(id, t_t, t)
 		let sel = t == selected_template_node_t
 		if (sel) {
-			ui.bb('', 'item',
+			ui.bb('item',
 				ui.focused(id)
 					? 'item-focused item-selected focused'
 					: 'item-focused item-selected'
@@ -4846,7 +4856,7 @@ function template_editor(id, t, ch_t) {
 				let def = defs[k]
 				let v = ch_t[k]
 				ui.h()
-					ui.bb('', null, null, 'b', 'light')
+					ui.border('b', 'light')
 					let vs = str((v != null ? v : def.default) ?? '')
 					ui.mb(1)
 					ui.p(8, 5)
@@ -4855,9 +4865,9 @@ function template_editor(id, t, ch_t) {
 					ui.p(8, 5)
 					ui.stack()
 						if (def.type == 'color') {
-							ui.bb('', v, null, 'l', 'light')
+							ui.bb(v, null, 'l', 'light')
 						} else {
-							ui.bb('', null, null, 'l', 'light')
+							ui.border('l', 'light')
 							ui.color(v != null ? 'text' : 'label')
 							ui.text('', vs, 1, 'l', 'c', 20)
 						}
@@ -4959,7 +4969,7 @@ ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
 	style = style ?? 'button'
 	ui.shadow('button')
-	ui.bb('', style, state, 1, 'intense', state, ui.sp05())
+	ui.bb(style, state, 1, 'intense', state, ui.sp05())
 }
 
 ui.button_text = function(s, state, min_w, min_h) {
@@ -5094,11 +5104,11 @@ ui.splitter = function() {
 				ui.ml(-hit_distance / 2)
 				ui.stack(id, 0, 'l', 's', hit_distance)
 					ui.stack('', 1, 'c', 's')
-						ui.bb('', null, null, 'l', 'intense', st)
+						ui.border('l', 'intense', st)
 					ui.end_stack()
 					if (collapsed) {
 						ui.stack('', 1, 'c', 'c', 5, 2*ui.sp8())
-							ui.bb('', null, null, 'lr', 'intense', st)
+							ui.border('lr', 'intense', st)
 						ui.end_stack()
 					}
 				ui.end_stack()
@@ -5110,11 +5120,11 @@ ui.splitter = function() {
 				ui.mt(-hit_distance / 2)
 				ui.stack(id, 0, 's', 't', 0, hit_distance)
 					ui.stack('', 1, 's', 'c')
-						ui.bb('', null, null, 't', 'intense', st)
+						ui.border('t', 'intense', st)
 					ui.end_stack()
 					if (collapsed) {
 						ui.stack('', 1, 'c', 'c', 2*ui.sp8(), 5)
-							ui.bb('', null, null, 'tb', 'intense', st)
+							ui.border('tb', 'intense', st)
 						ui.end_stack()
 					}
 				ui.end_stack()
@@ -5146,7 +5156,7 @@ ui.end_vsplit = function() { end_split('v') }
 
 ui.input = function(id, s, fr, min_w, min_h) {
 	ui.stack('', fr, 's', 's')
-		ui.bb('', 'input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
+		ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
 		s = ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(12), min_h, null, true)
 	ui.end_stack()
@@ -5211,7 +5221,7 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 		ui.p(ui.sp(), ui.sp05())
 		ui.stack(item_id, 0)
 			let item_focused = fi == i
-			 ui.bb('',
+			 ui.bb(
 			 	item_focused ? 'item' : 'bg',
 			 	item_focused
 			 		? list_focused
@@ -5234,6 +5244,93 @@ ui.hvlist = hvlist
 ui.vlist = function(...args) { return hvlist('v', ...args) }
 ui.hlist = function(...args) { return hvlist('h', ...args) }
 ui.list = ui.vlist
+
+// tabs ----------------------------------------------------------------------
+
+ui.tabs = function(id, tabs, selected_tab_i, tab_order) {
+
+	let s = ui.state(id)
+	selected_tab_i = s.get('i') ?? selected_tab_i
+	tab_order      = s.get('tab_order') ?? tab_order
+
+	let gap = 0
+	ui.stack(id)
+	ui.border(1, 'intense')
+	ui.h(0, gap, 'l', 't')
+
+	let drag_state, dx, dy, cs
+	let drag_tab_id
+	let drag_tab_i = 0
+	for (let tab of tabs) {
+		drag_tab_id = id+'.tab'+drag_tab_i
+		;[drag_state, dx, dy, cs] = ui.drag(drag_tab_id)
+		if (drag_state) break
+		drag_tab_i++
+	}
+
+	let mover = cs?.get('mover')
+	if (!mover && drag_state == 'drag') {
+		selected_tab_i = drag_tab_i
+		ui.state(id).set('i', selected_tab_i)
+	} else if (!mover && drag_state == 'dragging' && abs(dx) > 10) {
+		mover = ui.live_move_mixin()
+		cs.set('mover', mover)
+		mover.movable_element_size = function(i) {
+			let tab_id = id+'.tab'+drag_tab_i
+			let w = ui.state(tab_id).get('w')
+			return w + gap
+		}
+		mover.set_movable_element_pos = function(i, x, moving, vi) {
+		}
+		mover.move_element_start(drag_tab_i, 1, 0, tabs.length)
+	} else if (mover && drag_state == 'dragging') {
+		mover.move_element_update_dx(dx)
+	} else if (mover && drag_state == 'drop') {
+		tab_order ??= [...Array(tabs.length).keys()]
+		array_move(tab_order, drag_tab_i, 1, mover.over_i, true)
+		s.set('tab_order', tab_order)
+		mover = null
+	}
+
+	for (let j = 0, n = tabs.length; j < n; j++) {
+		let tab_i = tab_order?.[j] ?? j
+		let tab = tabs[tab_i]
+		let tab_id = id+'.tab'+tab_i
+		let over_gap = mover && tab_i == mover.over_i
+		if (over_gap) {
+			let tab_i = drag_tab_i
+			let tab_id = drag_tab_id
+			let w = ui.state(tab_id).get('w')
+			ui.stack('', 0, null, null, w)
+			ui.end_stack()
+		}
+		let moving = mover && tab_i == drag_tab_i
+		if (moving) {
+			ui.popup('', 'overlay', null, 'it', '[')
+			ui.ml(max(0, mover.x0 + dx))
+		}
+		ui.stack(tab_id)
+		ui.measure(tab_id)
+			let sel = tab_i == selected_tab_i
+			let hover = drag_state == 'hover' && drag_tab_i == tab_i || moving
+			ui.bb('bg1', hover ? 'hover' : null)
+			ui.p(ui.sp2(), ui.sp1())
+			ui.text('', isstr(tab) ? tab : tab.label)
+			if (sel) {
+				ui.stack('', 1, 's', 'b', null, 2)
+					ui.bb('marker')
+				ui.end_stack()
+			}
+		ui.end_stack()
+		if (moving) {
+			ui.end_popup()
+		}
+	}
+	ui.end_h()
+	ui.end_stack()
+
+	return selected_tab_i
+}
 
 // polyline ------------------------------------------------------------------
 
@@ -5400,7 +5497,7 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 			if (open)
 				ui.shadow('picker')
 
-			ui.bb('', 'input', null, 1, 'intense', ui.focused(id) || ui.focused(id+'.list') ? 'hover' : null)
+			ui.bb('input', null, 1, 'intense', ui.focused(id) || ui.focused(id+'.list') ? 'hover' : null)
 
 			ui.m(1)
 			ui.v()
@@ -5465,13 +5562,13 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 	ui.m(mx1, my1, mx2, my2)
 	ui.popup(id+'.popup', 'window', target_i ?? 'screen', 'it', align, min_w, min_h, 'constrain')
 		ui.p(1)
-		ui.bb('', 'bg1', null, 1, 'intense', null, ui.sp075())
+		ui.bb('bg1', null, 1, 'intense', null, ui.sp075())
 		ui.stack()
 			scope_set('toolbox_id', id)
 			ui.v() // title / body split
 				ui.h(0) // title bar
 					ui.stack(id+'.title')
-						ui.bb('', 'bg3', null, 0, null, null, ui.sp075() * 0.75)
+						ui.bb('bg3', null, 0, null, null, ui.sp075() * 0.75)
 						ui.p(ui.sp2(), ui.sp())
 						ui.text('', title, 0, 'l')
 					ui.end_stack()
@@ -5981,7 +6078,7 @@ ui.box_widget('slider', {
 			ui.mb(10)
 			ui.p(ui.sp2(), ui.sp())
 			ui.popup(id+'.popup', 'tooltip', thumb_i, 't', 'c', 0, 0, 'change_side constrain')
-				ui.bb_tooltip('', 'info', null, 'light', null, ui.sp05())
+				ui.bb_tooltip('info', null, 'light', null, ui.sp05())
 				ui.text('', dec(ui.state(id, 'v'), decimals ?? 2))
 			ui.end_popup()
 		}
@@ -6438,10 +6535,10 @@ ui.color_picker = function(id, hue, sat, lum) {
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
-				ui.bb('', ':'+hsl(hue, sat, lum))
+				ui.bb(':'+hsl(hue, sat, lum))
 			ui.end_aspect_box()
-			ui.record_play(sl_square)
-			ui.record_play(hue_bar)
+			ui.play_record(sl_square)
+			ui.play_record(hue_bar)
 		ui.end_h()
 		ui.h(0, 0, 's')
 			ui.label(id+'.input_hsl', 'HSL', .5)
@@ -6696,6 +6793,7 @@ ui.box_widget('frame_graph', {
 // implements:
 //   move_element_start(move_i, move_n, i1, i2[, x1, x2])
 //   move_element_update(elem_x)
+//   move_element_update_dx(elem_dx)
 //   move_element_stop() -> over_i
 // uses:
 //   movable_element_size(elem_i) -> w
@@ -6706,7 +6804,7 @@ ui.live_move_mixin = function(e) {
 	e = e || {}
 
 	let move_i1, move_i2, i1, i2, i1x, i2x, offsetx
-	let move_x, over_i, over_p, over_x
+	let move_x0, move_x, over_i, over_p, over_x
 	let sizes
 
 	e.move_element_start = function(move_i, move_n, _i1, _i2, _i1x, _i2x, _offsetx) {
@@ -6734,6 +6832,11 @@ ui.live_move_mixin = function(e) {
 					i2x += sizes[i]
 			}
 		}
+		move_x0 = 0
+		for (let i = i1; i < move_i; i++)
+			move_x0 += sizes[i]
+		e.x0 = move_x0
+		e.move_element_update_dx(0)
 	}
 
 	e.move_element_stop = function() {
@@ -6747,7 +6850,7 @@ ui.live_move_mixin = function(e) {
 		let last_over_i = over_i
 		let new_over_i, new_over_p
 		for (let i = i1; i < i2; i++) {
-			if (i < move_i1 || i >= move_i2) {
+			if (i < move_i1 || i >= move_i2) { // skip moving elements
 				let w = sizes[i]
 				let x1 = x + w / 2
 				if (elem_x < x1) {
@@ -6795,32 +6898,36 @@ ui.live_move_mixin = function(e) {
 
 	e.move_element_update = function(elem_x) {
 		elem_x = elem_x != null ? clamp(elem_x, i1x, i2x) : null
-		if (elem_x != move_x) {
-			move_x = elem_x
-			e.move_x = move_x
-			if (hit_test(move_x ?? 1/0)) { // first time always hits because over_i is null
-				e.over_i = over_i
-				e.over_p = over_p
-				let x = i1x
-				over_x = null
-				let vi = 0 // visual index
-				let mx = move_x
-				each_index(function(i, moving) {
-					if (moving) {
-						over_x = over_x ?? x
-						e.set_movable_element_pos(i, mx != null ? offsetx + mx : null, true, vi)
-						if (mx != null)
-							mx += sizes[i]
-					} else {
-						e.set_movable_element_pos(i, offsetx + x, false, vi)
-					}
-					x += sizes[i]
-					vi++
-				})
-			} else {
-				set_moving_element_pos(move_x, true)
-			}
+		if (elem_x == move_x)
+			return
+		move_x = elem_x
+		e.move_x = move_x
+		if (hit_test(move_x ?? 1/0)) { // first time always hits because over_i is null
+			e.over_i = over_i
+			e.over_p = over_p
+			let x = i1x
+			over_x = null
+			let vi = 0 // visual index
+			let mx = move_x
+			each_index(function(i, moving) {
+				if (moving) {
+					over_x = over_x ?? x
+					e.set_movable_element_pos(i, mx != null ? offsetx + mx : null, true, vi)
+					if (mx != null)
+						mx += sizes[i]
+				} else {
+					e.set_movable_element_pos(i, offsetx + x, false, vi)
+				}
+				x += sizes[i]
+				vi++
+			})
+		} else {
+			set_moving_element_pos(move_x, true)
 		}
+	}
+
+	e.move_element_update_dx = function(elem_dx) {
+		e.move_element_update(move_x0 + elem_dx)
 	}
 
 	return e

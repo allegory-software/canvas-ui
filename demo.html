@@ -16,7 +16,7 @@
 
 ui.DEBUG = 1
 
-SELECTED_DEMO = 12
+SELECTED_DEMO = 'tabs'
 
 const {
 	isnum, isobject, isfunc, isstr,
@@ -50,8 +50,8 @@ ui.scrollbox('sb1')
 	}
 	function on_frame(a, i, x, y, w, h, cx, cy, cw, ch) {
 		ui.m(cx-x, cy-y)
-		ui.stack('', 0, 'l', 't', 100, 100)
-			ui.bb('bb1', ui.hit('bb1') ? ':green' : ':red')
+		ui.stack('bb1', 0, 'l', 't', 100, 100)
+			ui.bb(ui.hit('bb1') ? ':green' : ':red')
 		ui.end_stack()
 	}
 	ui.frame(on_measure, on_frame)
@@ -130,7 +130,7 @@ ui.v(1, ui.sp())
 				answer_con.close()
 	ui.end_h()
 	ui.scrollbox('sb_shared_screen')
-		ui.bb('', null, null, 't', 'light')
+		ui.border('t', 'light')
 		ui.shared_screen('ss1', answer_con)
 	ui.end_scrollbox()
 ui.end_v()
@@ -190,7 +190,7 @@ ui.v(1, ui.sp())
 
 	ui.end_h()
 	ui.scrollbox('sb_shared_screen')
-		ui.bb('', null, null, 't', 'light')
+		ui.border('t', 'light')
 		ui.shared_screen('ss1', answer_con)
 	ui.end_scrollbox()
 ui.end_v()
@@ -198,7 +198,7 @@ ui.end_v()
 
 demos.silder = `
 ui.v(0, 0, 'c', 'c', 400)
-	ui.bb('', null, null, 1, 'intense')
+	ui.border(1, 'intense')
 	let p1 = ui.slider('slider1', 20, 40, 1, false)
 	//if (p != null)
 	//	pr(p)
@@ -210,12 +210,12 @@ dd_items = ['item 1', 'item 2 that is longer than others', 'item 3']
 demos.dropdown = `
 ui.v(1, ui.sp(), 'c', 'c')
 	ui.h(1, ui.sp())
-		ui.label('dd1', 'Label of this thing')
+		ui.label('dd1', 'dd1 label')
 		ui.state_init('dd1', 'i', 1)
 		ui.dropdown('dd1', dd_items)
 		ui.text('', 'or')
 		ui.dropdown('dd2', dd_items)
-		ui.text('', 'and something after')
+		ui.text('', 'trail')
 	ui.end_h()
 ui.end_v()
 `
@@ -254,16 +254,19 @@ ui.h(0, ui.sp(), 'c', 'c')
 ui.end_h()
 `
 
-li_items = []
+demos.tabs = `
+ui.stack('', 0, 'l', 'c')
+	ui.tabs('tabs1', ['Tab 1', 'Tab 2', 'Tab 3'], 1)
+ui.end_stack()
+`
+
+list1_items = []
 for (let i = 1; i <= 1000; i++)
-	li_items.push('Item '+i)
+	list1_items.push('Item '+i)
 demos.list = `
-ui.m(ui.em(20), ui.em(10))
-ui.h()
-	ui.sb('list_sb')
-		ui.list('list1', li_items)
-	ui.end_sb()
-ui.end_h()
+ui.sb('list1_sb', 1, null, null, 'c', 'c', 100, 300)
+	ui.list('list1', list1_items)
+ui.end_sb()
 `
 
 // grid
@@ -454,7 +457,7 @@ ui.border_style('*', 'brown'  , 'normal',   0, .59, .41)
 
 ui.stack('', 0, 'c', 'c', 150, 50)
 	ui.shadow(2, 2, 5, 0, false, 'black')
-	ui.bb('', 'crimson', null, 'ltrb', 'brown', null, 10)
+	ui.bb('crimson', null, 'ltrb', 'brown', null, 10)
 	ui.text('', 'Hello World!', 0, 'c')
 ui.end()
 `
@@ -490,10 +493,10 @@ ui.v(1, 30, 'c', 'c')
 		ui.v(1, 10)
 		for (let valign of ['t', 'b', 'c', 's']) {
 			ui.h(1, 10, 'c', 'c', 30, 30)
-				ui.bb('', null, null, 1, 'intense')
+				ui.border(1, 'intense')
 				for (let i = 1; i <= 3; i++) {
 					ui.stack('', 1, align, valign, 10, 10)
-						ui.bb('', 'info')
+						ui.bb('info')
 					ui.end_stack()
 				}
 			ui.end()
@@ -507,10 +510,10 @@ ui.v(1, 30, 'c', 'c')
 		ui.v(1, 10)
 		for (let valign of ['t', 'b', 'c', 's']) {
 			ui.v(1, 10, 'c', 'c', 30, 30)
-				ui.bb('', null, null, 1, 'intense')
+				ui.border(1, 'intense')
 				for (let i = 1; i <= 3; i++) {
 					ui.stack('', 1, align, valign, 10, 10)
-						ui.bb('', 'info')
+						ui.bb('info')
 					ui.end_stack()
 				}
 			ui.end()
@@ -527,19 +530,19 @@ ui.h(1, 30)
 for (let hv of ['h', 'v']) {
 	ui.hv(hv, 1, 10, 'c', 'c', 100, 100)
 		ui.stack('', 1)
-			ui.bb('', 'info')
+			ui.bb('info')
 		ui.end_stack()
 		ui.stack('', 2)
-			ui.bb('', 'info')
+			ui.bb('info')
 		ui.end_stack()
 		ui.stack('', 3)
-			ui.bb('', 'info')
+			ui.bb('info')
 		ui.end_stack()
 		ui.stack('', 4)
-			ui.bb('', 'info')
+			ui.bb('info')
 		ui.end_stack()
 		ui.stack('', 0, 's', 's', 100, 100)
-			ui.bb('', 'info')
+			ui.bb('info')
 		ui.end_stack()
 	ui.end()
 }
@@ -584,7 +587,7 @@ ui.hsplit('hsplit1', .8)
 
 			ui.p(20)
 			ui.stack()
-				ui.bb('', 'bg2')
+				ui.bb('bg2')
 				ui.text_wrapped('text1', \`
 					Were we in a Garden of Eden where land and other goods were infinitely
 					abundant, there would be no scarcity and, therefore, no need
@@ -600,7 +603,7 @@ ui.hsplit('hsplit1', .8)
 
 			ui.p(20)
 			ui.stack()
-				ui.bb('', 'bg1')
+				ui.bb('bg1')
 				ui.text_wrapped('text2', \`
 					The wrapped text pushes this flex cell down.
 				\`, 0, 'l')
@@ -608,7 +611,7 @@ ui.hsplit('hsplit1', .8)
 
 			ui.p(20)
 			ui.stack()
-				ui.bb('', 'bg2')
+				ui.bb('bg2')
 				ui.text_wrapped('text3', \`
 					The wrapped text pushes this flex cell down.
 					Also, this is right-aligned.
@@ -659,15 +662,15 @@ ui.v(1, 30, 'c', 'c')
 			for (let align of ['c', '[', ']']) {
 				ui.m(60, 30)
 				ui.stack()
-					ui.bb('', null, null, 1, 'light')
+					ui.border(1, 'light')
 					for (let side of ['t', 'r', 'b', 'l', 'c']) {
 						if (side != 'c' || inner) {
 							ui.m(10)
 							ui.popup('popup'+i++, null, null, inner+side, align, 30, 30)
-								ui.bb('', null, null, 1, 'intense')
+								ui.border(1, 'intense')
 								ui.m(5)
 								ui.popup('popup'+i++, null, null, inner+side, align, 10, 10)
-									ui.bb('', null, null, 1, 'intense')
+									ui.border(1, 'intense')
 								ui.end_popup()
 							ui.end_popup()
 						}
@@ -686,7 +689,7 @@ for (let align of ['c', '[', ']']) {
 	for (let side of ['t', 'r', 'b', 'l']) {
 		let [x, y, p_i] = ui.drag_point('p'+j+i, 100+j*220, 100+i*120, 'red')
 		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 50, 50)
-			ui.bb('', null, null, 1, 'light')
+			ui.border(1, 'light')
 			ui.m(
 				side == 'l' || side == 'r' ? ui.sp2() : 0,
 				side == 't' || side == 'b' ? ui.sp2() : 0,
@@ -711,28 +714,28 @@ ui.v(0, 30, 'c', 'c')
 		// both scrollbars
 		ui.sb('sb1', 0, null, null, 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 300, 300)
-				ui.bb('', 'bg1', null, 1, 'intense')
+				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// max w/h before showing scrollbar
 		ui.sb('sb2', 0, 'scroll', 'scroll', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 100, 100)
-				ui.bb('', 'bg1', null, 1, 'intense')
+				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// hide on x-axis
 		ui.sb('sb3', 0, 'hide', 'auto', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 300, 300)
-				ui.bb('', 'bg1', null, 1, 'intense')
+				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// hide on y-axis
 		ui.sb('sb4', 0, 'auto', 'hide', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 300, 300)
-				ui.bb('', 'bg1', null, 1, 'intense')
+				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
@@ -743,14 +746,14 @@ ui.v(0, 30, 'c', 'c')
 		// contain on x-axis
 		ui.sb('sb5', 0, 'contain', 'auto', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 200, 200)
-				ui.bb('', 'bg1', null, 1, 'intense')
+				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
 		// contain on y-axis
 		ui.sb('sb6', 0, 'auto', 'contain', 'c', 'c', 100, 100)
 			ui.stack('', 0, 'l', 't', 200, 200)
-				ui.bb('', 'bg1', null, 1, 'intense')
+				ui.bb('bg1', null, 1, 'intense')
 			ui.end_stack()
 		ui.end_sb()
 
@@ -788,7 +791,7 @@ ui.template('tpl1', test_template)
 demos.color_picker = `
 ui.p(ui.sp())
 ui.stack('', 0, 'c', 'c', 400)
-	ui.bb('', null, null, 1, 'light')
+	ui.border(1, 'light')
 	ui.color_picker('cp1')
 ui.end_stack()
 `
@@ -811,7 +814,7 @@ ui.main = function() {
 		ui.sb('top_bar_sb', 0, 'auto', 'contain')
 			ui.p(ui.sp())
 			ui.h(1, ui.sp2(), 's')
-				ui.bb('', null, null, 'b', 'light')
+				ui.border('b', 'light')
 
 				ui.color('label')
 				ui.text('', 'a.length', 0)
@@ -843,8 +846,8 @@ ui.main = function() {
 		ui.h()
 
 			ui.stack('', 0, 's', 's', ui.em(10))
-				ui.bb('', null, null, 'r', 'light')
-				ui.state_init('demos_list', 'focused_item_i', SELECTED_DEMO)
+				ui.border('r', 'light')
+				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(SELECTED_DEMO))
 				let i = ui.state('demos_list', 'focused_item_i')
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
@@ -855,7 +858,7 @@ ui.main = function() {
 
 			if (0) {
 				ui.sb('demo_code_sb', .5)
-					ui.bb('', 'bg1', null, 'r', 'light')
+					ui.bb('bg1', null, 'r', 'light')
 					ui.font('monospace')
 					ui.p(ui.sp4())
 					if (s)
@@ -871,11 +874,11 @@ ui.main = function() {
 			if (ui.DEBUG) {
 
 				ui.v(0, 0, 's', 's', 200)
-					ui.bb('', null, null, 'l', 'intense')
+					ui.border('l', 'intense')
 
 					function fgr(graph_name, fr) {
 						ui.stack('', 0)
-							ui.bb('', 'bg2')
+							ui.bb('bg2')
 							ui.color('text')
 							ui.p(ui.sp())
 							ui.text('', graph_name, 0, 'l')
@@ -894,10 +897,10 @@ ui.main = function() {
 				ui.end_v()
 
 				ui.v(0, 0, 's', 's', 200)
-					ui.bb('', null, null, 'l', 'intense')
+					ui.border('l', 'intense')
 
 					ui.stack('', 0)
-						ui.bb('', 'bg2')
+						ui.bb('bg2')
 						ui.color('text')
 						ui.p(ui.sp())
 						ui.text('', 'ID STATES', 0, 'l')
@@ -925,9 +928,9 @@ ui.main = function() {
 						ui.end_v()
 					ui.end_scrollbox()
 
-					ui.bb('', null, null, 1, 'light')
+					ui.border(1, 'light')
 					ui.stack('', 0)
-						ui.bb('', 'bg2')
+						ui.bb('bg2')
 						ui.color('text')
 						ui.p(ui.sp())
 						ui.text('', 'HIT STATES', 0, 'l')
@@ -954,7 +957,7 @@ ui.main = function() {
 					ui.end_scrollbox()
 
 					ui.stack('', 0)
-						ui.bb('', 'bg2')
+						ui.bb('bg2')
 						ui.color(ui.captured_id ? 'text' : 'label')
 						ui.p(ui.sp())
 						ui.text('', ui.captured_id ? 'CAP '+ui.captured_id : 'CAPTURED', 0, 'l', 'c', 1/0, 0)
@@ -977,7 +980,7 @@ ui.main = function() {
 					ui.end_scrollbox()
 
 					ui.stack('', 0)
-						ui.bb('', 'bg2')
+						ui.bb('bg2')
 						ui.color(ui.captured_id ? 'text' : 'label')
 						ui.p(ui.sp())
 						ui.text('', ui.focused_id ? 'FOCUSED '+ui.focused_id : 'FOCUSED', 0, 'l', 'c', 1/0, 0)

@@ -1,13 +1,19 @@
+BUGS UI
+------------------------------------------------------------------------------
+- force-scroll with popups double-translate bug
+- text hit clip
+-
+
 TODO GRID
 ------------------------------------------------------------------------------
-- ?
 
-TODO CORE UI
+TODO UI
 ------------------------------------------------------------------------------
+- scroll-to-view-rect cascade to all scrollboxes
+
 - remove scopes and automatic container scopes and replace them with
 	begin_font() end_font()
 	begin_bold() end_bold()
-
 	- careful with begin_rec()
 	- careful with frames
 
@@ -33,7 +39,7 @@ THINK
 
 - separate available APIs for each phase
 - make drawing phase stateless
--
+	- empty context in drawing phase!
 
 ------------------------------------------------------------------------------
 

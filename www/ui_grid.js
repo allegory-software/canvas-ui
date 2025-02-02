@@ -202,7 +202,7 @@ function init(id, e) {
 
 		ui.m(x, y, 0, 0)
 		ui.stack('', 0, 'l', 't', w, h)
-			ui.bb('', bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
+			ui.bb(bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
 			ui.color(fg)
 			if (has_children) {
 				ui.p(indent_x - sp2, 0, sp2, 0)
@@ -1109,7 +1109,7 @@ function init(id, e) {
 			) {
 
 				let group_bar_i = ui.sb(id+'.group_bar', 0, 'hide', 'hide', 's', 't', null, group_bar_h())
-					ui.bb('', 'bg2', null, 'b', 'light')
+					ui.bb('bg2', null, 'b', 'light')
 
 					let mover = gcol_mover
 
@@ -1135,7 +1135,7 @@ function init(id, e) {
 									let place_x = vi * (w + 1)
 									ui.m(sp2 + place_x - 1, sp2 + y - 1, 0, 0)
 									ui.stack('', 0, 'l', 't', w + 2, h + 2)
-										ui.bb('', null, null, 1, 'marker', null, 0, 'dashes')
+										ui.border(1, 'marker', null, 0, 'dashes')
 									ui.end_stack()
 									x = mover.x0 + dx
 									y = mover.y0 + dy
@@ -1152,7 +1152,7 @@ function init(id, e) {
 						let field = e.fld(col)
 						ui.m(sp2 + x, sp2 + y, 0, 0)
 						ui.stack(col_id, 1, 'l', 't', w, h)
-							ui.bb('', 'bg1',
+							ui.bb('bg1',
 									hit_gcol == col && (
 										drag_state == 'hover'    && 'hover' ||
 										drag_state == 'drop'     && 'hover' ||
@@ -1201,7 +1201,7 @@ function init(id, e) {
 					let col_move  = drag_op == 'col_move'  && hit_fi == field.index
 					let col_group = drag_op == 'col_group' && hit_gcol == field.name
 
-					ui.bb('',
+					ui.bb(
 						col_move ? 'bg2' : col_group ? 'bg0' : 'bg1', null,
 						col_move ? 'blr' : 'br', 'intense')
 
@@ -1250,7 +1250,7 @@ function init(id, e) {
 
 					let col_move = drag_op == 'col_move'
 
-					ui.bb('', 'bg1', null, 'b', 'intense')
+					ui.bb('bg1', null, 'b', 'intense')
 					for (let field of e.fields) {
 						if (col_move && hit_fi === field.index)
 							continue
