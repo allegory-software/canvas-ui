@@ -16,7 +16,7 @@
 
 ui.DEBUG = 1
 
-SELECTED_DEMO = 'tabs'
+SELECTED_DEMO = load('demo') ?? 'tabs'
 
 const {
 	isnum, isobject, isfunc, isstr,
@@ -827,6 +827,14 @@ ui.main = function() {
 
 	ui.v()
 
+		ui.m(ui.sp4(), ui.sp2())
+		ui.h(0, 0, 's', 't', null, ui.em(4))
+			ui.img('icons/dell.svg', 1, 's', 's', 100, 100)
+			ui.font_size(62)
+			ui.mr(ui.sp())
+			ui.text('', 'Defuser', 0, 'r')
+		ui.end_h()
+
 		ui.sb('top_bar_sb', 0, 'auto', 'contain')
 			ui.p(ui.sp())
 			ui.h(1, ui.sp2(), 's')
@@ -865,6 +873,8 @@ ui.main = function() {
 				ui.border('r', 'light')
 				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(SELECTED_DEMO))
 				let i = ui.state('demos_list', 'focused_item_i')
+				SELECTED_DEMO = demos_array[i]
+				save('demo', SELECTED_DEMO)
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
 				ui.end_sb()

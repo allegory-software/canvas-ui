@@ -2025,6 +2025,7 @@ function redraw_all() {
 
 			ui.frame_changed()
 		}
+
 		reset_canvas()
 
 		if (ui.clickup) {
@@ -6258,6 +6259,72 @@ ui.box_widget('slider', {
 ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 
 }
+
+// image ---------------------------------------------------------------------
+
+ui.box_widget('img', {
+
+	create: function(cmd, src, fr, align, valign, min_w, min_h) {
+
+		let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h, src)
+
+		let image = ui.state(src, 'image')
+		if (!image) {
+			image = new Image()
+			image.src = src
+			image.onload = function() {
+				ui.redraw()
+			}
+			ui.state(src).set('image', image)
+		}
+
+		return i
+
+	},
+
+	measure: function(a, i, axis) {
+		let src = a[i+S-1]
+		let image = ui.state(src, 'image')
+		let w = image && image.complete && (axis ? image.height : image.width) || 0
+		add_ct_min_wh(a, axis, w)
+	},
+
+	draw: function(a, i) {
+
+		let bx = a[i+0]
+		let by = a[i+1]
+		let bw = a[i+2]
+		let bh = a[i+3]
+
+		let src = a[i+S-1]
+
+		let image = ui.state(src, 'image')
+
+		if (!image.complete)
+			return
+
+		// fit image to box, preserving aspect ratio.
+		let iw = image.width
+		let ih = image.height
+		let x, y, w, h
+		if (iw != null) {
+			if (iw / ih > bw / bh) {
+				w = bw
+				h = bw * ih / iw
+			} else {
+				w = bh * iw / ih
+				h = bh
+			}
+			x = bx
+			y = by
+			w = floor(w)
+			h = floor(h)
+			cx.drawImage(image, x, y, w, h)
+		}
+
+	},
+
+})
 
 // blit'able -----------------------------------------------------------------
 
