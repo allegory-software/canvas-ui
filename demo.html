@@ -255,8 +255,24 @@ ui.end_h()
 `
 
 demos.tabs = `
-ui.stack('', 0, 'l', 'c')
-	ui.tabs('tabs1', ['Tab 1', 'Tab 2', 'Tab 3'], 1)
+ui.m(ui.em(5))
+ui.stack('', 1, 's', 'c')
+	ui.v()
+		ui.stack()
+			ui.bb('bg1')
+			let sel_tab = ui.tabs('tabs1', [
+				{id: 'tab1', label:'Tab 1'},
+				{id: 'tab2', label:'Tab 2'},
+				{id: 'tab3', label:'Tab 3'},
+				{id: 'tab4', label:'Tab 4'},
+				{id: 'tab5', label:'Tab 5'},
+			], 'tab2', 'tab2 tab4')
+		ui.end_stack()
+		ui.stack('', 1, 's', 's', null, 200)
+			ui.bb('bg0')
+		ui.end_stack()
+	ui.end_v()
+	ui.border(1, 'intense')
 ui.end_stack()
 `
 

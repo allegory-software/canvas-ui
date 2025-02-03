@@ -5247,53 +5247,58 @@ ui.list = ui.vlist
 
 // tabs ----------------------------------------------------------------------
 
-ui.tabs = function(id, tabs, selected_tab_i, tab_order) {
+ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	let s = ui.state(id)
-	selected_tab_i = s.get('i') ?? selected_tab_i
-	tab_order      = s.get('tab_order') ?? tab_order
+	selected_tab = s.get('selected_tab') ?? selected_tab
+	tab_order = s.get('tab_order') ?? tab_order
+	hidden_tabs = s.get('hidden_tabs') ?? hidden_tabs
+
+	let tabs = []
+	for (let tab of all_tabs) {
+		tab.index = tabs.length
+		tabs.push(tab)
+	}
 
 	let gap = 0
 	ui.stack(id)
-	ui.border(1, 'intense')
 	ui.h(0, gap, 'l', 't')
 
 	let drag_state, dx, dy, cs
-	let drag_tab_id
-	let drag_tab_i = 0
-	for (let tab of tabs) {
-		drag_tab_id = id+'.tab'+drag_tab_i
+	let drag_tab_id, drag_tab
+	for (drag_tab of tabs) {
+		drag_tab_id = id+'.tab.'+drag_tab.id
 		;[drag_state, dx, dy, cs] = ui.drag(drag_tab_id)
 		if (drag_state) break
-		drag_tab_i++
 	}
 
 	let mover = cs?.get('mover')
 	if (!mover && drag_state == 'drag') {
-		selected_tab_i = drag_tab_i
-		ui.state(id).set('i', selected_tab_i)
+		selected_tab = drag_tab
+		ui.state(id).set('selected_tab', selected_tab.id)
 	} else if (!mover && drag_state == 'dragging' && abs(dx) > 10) {
 		mover = ui.live_move_mixin()
 		cs.set('mover', mover)
-		mover.movable_element_size = function(i) {
-			let tab_id = id+'.tab'+drag_tab_i
+		mover.movable_element_size = function(vi) {
+			let tab = tabs[vi]
+			let tab_id = id+'.tab.'+drag_tab.id
 			let w = ui.state(tab_id).get('w')
 			return w + gap
 		}
 		mover.set_movable_element_pos = function(i, x, moving, vi) {
+			//
 		}
-		mover.move_element_start(drag_tab_i, 1, 0, tabs.length)
+		mover.move_element_start(drag_tab.index, 1, 0, tabs.length)
 	} else if (mover && drag_state == 'dragging') {
 		mover.move_element_update_dx(dx)
 	} else if (mover && drag_state == 'drop') {
-		tab_order ??= [...Array(tabs.length).keys()]
 		array_move(tab_order, drag_tab_i, 1, mover.over_i, true)
 		s.set('tab_order', tab_order)
 		mover = null
 	}
 
 	for (let j = 0, n = tabs.length; j < n; j++) {
-		let tab_i = tab_order?.[j] ?? j
+		let tab_i = j
 		let tab = tabs[tab_i]
 		let tab_id = id+'.tab'+tab_i
 		let over_gap = mover && tab_i == mover.over_i
@@ -5311,11 +5316,11 @@ ui.tabs = function(id, tabs, selected_tab_i, tab_order) {
 		}
 		ui.stack(tab_id)
 		ui.measure(tab_id)
-			let sel = tab_i == selected_tab_i
-			let hover = drag_state == 'hover' && drag_tab_i == tab_i || moving
+			let sel = tab == selected_tab
+			let hover = drag_state == 'hover' && drag_tab == tab || moving
 			ui.bb('bg1', hover ? 'hover' : null)
 			ui.p(ui.sp2(), ui.sp1())
-			ui.text('', isstr(tab) ? tab : tab.label)
+			ui.text('', tab.label)
 			if (sel) {
 				ui.stack('', 1, 's', 'b', null, 2)
 					ui.bb('marker')
@@ -5329,7 +5334,7 @@ ui.tabs = function(id, tabs, selected_tab_i, tab_order) {
 	ui.end_h()
 	ui.end_stack()
 
-	return selected_tab_i
+	return selected_tab
 }
 
 // polyline ------------------------------------------------------------------
