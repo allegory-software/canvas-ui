@@ -136,7 +136,7 @@ FOCUS STATE
 	window_unfocusing = t                window is unfocusing this frame
 	window_focused    = t|f              check if window is currently focused
 
-PADDINGS & MARGINS
+SPACINGS (MARGINS & PADDINGS)
 
 	rem             (rem) -> x   rem units to pixels
 	em              (em) -> x    em units to pixels
@@ -181,7 +181,8 @@ WIDGET DEFINITIONS
 	t.draw_end      : f(a, i)           draw widget at widget's end() call
 	t.hit           : f(a, i, recs)     hit-test widget
 	t.reindex       : f(a, i, offset)   update widget's internal indices in a
-	t.is_flex_child : t|f   has fr at a[i+FR] so it can be a child of a flex container
+	t.is_flex_child : t|f     has fr at a[i+FR] and min_w/h at a[i+2+axis]
+	                          so it can be a child of a flex container.
 
 	measure         (id)        request that widget be measured; puts x,y,w,h in its state map
 
@@ -1991,7 +1992,7 @@ function redraw_all() {
 		assert(i == 2)
 		begin_layer(layer_base, i)
 		ui.main()
-		reset_paddings()
+		reset_spacings()
 		ui.end()
 		end_layer()
 		frame_end_check()
@@ -2092,7 +2093,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 // box widgets ---------------------------------------------------------------
 
 // a box has min_w, min_h, margin, padding, align, valign, and also `fr`
-// if it's in is_flex_child. a box can also be a container.
+// if it's is_flex_child. a box can also be a container.
 // it's x,y,w,h are calculated by the layouting system using the above.
 
 const PX1        =  4
@@ -2113,7 +2114,7 @@ ui.FR    = FR
 ui.ALIGN = ALIGN
 ui.S     = S
 
-function paddings(a, i, axis) {
+function spacings(a, i, axis) {
 	return (
 		a[i+MX1+axis] + a[i+MX2+axis] +
 		a[i+PX1+axis] + a[i+PX2+axis]
@@ -2155,7 +2156,7 @@ function parse_valign(s) {
 	assert(false, 'invalid valign ', s)
 }
 
-// paddings and margins, applied to the next box cmd and then they are reset.
+// spacings (margins and paddings), applied to the next box cmd and then they are reset.
 let px1, px2, py1, py2
 let mx1, mx2, my1, my2
 
@@ -2196,7 +2197,7 @@ ui.margin_right  = function(m) { mx2 = m }; ui.mr = ui.margin_right
 ui.margin_top    = function(m) { my1 = m }; ui.mt = ui.margin_top
 ui.margin_bottom = function(m) { my2 = m }; ui.mb = ui.margin_bottom
 
-function reset_paddings() {
+function reset_spacings() {
 	px1 = 0
 	py1 = 0
 	px2 = 0
@@ -2206,7 +2207,7 @@ function reset_paddings() {
 	mx2 = 0
 	my2 = 0
 }
-reset_paddings()
+reset_spacings()
 
 // box command
 
@@ -2223,7 +2224,7 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		parse_valign (valign ?? 's'),
 		...args
 	)
-	reset_paddings()
+	reset_spacings()
 	return i
 }
 ui.cmd_box = ui_cmd_box
@@ -2254,7 +2255,7 @@ function ct_stack_push(a, i) {
 // the minimum dimensions include margins and paddings.
 function box_measure(a, i, axis) {
 	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) // apply own min_w|h
-	a[i+2+axis] += paddings(a, i, axis)
+	a[i+2+axis] += spacings(a, i, axis)
 	let min_w = a[i+2+axis]
 	add_ct_min_wh(a, axis, min_w)
 }
@@ -2286,7 +2287,7 @@ function inner_x(a, i, axis, ct_x) {
 	return ct_x + a[i+MX1+axis] + a[i+PX1+axis]
 }
 function inner_w(a, i, axis, ct_w) {
-	return ct_w - paddings(a, i, axis)
+	return ct_w - spacings(a, i, axis)
 }
 
 ui.align_x = align_x
@@ -2295,7 +2296,7 @@ ui.inner_x = inner_x
 ui.inner_w = inner_w
 
 // calculate a[i+0]=x, a[i+2]=w (for axis=0) or a[i+1]=y, a[i+3]=h (for axis=1).
-// the resulting box at a[i+0..3] exclude margins and paddings.
+// the resulting box at a[i+0..3] is the inner box which excludes margins and paddings.
 // NOTE: scrolling and popup positioning is done in the translation phase.
 function box_position(a, i, axis, sx, sw) {
 	a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
@@ -2409,7 +2410,7 @@ measure[CMD_END] = function(a, _, axis) {
 		let min_w     = a[i+2+axis]
 		if (main_axis)
 			min_w = max(0, min_w - a[i+FLEX_GAP]) // remove last element's gap
-		min_w = max(min_w, own_min_w) + paddings(a, i, axis)
+		min_w = max(min_w, own_min_w) + spacings(a, i, axis)
 		a[i+2+axis] = min_w
 		add_ct_min_wh(a, axis, min_w)
 	}
@@ -2787,7 +2788,7 @@ measure_end[CMD_SCROLLBOX] = function(a, i, axis) {
 	let co_min_w  = a[i+2+axis] // content min_w
 	let contain = a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_CONTAIN
 	let sb_min_w = max(contain ? co_min_w : 0, own_min_w) // scrollbox min_w
-	sb_min_w += paddings(a, i, axis)
+	sb_min_w += spacings(a, i, axis)
 	a[i+SB_CW+axis] = co_min_w
 	a[i+2+axis] = sb_min_w
 	add_ct_min_wh(a, axis, sb_min_w)
@@ -3169,7 +3170,7 @@ measure[CMD_POPUP] = ct_stack_push
 
 measure_end[CMD_POPUP] = function(a, i, axis) {
 	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) // apply own min_w|h
-	a[i+2+axis] += paddings(a, i, axis)
+	a[i+2+axis] += spacings(a, i, axis)
 	// popups don't affect their target's layout so no add_ct_min_wh() call.
 }
 
@@ -3186,7 +3187,7 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
 		} else {
 			// TODO: align border rects here!
-			let ct_w = a[target_i+2+axis] + paddings(a, target_i, axis)
+			let ct_w = a[target_i+2+axis] + spacings(a, target_i, axis)
 			a[i+2+axis] = max(a[i+2+axis], ct_w)
 		}
 	}
@@ -3283,10 +3284,10 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 
 	get_popup_target_rect(a, i)
 
-	let px    = paddings(a, i, 0)
-	let py    = paddings(a, i, 1)
-	let w     = a[i+2] + px
-	let h     = a[i+3] + py
+	let spx   = spacings(a, i, 0)
+	let spy   = spacings(a, i, 1)
+	let w     = a[i+2] + spx
+	let h     = a[i+3] + spy
 	let side  = a[i+POPUP_SIDE]
 	let align = a[i+POPUP_ALIGN]
 	let flags = a[i+POPUP_FLAGS]
@@ -3337,8 +3338,8 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 
 	a[i+0] = x
 	a[i+1] = y
-	a[i+2] = w - px
-	a[i+3] = h - py
+	a[i+2] = w - spx
+	a[i+3] = h - spy
 
 	translate_children(a, i, x, y)
 
@@ -4240,9 +4241,9 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		a[i+3] = min_h
 		a[i+TEXT_ASC] = round(asc)
 		a[i+TEXT_DSC] = round(dsc)
-		a[i+TEXT_W] = text_w + paddings(a, i, 0)
+		a[i+TEXT_W] = text_w + spacings(a, i, 0)
 	}
-	a[i+2+axis] += paddings(a, i, axis)
+	a[i+2+axis] += spacings(a, i, axis)
 	let min_w = a[i+2+axis]
 	add_ct_min_wh(a, axis, min_w)
 }
@@ -4259,7 +4260,7 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 		}
 		// store the segment we might have to clip the text to.
 		a[i+TEXT_X] = sx + a[i+MX1] + a[i+PX1]
-		a[i+TEXT_W] = sw - paddings(a, i, 0)
+		a[i+TEXT_W] = sw - spacings(a, i, 0)
 	}
 	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
@@ -4510,7 +4511,7 @@ frame.translate = function(a, i, dx, dy) {
 		let layer_ct_i = ui.stack()
 			force_scope_vars()
 			on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
-			reset_paddings()
+			reset_spacings()
 		ui.end_stack()
 		layer_i = layer_i0
 		frame_end_check()
@@ -4567,7 +4568,7 @@ ss.measure = function(a, i, axis) {
 	let id = a[i+SS_ID]
 	let t = ui.state(id, 'con')?.frame
 	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis])
-	a[i+2+axis] += paddings(a, i, axis) + ((axis ? t?.h : t?.w) ?? 0)
+	a[i+2+axis] += spacings(a, i, axis) + ((axis ? t?.h : t?.w) ?? 0)
 	let min_w = a[i+2+axis]
 	add_ct_min_wh(a, axis, min_w)
 }
@@ -6264,9 +6265,12 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 
 ui.box_widget('img', {
 
-	create: function(cmd, src, fr, align, valign, min_w, min_h) {
+	create: function(cmd, src, fr, align, valign, max_min_h, min_w, min_h) {
 
-		let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h, src)
+		let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			src,
+			max_min_h ?? -1 // -1=inf
+		)
 
 		let image = ui.state(src, 'image')
 		if (!image) {
@@ -6283,42 +6287,42 @@ ui.box_widget('img', {
 	},
 
 	before_measure: function(a, i, axis) {
-		if (axis == 0) return
-		let src = a[i+S-1]
+		if (!axis) return // can't impose a width
+		let bw        = a[i+2]
+		let src       = a[i+S-1]
+		let max_min_h = a[i+S+0]
 		let image = ui.state(src, 'image')
 		if (!image || !image.complete) return
 		let iw = image.width
 		let ih = image.height
 		if (!iw || !ih) return
-		let w = a[i+2]
-		let h = (ih / iw) * w
-
-		image.w = w
-		image.h = h
-
-		/*
-		// fit image to box, preserving aspect ratio.
-		let iw = image.width
-		let ih = image.height
-		let x, y, w, h
-		if (iw != null) {
-			if (iw / ih > bw / bh) {
-				w = bw
-				h = bw * ih / iw
-			} else {
-				w = bh * iw / ih
-				h = bh
-			}
-			x = bx
-			y = by
-			w = floor(w)
-			h = floor(h)
-			cx.drawImage(image, x, y, w, h)
-		}
-		*/
-
-		add_ct_min_wh(a, 1, h)
+		let h = (ih / iw) * bw
+		let min_h = min(h, repl(max_min_h, -1, 1/0))
+		a[i+0+1] = max(a[i+0+1], min_h)
 	},
+
+	position: function(a, i, axis, sx, sw) {
+		if (!axis) {
+			let min_w     = a[i+2+0]
+			let min_h     = a[i+0+1]
+			let src       = a[i+S-1]
+			let max_min_h = a[i+S+0]
+			let image = ui.state(src, 'image')
+			if (!image || !image.complete) return
+			let iw = image.width
+			let ih = image.height
+			if (!iw || !ih) return
+			let max_h = (ih / iw) * sw // max h that fits available space
+			let min_h = max(min(min_h, repl(max_min_h, -1, 1/0))), max_h)
+
+			min(max(min_w, iw), sw)
+		}
+		a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
+		a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
+	},
+
+	// before_position: function(a, i, axis) {
+	// },
 
 	draw: function(a, i) {
 
@@ -6330,13 +6334,23 @@ ui.box_widget('img', {
 		let src = a[i+S-1]
 
 		let image = ui.state(src, 'image')
-
-		if (!image.w)
-			return
-
-		let x = bx
-		let y = by
-		cx.drawImage(image, x, y, image.w, image.h)
+		if (!image || !image.complete) return
+		let iw = image.width
+		let ih = image.height
+		if (!iw || !ih) return
+		// fit image to box, preserving aspect ratio.
+		let x, y, w, h
+		if (iw / ih > bw / bh) {
+			w = bw
+			h = bw * ih / iw
+		} else {
+			w = bh * iw / ih
+			h = bh
+		}
+		x = bx
+		y = by
+		pr(bw, bh)
+		cx.drawImage(image, x, y, w, h)
 
 	},
 
