@@ -3948,7 +3948,7 @@ const TEXT_FOCUSED   = 8 // bit 4
 const CMD_TEXT = cmd('text')
 
 ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
-	// NOTE: min_w and min_h are measured, not given.
+	// NOTE: min_w and min_h are by default measured, not given.
 	s = s ?? ''
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
@@ -6282,27 +6282,21 @@ ui.box_widget('img', {
 
 	},
 
-	measure: function(a, i, axis) {
+	before_measure: function(a, i, axis) {
+		if (axis == 0) return
 		let src = a[i+S-1]
 		let image = ui.state(src, 'image')
-		let w = image && image.complete && (axis ? image.height : image.width) || 0
-		add_ct_min_wh(a, axis, w)
-	},
+		if (!image || !image.complete) return
+		let iw = image.width
+		let ih = image.height
+		if (!iw || !ih) return
+		let w = a[i+2]
+		let h = (ih / iw) * w
 
-	draw: function(a, i) {
+		image.w = w
+		image.h = h
 
-		let bx = a[i+0]
-		let by = a[i+1]
-		let bw = a[i+2]
-		let bh = a[i+3]
-
-		let src = a[i+S-1]
-
-		let image = ui.state(src, 'image')
-
-		if (!image.complete)
-			return
-
+		/*
 		// fit image to box, preserving aspect ratio.
 		let iw = image.width
 		let ih = image.height
@@ -6321,6 +6315,28 @@ ui.box_widget('img', {
 			h = floor(h)
 			cx.drawImage(image, x, y, w, h)
 		}
+		*/
+
+		add_ct_min_wh(a, 1, h)
+	},
+
+	draw: function(a, i) {
+
+		let bx = a[i+0]
+		let by = a[i+1]
+		let bw = a[i+2]
+		let bh = a[i+3]
+
+		let src = a[i+S-1]
+
+		let image = ui.state(src, 'image')
+
+		if (!image.w)
+			return
+
+		let x = bx
+		let y = by
+		cx.drawImage(image, x, y, image.w, image.h)
 
 	},
 
