@@ -6287,8 +6287,8 @@ ui.box_widget('img', {
 	},
 
 	before_measure: function(a, i, axis) {
-		if (!axis) return // can't impose a width
-		let bw        = a[i+2]
+		if (!axis) return // can't impose a width (min_w still works)
+		let sw        = a[i+2]
 		let src       = a[i+S-1]
 		let max_min_h = a[i+S+0]
 		let image = ui.state(src, 'image')
@@ -6296,14 +6296,22 @@ ui.box_widget('img', {
 		let iw = image.width
 		let ih = image.height
 		if (!iw || !ih) return
-		let h = (ih / iw) * bw
-		let min_h = min(h, repl(max_min_h, -1, 1/0))
+		let max_h = (ih / iw) * sw
+		let min_h = min(max_h, repl(max_min_h, -1, 1/0))
 		a[i+0+1] = max(a[i+0+1], min_h)
 	},
 
 	position: function(a, i, axis, sx, sw) {
 		if (!axis) {
-			let min_w     = a[i+2+0]
+			// can't compute x,w until we know min_h, so assume align is stretch.
+			a[i+0+0] = inner_x(a, i, 0, sx)
+			a[i+2+0] = inner_w(a, i, 0, sw)
+		} else {
+			// compute both x,w and y,h
+			let sy = sx
+			let sh = sw
+			sx            = a[i+0+0]
+			sw            = a[i+2+0]
 			let min_h     = a[i+0+1]
 			let src       = a[i+S-1]
 			let max_min_h = a[i+S+0]
@@ -6312,7 +6320,7 @@ ui.box_widget('img', {
 			let iw = image.width
 			let ih = image.height
 			if (!iw || !ih) return
-			let max_h = (ih / iw) * sw // max h that fits available space
+			let max_h = (ih / iw) * sw // max h for max w that fits
 			let min_h = max(min(min_h, repl(max_min_h, -1, 1/0))), max_h)
 
 			min(max(min_w, iw), sw)
