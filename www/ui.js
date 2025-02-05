@@ -856,7 +856,10 @@ function set_screen_bg() {
 	document.documentElement.style.background = bg_color('bg')
 }
 // prevent flicker on load by setting the screen's background color now.
-set_screen_bg()
+ui.set_default_theme = function(theme) {
+	ui.default_theme = theme
+	set_screen_bg()
+}
 
 document.addEventListener('DOMContentLoaded', function() {
 	ready = true
@@ -6269,7 +6272,7 @@ ui.box_widget('img', {
 
 		let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 			src,
-			max_min_h ?? -1 // -1=inf
+			max_min_h ?? 0 // -1=inf
 		)
 
 		let image = ui.state(src, 'image')
@@ -6296,7 +6299,7 @@ ui.box_widget('img', {
 		let iw = image.width
 		let ih = image.height
 		if (!iw || !ih) return
-		let max_h = (ih / iw) * sw
+		let max_h = (ih / iw) * sw // max h for max w that fits
 		let min_h = min(max_h, repl(max_min_h, -1, 1/0))
 		a[i+0+1] = max(a[i+0+1], min_h)
 	},
@@ -6307,7 +6310,8 @@ ui.box_widget('img', {
 			a[i+0+0] = inner_x(a, i, 0, sx)
 			a[i+2+0] = inner_w(a, i, 0, sw)
 		} else {
-			// compute both x,w and y,h
+			// fit image into the available space preserving aspect ratio.
+			// NOTE: 'stretch' align doesn't make sense with fit images.
 			let sy = sx
 			let sh = sw
 			sx            = a[i+0+0]
@@ -6320,13 +6324,18 @@ ui.box_widget('img', {
 			let iw = image.width
 			let ih = image.height
 			if (!iw || !ih) return
-			let max_h = (ih / iw) * sw // max h for max w that fits
-			let min_h = max(min(min_h, repl(max_min_h, -1, 1/0))), max_h)
-
-			min(max(min_w, iw), sw)
+			if (iw / ih > sw / sh) {
+				a[i+2+0] = sw
+				a[i+2+1] = sw * ih / iw
+			} else {
+				a[i+2+0] = sh * iw / ih
+				a[i+2+1] = sh
+			}
+			a[i+0+0] = inner_x(a, i, 0, align_x(a, i, 0, sx, sw))
+			a[i+2+0] = inner_w(a, i, 0, align_w(a, i, 0, sw))
+			a[i+0+1] = inner_x(a, i, 1, align_x(a, i, 1, sy, sh))
+			a[i+2+1] = inner_w(a, i, 1, align_w(a, i, 1, sh))
 		}
-		a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
-		a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
 	},
 
 	// before_position: function(a, i, axis) {
@@ -6357,7 +6366,6 @@ ui.box_widget('img', {
 		}
 		x = bx
 		y = by
-		pr(bw, bh)
 		cx.drawImage(image, x, y, w, h)
 
 	},

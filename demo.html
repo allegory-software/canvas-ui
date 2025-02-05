@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html theme=dark>
+<html>
 <body>
 <base href="www/">
 <link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2">
@@ -14,21 +14,15 @@
 <script src=webrtc.js></script>
 <script>
 
-ui.DEBUG = 1
+let demo_state = json_arg(load('demo_state')) ?? {}
+ui.DEBUG      = demo_state.debug ?? true
+SELECTED_DEMO = demo_state.demo ?? 'tabs'
+ui.set_default_theme(demo_state.theme ?? 'dark')
 
-SELECTED_DEMO = load('demo') ?? 'tabs'
-
-const {
-	isnum, isobject, isfunc, isstr,
-	assert,
-	assign,
-	str, dec, format_kbytes, json, json_arg,
-	runevery, runafter,
-	listen,
-	post,
-} = glue
-
-let pr = console.log
+function save_demo_state(k, v) {
+	demo_state[k] = v
+	save('demo_state', json(demo_state))
+}
 
 let tuts = []
 let demos = []
@@ -822,19 +816,21 @@ demos_array = keys(demos)
 
 let a_length = 0
 let a_strlen = 0
-let dark_mode = true
 ui.main = function() {
 
 	ui.v()
 
-		ui.m(ui.sp4(), ui.sp2())
-		ui.h(0, 0, 's', 't', null, ui.em(4))
-			ui.bb('bg2')
-			ui.img('icons/dell.svg', 1, 's', 's', 0, null, 200)
-			ui.font_size(62)
-			ui.mr(ui.sp())
-			ui.text('', 'Defuser', 0, 'r')
-		ui.end_h()
+		ui.stack(0, 0, 's', 't', null, ui.em(4))
+			ui.p(ui.sp4(), ui.sp4(), ui.sp2(), ui.sp2())
+			ui.h()
+				ui.bb(':rgb(0, 125, 184)')
+				ui.img('icons/dell.svg', 1, 'l', 'c')
+				ui.font_size(52)
+				ui.mr(ui.sp())
+				ui.color(':white')
+				ui.text('', 'Defuser', 0, 'r')
+			ui.end_h()
+		ui.end_stack()
 
 		ui.sb('top_bar_sb', 0, 'auto', 'contain')
 			ui.p(ui.sp())
@@ -852,13 +848,14 @@ ui.main = function() {
 				ui.text('', format_kbytes(a_strlen, 1), 0, 'r', 'c', 1/0, ui.em(3))
 
 				if (ui.button('btn_light', 'lights', 0)) {
-					dark_mode = !dark_mode
-					ui.default_theme = dark_mode ? 'dark' : 'light'
+					ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
+					save_demo_state('theme', ui.default_theme)
 					ui.redraw()
 				}
 
 				if (ui.button('btn_debug', 'DEBUG', 0)) {
 					ui.DEBUG = !ui.DEBUG
+					save_demo_state('debug', ui.DEBUG)
 					ui.redraw()
 				}
 
@@ -875,7 +872,7 @@ ui.main = function() {
 				ui.state_init('demos_list', 'focused_item_i', demos_array.indexOf(SELECTED_DEMO))
 				let i = ui.state('demos_list', 'focused_item_i')
 				SELECTED_DEMO = demos_array[i]
-				save('demo', SELECTED_DEMO)
+				save_demo_state('demo', SELECTED_DEMO)
 				ui.sb('demos_list_sb')
 					let demo = ui.list('demos_list', demos_array)
 				ui.end_sb()
