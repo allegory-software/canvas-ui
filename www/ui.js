@@ -6291,14 +6291,17 @@ ui.box_widget('img', {
 
 	before_measure: function(a, i, axis) {
 		if (!axis) return // can't impose a width (min_w still works)
+
 		let sw        = a[i+2]
 		let src       = a[i+S-1]
 		let max_min_h = a[i+S+0]
+
 		let image = ui.state(src, 'image')
 		if (!image || !image.complete) return
 		let iw = image.width
 		let ih = image.height
 		if (!iw || !ih) return
+
 		let max_h = (ih / iw) * sw // max h for max w that fits
 		let min_h = min(max_h, repl(max_min_h, -1, 1/0))
 		a[i+0+1] = max(a[i+0+1], min_h)
@@ -6310,8 +6313,6 @@ ui.box_widget('img', {
 			a[i+0+0] = inner_x(a, i, 0, sx)
 			a[i+2+0] = inner_w(a, i, 0, sw)
 		} else {
-			// fit image into the available space preserving aspect ratio.
-			// NOTE: 'stretch' align doesn't make sense with fit images.
 			let sy = sx
 			let sh = sw
 			sx            = a[i+0+0]
@@ -6319,11 +6320,14 @@ ui.box_widget('img', {
 			let min_h     = a[i+0+1]
 			let src       = a[i+S-1]
 			let max_min_h = a[i+S+0]
+
 			let image = ui.state(src, 'image')
 			if (!image || !image.complete) return
 			let iw = image.width
 			let ih = image.height
 			if (!iw || !ih) return
+
+			// fit image into the available space preserving aspect ratio.
 			if (iw / ih > sw / sh) {
 				a[i+2+0] = sw
 				a[i+2+1] = sw * ih / iw
@@ -6331,6 +6335,8 @@ ui.box_widget('img', {
 				a[i+2+0] = sh * iw / ih
 				a[i+2+1] = sh
 			}
+
+			// NOTE: 'stretch' align doesn't make sense with fitted images.
 			a[i+0+0] = inner_x(a, i, 0, align_x(a, i, 0, sx, sw))
 			a[i+2+0] = inner_w(a, i, 0, align_w(a, i, 0, sw))
 			a[i+0+1] = inner_x(a, i, 1, align_x(a, i, 1, sy, sh))
@@ -6338,36 +6344,20 @@ ui.box_widget('img', {
 		}
 	},
 
-	// before_position: function(a, i, axis) {
-	// },
-
 	draw: function(a, i) {
 
-		let bx = a[i+0]
-		let by = a[i+1]
-		let bw = a[i+2]
-		let bh = a[i+3]
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
 
 		let src = a[i+S-1]
 
 		let image = ui.state(src, 'image')
 		if (!image || !image.complete) return
-		let iw = image.width
-		let ih = image.height
-		if (!iw || !ih) return
-		// fit image to box, preserving aspect ratio.
-		let x, y, w, h
-		if (iw / ih > bw / bh) {
-			w = bw
-			h = bw * ih / iw
-		} else {
-			w = bh * iw / ih
-			h = bh
-		}
-		x = bx
-		y = by
-		cx.drawImage(image, x, y, w, h)
+		if (!w || !h) return
 
+		cx.drawImage(image, x, y, w, h)
 	},
 
 })
