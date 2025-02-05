@@ -6270,20 +6270,33 @@ ui.box_widget('img', {
 
 	create: function(cmd, src, fr, align, valign, max_min_h, min_w, min_h) {
 
+		// TODO: check expire time and refetch on a timer.
+		// TODO: check etag and refetch on a timer.
+		let data = ui.state(src, 'data')
+		if (!data) {
+			fetch(src)
+				.then(res => res.blob())
+				.then(blob => {
+					let reader = new FileReader()
+					reader.onloadend = () => {
+						data = reader.result
+						let image = new Image()
+						image.src = data
+						image.onload = function() {
+							ui.state(src).set('image', image)
+							ui.state(src).set('data', data)
+							ui.redraw()
+						}
+					}
+					reader.readAsDataURL(blob)
+			  })
+		}
+
 		let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 			src,
-			max_min_h ?? 0 // -1=inf
+			max_min_h ?? 0, // -1=inf
+			data ?? '',
 		)
-
-		let image = ui.state(src, 'image')
-		if (!image) {
-			image = new Image()
-			image.src = src
-			image.onload = function() {
-				ui.redraw()
-			}
-			ui.state(src).set('image', image)
-		}
 
 		return i
 
@@ -6297,7 +6310,7 @@ ui.box_widget('img', {
 		let max_min_h = a[i+S+0]
 
 		let image = ui.state(src, 'image')
-		if (!image || !image.complete) return
+		if (!image?.complete) return
 		let iw = image.width
 		let ih = image.height
 		if (!iw || !ih) return
@@ -6322,7 +6335,7 @@ ui.box_widget('img', {
 			let max_min_h = a[i+S+0]
 
 			let image = ui.state(src, 'image')
-			if (!image || !image.complete) return
+			if (!image?.complete) return
 			let iw = image.width
 			let ih = image.height
 			if (!iw || !ih) return
@@ -6351,10 +6364,19 @@ ui.box_widget('img', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let src = a[i+S-1]
+		let src  = a[i+S-1]
+		let data = a[i+S+1]
 
-		let image = ui.state(src, 'image')
-		if (!image || !image.complete) return
+		let image = ui.state(src, 'image') ?? ui.state(src, 'draw_image')
+		if (data && !image) { // have data but no image (remote image)
+			image = new Image()
+			image.onload = function() {
+				ui.redraw()
+			}
+			image.src = data
+			ui.state(src).set('draw_image', image)
+		}
+		if (!image?.complete) return
 		if (!w || !h) return
 
 		cx.drawImage(image, x, y, w, h)
