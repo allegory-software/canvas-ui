@@ -642,9 +642,9 @@ ui.fg_style('dark' , 'link'   , 'normal' ,  26, 0.88, 0.60)
 ui.fg_style('dark' , 'link'   , 'hover'  ,  26, 0.99, 0.70)
 ui.fg_style('dark' , 'link'   , 'active' ,  26, 0.99, 0.80)
 
-ui.fg_style('light', 'marker' , 'normal' ,  61, 1.00, 0.57) // TODO
-ui.fg_style('light', 'marker' , 'hover'  ,  61, 1.00, 0.57) // TODO
-ui.fg_style('light', 'marker' , 'active' ,  61, 1.00, 0.57) // TODO
+ui.fg_style('light', 'marker' , 'normal' ,   0, 0.00, 0.5) // TODO
+ui.fg_style('light', 'marker' , 'hover'  ,   0, 0.00, 0.5) // TODO
+ui.fg_style('light', 'marker' , 'active' ,   0, 0.00, 0.5) // TODO
 
 ui.fg_style('dark' , 'marker' , 'normal' ,  61, 1.00, 0.57)
 ui.fg_style('dark' , 'marker' , 'hover'  ,  61, 1.00, 0.57) // TODO
@@ -674,6 +674,7 @@ ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
+ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00) // TODO
 
 ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
 ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
@@ -699,7 +700,7 @@ ui.bg_is_dark = bg_is_dark
 
 //           theme    name      state       h     s     L     a
 // -------------------------------------------------------------
-ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.50)
+ui.bg_style('light', 'bg0'   , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'bg'    , 'normal' ,   0, 0.00, 1.00)
 ui.bg_style('light', 'bg'    , 'hover'  ,   0, 0.00, 0.95)
 ui.bg_style('light', 'bg'    , 'active' ,   0, 0.00, 0.93)
@@ -4973,6 +4974,8 @@ ui.button_state = function(id) {
 ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
 	style = style ?? 'button'
+	if (!style) // false, 0, '' means no border
+		return
 	ui.shadow('button')
 	ui.bb(style, state, 1, 'intense', state, ui.sp05())
 }
@@ -5004,6 +5007,10 @@ ui.icon_button = function(id, font, icon, fr, align, valign, min_w, min_h, style
 	ui.button_bb(style, state)
 	ui.button_icon(font, icon, state)
 	return ui.end_button_stack(state)
+}
+
+ui.bare_icon_button = function(id, font, icon, fr, align, valign, min_w, min_h) {
+	return ui.icon_button(id, font, icon, fr, align, valign, min_w, min_h, '')
 }
 
 ui.tool_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
@@ -5260,20 +5267,24 @@ function visible_element_list(all, ID, INDEX, order, hidden) {
 	let hidden_ids = words(hidden) ?? empty_array
 	let visible_ids = words(order) ?? all.map(e => e[ID])
 	let id_map = {}
-	for (let e of all)
+	for (let e of all) {
+		if (hidden_ids.includes(e[ID])) // hidden
+			continue
+		if (id_map[e[ID]]) // duplicate
+			continue
 		id_map[e[ID]] = e
+	}
 	let visible = []
 	for (let id of visible_ids) {
 		let e = id_map[id]
-		if (!e)
+		if (!e) // hidden or invalid, skip
 			continue
 		// mark id as processed to skip duplicates and be left with new elements.
 		id_map[id] = null
-		if (hidden_ids.includes(id))
-			continue
 		visible.push(e)
 	}
-	// add new elements not present in the order list in natural order.
+	// add new elements not present in the order list at the end, in natural order.
+	// TODO: support "before" and "after" hits for more control on placement.
 	for (let e of all)
 		if (id_map[e[ID]])
 			visible.push(e)
@@ -5291,10 +5302,9 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	let s = ui.state(id)
 	selected_tab = s.get('selected_tab') ?? selected_tab
-	tab_order = s.get('tab_order') ?? tab_order
-	hidden_tabs = s.get('hidden_tabs') ?? hidden_tabs
+	tab_order    = s.get('tab_order'   ) ?? tab_order
+	hidden_tabs  = s.get('hidden_tabs' ) ?? hidden_tabs
 
-	// compute visible tabs
 	let tabs = s.get('tabs')
 	if (!tabs) {
 		tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
@@ -5303,9 +5313,8 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	selected_tab = tabs.by_id[selected_tab]
 
-	let gap = 0
-	ui.stack(id)
-	ui.h(0, gap, 'l', 't')
+	ui.sb(id, 1, 'auto', 'contain')
+	ui.h(0, 0, 'l', 't')
 
 	let drag_state, dx, dy, cs
 	let drag_tab_id, drag_tab
@@ -5324,19 +5333,22 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 		cs.set('mover', mover)
 		mover.movable_element_size = function(vi) {
 			let tab = tabs[vi]
-			let tab_id = id+'.tab'+drag_tab.id
+			let tab_id = id+'.tab'+tab.index
 			let w = ui.state(tab_id).get('w')
-			return w + gap
+			return w
 		}
 		mover.set_movable_element_pos = function(i, x, moving, vi) {
-			//
+			// not using mover's positions, just mover.over_i
 		}
 		mover.move_element_start(drag_tab.index, 1, 0, tabs.length)
 	} else if (mover && drag_state == 'dragging') {
 		mover.move_element_update_dx(dx)
 	} else if (mover && drag_state == 'drop') {
-		array_move(tab_order, tabs.indexOf(drag_tab), 1, mover.over_i, true)
+		array_move(tabs, drag_tab.index, 1, mover.over_i, true)
+		tab_order = tabs.map(tab => tab.id).join(' ')
 		s.set('tab_order', tab_order)
+		tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
+		s.set('tabs', tabs)
 		mover = null
 	}
 
@@ -5373,8 +5385,16 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 			ui.end_popup()
 		}
 	}
+	if (!mover) {
+		if (ui.bare_icon_button(id+'.plus', 'fas', '+', false)) {
+			all_tabs.push({id: 'newtab'+all_tabs.length, label: 'New Tab '+all_tabs.length})
+			tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
+			s.set('tabs', tabs)
+			ui.redraw()
+		}
+	}
 	ui.end_h()
-	ui.end_stack()
+	ui.end_sb()
 
 	return selected_tab
 }
@@ -6303,6 +6323,16 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 
 // image ---------------------------------------------------------------------
 
+function create_image(src, data) {
+	let image = new Image()
+	image.src = data
+	image.onload = function() {
+		ui.state(src).set('image', image)
+		ui.state(src).set('data', data)
+		ui.redraw()
+	}
+}
+
 ui.box_widget('img', {
 
 	create: function(cmd, src, fr, align, valign, max_min_h, min_w, min_h) {
@@ -6311,22 +6341,19 @@ ui.box_widget('img', {
 		// TODO: check etag and refetch on a timer.
 		let data = ui.state(src, 'data')
 		if (!data) {
-			fetch(src)
-				.then(res => res.blob())
-				.then(blob => {
-					let reader = new FileReader()
-					reader.onloadend = () => {
-						data = reader.result
-						let image = new Image()
-						image.src = data
-						image.onload = function() {
-							ui.state(src).set('image', image)
-							ui.state(src).set('data', data)
-							ui.redraw()
+			if (src.startsWith('data:')) {
+				create_image(src, src)
+			} else {
+				fetch(src)
+					.then(res => res.blob())
+					.then(blob => {
+						let reader = new FileReader()
+						reader.onloadend = () => {
+							create_image(src, reader.result)
 						}
-					}
-					reader.readAsDataURL(blob)
-			  })
+						reader.readAsDataURL(blob)
+				  })
+			}
 		}
 
 		let i = ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
@@ -6404,14 +6431,14 @@ ui.box_widget('img', {
 		let src  = a[i+S-1]
 		let data = a[i+S+1]
 
-		let image = ui.state(src, 'image') ?? ui.state(src, 'draw_image')
+		let image = ui.state(src, 'image')
 		if (data && !image) { // have data but no image (remote image)
 			image = new Image()
 			image.onload = function() {
 				ui.redraw()
 			}
 			image.src = data
-			ui.state(src).set('draw_image', image)
+			ui.state(src).set('image', image)
 		}
 		if (!image?.complete) return
 		if (!w || !h) return
