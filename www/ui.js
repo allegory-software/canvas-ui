@@ -5252,6 +5252,41 @@ ui.list = ui.vlist
 
 // tabs ----------------------------------------------------------------------
 
+// given a list of elements with an ID key, an optional "order list" and an
+// optional "hidden" list, return the list of visible elements in specified
+// order with hidden ones skipped and with new ones that are not in the order
+// list or hidden added at the end.
+function visible_element_list(all, ID, INDEX, order, hidden) {
+	let hidden_ids = words(hidden) ?? empty_array
+	let visible_ids = words(order) ?? all.map(e => e[ID])
+	let id_map = {}
+	for (let e of all)
+		id_map[e[ID]] = e
+	let visible = []
+	for (let id of visible_ids) {
+		let e = id_map[id]
+		if (!e)
+			continue
+		// mark id as processed to skip duplicates and be left with new elements.
+		id_map[id] = null
+		if (hidden_ids.includes(id))
+			continue
+		visible.push(e)
+	}
+	// add new elements not present in the order list in natural order.
+	for (let e of all)
+		if (id_map[e[ID]])
+			visible.push(e)
+	let by_id = {}
+	let i = 0
+	for (let e of visible) {
+		e[INDEX] = i++
+		by_id[e[ID]] = e
+	}
+	visible['by_'+ID] = by_id
+	return visible
+}
+
 ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	let s = ui.state(id)
@@ -5259,11 +5294,14 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 	tab_order = s.get('tab_order') ?? tab_order
 	hidden_tabs = s.get('hidden_tabs') ?? hidden_tabs
 
-	let tabs = []
-	for (let tab of all_tabs) {
-		tab.index = tabs.length
-		tabs.push(tab)
+	// compute visible tabs
+	let tabs = s.get('tabs')
+	if (!tabs) {
+		tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
+		s.set('tabs', tabs)
 	}
+
+	selected_tab = tabs.by_id[selected_tab]
 
 	let gap = 0
 	ui.stack(id)
@@ -5272,7 +5310,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 	let drag_state, dx, dy, cs
 	let drag_tab_id, drag_tab
 	for (drag_tab of tabs) {
-		drag_tab_id = id+'.tab.'+drag_tab.id
+		drag_tab_id = id+'.tab'+drag_tab.index
 		;[drag_state, dx, dy, cs] = ui.drag(drag_tab_id)
 		if (drag_state) break
 	}
@@ -5286,7 +5324,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 		cs.set('mover', mover)
 		mover.movable_element_size = function(vi) {
 			let tab = tabs[vi]
-			let tab_id = id+'.tab.'+drag_tab.id
+			let tab_id = id+'.tab'+drag_tab.id
 			let w = ui.state(tab_id).get('w')
 			return w + gap
 		}
@@ -5297,7 +5335,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 	} else if (mover && drag_state == 'dragging') {
 		mover.move_element_update_dx(dx)
 	} else if (mover && drag_state == 'drop') {
-		array_move(tab_order, drag_tab_i, 1, mover.over_i, true)
+		array_move(tab_order, tabs.indexOf(drag_tab), 1, mover.over_i, true)
 		s.set('tab_order', tab_order)
 		mover = null
 	}
@@ -5308,13 +5346,12 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 		let tab_id = id+'.tab'+tab_i
 		let over_gap = mover && tab_i == mover.over_i
 		if (over_gap) {
-			let tab_i = drag_tab_i
 			let tab_id = drag_tab_id
 			let w = ui.state(tab_id).get('w')
 			ui.stack('', 0, null, null, w)
 			ui.end_stack()
 		}
-		let moving = mover && tab_i == drag_tab_i
+		let moving = mover && tab == drag_tab
 		if (moving) {
 			ui.popup('', 'overlay', null, 'it', '[')
 			ui.ml(max(0, mover.x0 + dx))
