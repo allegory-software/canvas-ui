@@ -2,7 +2,7 @@ BUGS UI
 ------------------------------------------------------------------------------
 - force-scroll with popups double-translate bug
 - text hit clip
--
+- hit through scrollbox padding (fix: prevent hitting outside clip rect)
 
 TODO GRID
 ------------------------------------------------------------------------------

@@ -155,12 +155,16 @@ SPACINGS (MARGINS & PADDINGS)
 	p[adding_]r[ight]   (p)
 	p[adding_]t[op]     (p)
 	p[adding_]b[ottom]  (p)
+	p[adding_]h[oriz]   (p)
+	p[adding_]v[ert]    (p)
 
 	m[argin]            ([mx1], [my1], [mx2], [my2])
 	m[argin_]l[eft]     (m)
 	m[argin_]r[ight]    (m)
 	m[argin_]t[op]      (m)
 	m[argin_]b[ottom]   (m)
+	m[argin_]h[oriz]    (m)
+	m[argin_]v[ert]     (m)
 
 COMMAND RECORDING
 
@@ -301,8 +305,6 @@ TODO
 	tooltip         text  target  align  side  kind  icon_visible
 	toaster         side  align  timeout  spacing
 	checklist
-	menu
-	tabs            tabs_side  auto_focus  selected_item_id
 	action-band
 	dialog
 	slides
@@ -2188,6 +2190,8 @@ ui.padding_left   = function(p) { px1 = p }; ui.pl = ui.padding_left
 ui.padding_right  = function(p) { px2 = p }; ui.pr = ui.padding_right
 ui.padding_top    = function(p) { py1 = p }; ui.pt = ui.padding_top
 ui.padding_bottom = function(p) { py2 = p }; ui.pb = ui.padding_bottom
+ui.padding_horiz  = function(p) { px1 = p; px2 = p }; ui.ph = ui.padding_horiz
+ui.padding_vert   = function(p) { py1 = p; py2 = p }; ui.pv = ui.padding_vert
 
 ui.margin = function(_mx1, _my1, _mx2, _my2) {
 	mx1 = _mx1 ?? 0
@@ -2200,6 +2204,8 @@ ui.margin_left   = function(m) { mx1 = m }; ui.ml = ui.margin_left
 ui.margin_right  = function(m) { mx2 = m }; ui.mr = ui.margin_right
 ui.margin_top    = function(m) { my1 = m }; ui.mt = ui.margin_top
 ui.margin_bottom = function(m) { my2 = m }; ui.mb = ui.margin_bottom
+ui.margin_horiz  = function(p) { mx1 = p; mx2 = p }; ui.mh = ui.margin_horiz
+ui.margin_vert   = function(p) { my1 = p; my2 = p }; ui.mv = ui.margin_vert
 
 function reset_spacings() {
 	px1 = 0
@@ -3220,34 +3226,38 @@ function get_popup_target_rect(a, i) {
 
 	} else {
 
-		tx1 = a[ct_i+0] - a[ct_i+PX1+0]
-		ty1 = a[ct_i+1] - a[ct_i+PX1+1]
-		tx2 = a[ct_i+2] + tx1 + a[ct_i+PX2+0]
-		ty2 = a[ct_i+3] + ty1 + a[ct_i+PX2+1]
+		let px1 = a[ct_i+PX1+0]
+		let py1 = a[ct_i+PX1+1]
+		let px2 = a[ct_i+PX2+0]
+		let py2 = a[ct_i+PX2+1]
+
+		tx1 = a[ct_i+0] - px1
+		ty1 = a[ct_i+1] - py1
+		tx2 = a[ct_i+2] + tx1 + px1 + px2
+		ty2 = a[ct_i+3] + ty1 + py1 + py2
 
 	}
 
 }
 
 let x, y
-
 function position_popup(w, h, side, align) {
 
 	let tw = tx2 - tx1
 	let th = ty2 - ty1
 
 	if (side == POPUP_SIDE_RIGHT) {
-		x = tx2 - 1
+		x = tx2
 		y = ty1
 	} else if (side == POPUP_SIDE_LEFT) {
-		x = tx1 - w + 1
+		x = tx1 - w
 		y = ty1
 	} else if (side == POPUP_SIDE_TOP) {
 		x = tx1
-		y = ty1 - h + 1
+		y = ty1 - h
 	} else if (side == POPUP_SIDE_BOTTOM) {
 		x = tx1
-		y = ty2 - 1
+		y = ty2
 	} else if (side == POPUP_SIDE_INNER_RIGHT) {
 		x = tx2 - w
 		y = ty1
@@ -3290,8 +3300,8 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 
 	let spx   = spacings(a, i, 0)
 	let spy   = spacings(a, i, 1)
-	let w     = a[i+2] + spx
-	let h     = a[i+3] + spy
+	let w     = a[i+2+0] + spx
+	let h     = a[i+2+1] + spy
 	let side  = a[i+POPUP_SIDE]
 	let align = a[i+POPUP_ALIGN]
 	let flags = a[i+POPUP_FLAGS]
@@ -3450,11 +3460,11 @@ draw[CMD_BB_TOOLTIP] = function(a, i) {
 	let w   = a[ct_i+2] + px1 + px2
 	let h   = a[ct_i+3] + py1 + py2
 
-	let bg_color           = a[i+2]
-	let bg_color_state     = a[i+3]
-	let border_color       = a[i+4]
-	let border_color_state = a[i+5]
-	let r                  = a[i+6] / 128 // border radius
+	let bg_color           = a[i+1]
+	let bg_color_state     = a[i+2]
+	let border_color       = a[i+3]
+	let border_color_state = a[i+4]
+	let r                  = a[i+5] / 128 // border radius
 
 	let side  = a[ct_i+POPUP_SIDE_REAL]
 	let align = a[ct_i+POPUP_ALIGN]
@@ -3570,7 +3580,7 @@ ui.shadow_style = function(theme, name, x, y, blur, spread, inset, h, s, L, a) {
 // ----------------------------------------------------------------------------------
 ui.shadow_style('light', 'tooltip' ,  2,  2,  9, 0, false, 0, 0, 0, 0x44 / 0xff)
 ui.shadow_style('light', 'toolbox' ,  1,  1,  4, 0, false, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('light', 'menu'    ,  2,  2,  2, 0, false, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_style('light', 'menu'    ,  0,  5, 16, 0, false, 0, 0, 0, 0x33 / 0xff)
 ui.shadow_style('light', 'button'  ,  0,  0,  2, 0, false, 0, 0, 0, 0x11 / 0xff)
 ui.shadow_style('light', 'thumb'   ,  0,  0,  2, 0, false, 0, 0, 0, 0xbb / 0xff)
 ui.shadow_style('light', 'modal'   ,  2,  5, 10, 0, false, 0, 0, 0, 0x88 / 0xff)
@@ -3578,7 +3588,7 @@ ui.shadow_style('light', 'picker'  ,  0,  5, 10, 1, false, 0, 0, 0, 0x22 / 0xff)
 
 ui.shadow_style('dark', 'tooltip' ,  2,  2,  9, 0, false, 0, 0, 0, 0x44 / 0xff)
 ui.shadow_style('dark', 'toolbox' ,  1,  1,  4, 0, false, 0, 0, 0, 0xaa / 0xff)
-ui.shadow_style('dark', 'menu'    ,  2,  2,  2, 0, false, 0, 0, 0, 0xaa / 0xff)
+ui.shadow_style('dark', 'menu'    ,  1,  1,  9, 0, false, 0, 0, 0, 0xff / 0xff)
 ui.shadow_style('dark', 'button'  ,  0,  0,  2, 0, false, 0, 0, 0, 0xff / 0xff)
 ui.shadow_style('dark', 'thumb'   ,  1,  1,  2, 0, false, 0, 0, 0, 0xaa / 0xff)
 ui.shadow_style('dark', 'modal'   ,  2,  5, 10, 0, false, 0, 0, 0, 0x88 / 0xff)
@@ -3713,12 +3723,12 @@ if (!c2d.roundRect) { // Firefox doesn't have it
 
 function bg_path(cx, x1, y1, x2, y2, sides, r) {
 	cx.beginPath()
-	if (sides == BORDER_SIDE_ALL)
+	if (sides == BORDER_SIDE_ALL) {
 		if (!r)
 			cx.rect(x1, y1, x2-x1, y2-y1)
 		else
 			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
-	else {
+	} else {
 		let rlb = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_B) && r || 0
 		let rlt = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_T) && r || 0
 		let rrt = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_T) && r || 0
@@ -4977,7 +4987,8 @@ ui.button_bb = function(style, state) {
 	if (!style) // false, 0, '' means no border
 		return
 	ui.shadow('button')
-	ui.bb(style, state, 1, 'intense', state, ui.sp05())
+	let radius = ui.sp05()
+	ui.bb(style, state, 1, 'intense', state, radius)
 }
 
 ui.button_text = function(s, state, min_w, min_h) {
@@ -5298,6 +5309,8 @@ function visible_element_list(all, ID, INDEX, order, hidden) {
 	return visible
 }
 
+// TODO: tabs_side  auto_focus
+
 ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	let s = ui.state(id)
@@ -5313,7 +5326,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	selected_tab = tabs.by_id[selected_tab]
 
-	ui.pr(100)
+	ui.pr(ui.em(2))
 	ui.sb(id, 1, 'auto', 'contain')
 	ui.h(0, 0, 'l', 't')
 
@@ -5398,6 +5411,63 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 	ui.end_sb()
 
 	return selected_tab
+}
+
+// menu ----------------------------------------------------------------------
+
+ui.menu = function(id, items, side, align) {
+
+		let open_items = ui.state(id, 'open_items')
+		if (!open_items) {
+			open_items = []
+			ui.state(id).set('open_items', open_items)
+		}
+
+		function menu(level, items, side, align) {
+			let radius = 0 // ui.sp()
+			ui.popup(id, 'tooltip', null, side, align)
+			ui.shadow('menu')
+			ui.bb('bg1', null, 1, 'light', null, radius)
+			ui.p(1)
+			ui.v()
+			let i = 0
+			for (let item of items) {
+				let first = i == 0
+				let last = i == items.length-1
+				let item_id = id+'.item.'+item.id
+				let hover = hit(item_id)
+				if (hover && item.items?.length) {
+					open_items[level] = item.id
+					open_items.length = level+1
+				}
+				ui.stack(item_id)
+					ui.ph(ui.sp4())
+					ui.pt(ui.sp())
+					ui.pb(ui.sp() + (first ? 1 : 0))
+					ui.bb('bg1', hover ? 'hover' : null,
+						first ? 'ltr' : last ? 'lbr' : '', null, null, radius)
+					ui.border(last ? '' : 'b', 'light')
+					ui.h(1, ui.sp2())
+						ui.text('', item.label, 1)
+						if (item.items?.length) {
+							ui.stack('', 0)
+								ui.font('fas')
+								ui.color('label')
+								ui.text('', '\uf0da')
+							ui.end_stack()
+							if (hover || open_items[level] == item.id) {
+								ui.m(-ui.sp(), -1)
+								menu(level + 1, item.items, 'r', '[')
+							}
+						}
+					ui.end_h()
+				ui.end_stack()
+				i++
+			}
+			ui.end_v()
+			ui.end_popup()
+		}
+		menu(0, items, side, align)
 }
 
 // polyline ------------------------------------------------------------------
