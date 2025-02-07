@@ -5313,6 +5313,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 
 	selected_tab = tabs.by_id[selected_tab]
 
+	ui.pr(100)
 	ui.sb(id, 1, 'auto', 'contain')
 	ui.h(0, 0, 'l', 't')
 
@@ -5373,7 +5374,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 			let sel = tab == selected_tab
 			let hover = drag_state == 'hover' && drag_tab == tab || moving
 			ui.bb('bg1', hover ? 'hover' : null)
-			ui.p(ui.sp2(), ui.sp1())
+			ui.p(ui.sp2())
 			ui.text('', tab.label)
 			if (sel) {
 				ui.stack('', 1, 's', 'b', null, 2)
