@@ -234,7 +234,7 @@ CONTAINERS
 	popup           (id, layer_name, target_i, side, align, min_w, min_h, flags)
 	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
 	splitter        ()
-	toolbox         (id, title, align, x0, y0, target_i)
+	toolbox         (id, title, align, valign, x0, y0, target_i)
 	frame           (id, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args)
 	end             ()
 
@@ -349,7 +349,7 @@ const {
 	assert, warn, pr, debug, trace,
 	floor, ceil, round, max, min, abs, clamp, logbase, lerp,
 	dec, num, str, json, json_arg,
-	set, map, array,
+	set, map, array, attr,
 	assign, entries, insert, map_assign, remove_value,
 	noop, return_true, do_after, do_before,
 	runafter,
@@ -1568,7 +1568,7 @@ let layer_freelist = obj_freelist()
 let layer_map = {} // {name->layer}
 let layer_arr = [] // [layer1,...]
 
-let layers = [] // [layer1,...]
+let layers = [] // [layer1,...] in paint order
 
 function ui_layer(name, index) {
 	let layer = layer_map[name]
@@ -1609,19 +1609,15 @@ function begin_layer(layer, i) {
 	layer_i = layer.i
 	// NOTE: adding the cmd on the same layer will just draw it twice but badly
 	// since it won't even have the right context!
-	if (layer_i != layer_i0)
+	if (layer_i != layer_i0) {
 		layer.indexes.push(rec_i, i)
+		return true
+	}
 }
 
 function end_layer() {
 	layer_i = layer_stack.pop()
 }
-
-ui.begin_layer = function(name) {
-	begin_layer(ui_layer(name), a.length+2)
-}
-
-ui.end_layer = end_layer
 
 function layer_stack_check() {
 	if (layer_stack.length) {
@@ -3162,8 +3158,7 @@ ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) 
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	begin_layer(layer, i)
-	if (layer.i != layer_i)
+	if (begin_layer(layer, i))
 		force_scope_vars()
 	return i
 }
@@ -3339,14 +3334,15 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 	// if nothing else works, adjust the offset to fit the screen.
 	if (flags & POPUP_FIT_CONSTRAIN) {
 		let d = screen_margin
-		let ox2 = max(0, x + w - (bw - d))
 		let ox1 = min(0, x - d)
-		let oy2 = max(0, y + h - (bh - d))
 		let oy1 = min(0, y - d)
+		let ox2 = max(0, x + w - (bw - d))
+		let oy2 = max(0, y + h - (bh - d))
 		x -= ox1 ? ox1 : ox2
 		y -= oy1 ? oy1 : oy2
 	}
 
+	// TODO: constrain should include these too (see toolbox constrain not working)!
 	x += a[i+MX1+0] + a[i+PX1+0]
 	y += a[i+MX1+1] + a[i+PX1+1]
 
@@ -4522,7 +4518,7 @@ frame.translate = function(a, i, dx, dy) {
 		a[i+FRAME_REC_I] = rec_i
 		let layer_i0 = layer_i
 		layer_i = a[i+FRAME_LAYER_I]
-		let layer_ct_i = ui.stack()
+		ui.stack()
 			force_scope_vars()
 			on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_spacings()
@@ -4855,7 +4851,7 @@ function draw_node(id, t_t, t, depth) {
 }
 function template_editor(id, t, ch_t) {
 
-	ui.toolbox(id+'.tree_toolbox', 'Tree', ']', 100, 100)
+	ui.toolbox(id+'.tree_toolbox', 'Tree', ']', 't', 100, 100)
 		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.p(10)
 			ui.v(1, 0, 's', 't')
@@ -4864,7 +4860,7 @@ function template_editor(id, t, ch_t) {
 		ui.end_scrollbox()
 	ui.end_toolbox()
 
-	ui.toolbox(id+'.prop_toolbox', 'Props', ']', 100, 400)
+	ui.toolbox(id+'.prop_toolbox', 'Props', ']', 't', 100, 400)
 		ui.scrollbox(id+'.prop_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.v(1, 0, 's', 't')
 			let defs = tprops[ch_t.t]
@@ -5436,20 +5432,28 @@ ui.menu = function(id, items, side, align) {
 				let last = i == items.length-1
 				let item_id = id+'.item.'+item.id
 				let hover = hit(item_id)
-				if (hover && item.items?.length) {
-					open_items[level] = item.id
-					open_items.length = level+1
-				}
+				if (hover)
+					if (item.items?.length) {
+						open_items[level] = item.id
+						open_items.length = level+1
+					} else {
+						open_items.length = level
+					}
+				let open = open_items[level] == item.id
 				ui.stack(item_id)
-					ui.ph(ui.sp4())
-					ui.pt(ui.sp())
-					ui.pb(ui.sp() + (first ? 1 : 0))
-					ui.bb('bg1', hover ? 'hover' : null,
+					ui.pl(ui.rem(3))
+					ui.pr(ui.rem(1))
+					ui.pt(ui.sp2())
+					ui.pb(ui.sp2() + (first ? 1 : 0))
+					ui.bb(
+						hover || open ? 'item' : 'bg1',
+						hover || open ? 'focused item-selected item-focused' : null,
 						first ? 'ltr' : last ? 'lbr' : '', null, null, radius)
 					ui.border(last ? '' : 'b', 'light')
 					ui.h(1, ui.sp2())
 						ui.text('', item.label, 1)
 						if (item.items?.length) {
+							ui.pl(ui.sp2())
 							ui.stack('', 0)
 								ui.font('fas')
 								ui.color('label')
@@ -5667,18 +5671,22 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 
 // toolbox widget ------------------------------------------------------------
 
-ui.toolbox = function(id, title, align, x0, y0, target_i) {
+ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 
 	keepalive(id)
-	let align_start = parse_align(align || '[') == ALIGN_START
-	let [dstate, dx, dy] = ui.drag(id+'.title')
+	let  align_start =  parse_align( align || '[') == ALIGN_START
+	let valign_start = parse_valign(valign || 't') == ALIGN_START
+	let [dstate, dx, dy, cs] = ui.drag(id+'.title')
 	let s = ui.state(id)
-	let mx1 =  align_start ? (s.get('mx1') ?? x0) + dx : 0
-	let mx2 = !align_start ? (s.get('mx2') ?? x0) - dx : 0
-	let my1 =  align_start ? (s.get('my1') ?? y0) + dy : 0
-	let my2 = !align_start ? (s.get('my2') ?? y0) - dy : 0
+	let mx1 =   align_start ? (s.get('mx1') ?? x0) + dx : 0
+	let mx2 =  !align_start ? (s.get('mx2') ?? x0) - dx : 0
+	let my1 =  valign_start ? (s.get('my1') ?? y0) + dy : 0
+	let my2 = !valign_start ? (s.get('my2') ?? y0) - dy : 0
 	let min_w = s.get('min_w')
 	let min_h = s.get('min_h')
+	if (dstate == 'drag') {
+		ui.state('<toolboxes>').set('to_top', id)
+	}
 	if (dstate == 'drop') {
 		s.set('mx1', mx1)
 		s.set('mx2', mx2)
@@ -5687,37 +5695,66 @@ ui.toolbox = function(id, title, align, x0, y0, target_i) {
 	}
 
 	keepalive(id)
-	let ts = ui.state('toolboxes')
-	let layers = ts.get('layers')
-	if (!layers) {
-		layers = []
-		ts.set('layers', layers)
-	}
-
-	// let z_index = s.get('z_index')
-	// let layer = layer_above('toolbox', z_index)
-
+	ui.record()
 	ui.m(mx1, my1, mx2, my2)
-	ui.popup(id+'.popup', 'window', target_i ?? 'screen', 'it', align, min_w, min_h, 'constrain')
-		ui.p(1)
-		ui.bb('bg1', null, 1, 'intense', null, ui.sp075())
-		ui.stack()
-			scope_set('toolbox_id', id)
-			ui.v() // title / body split
-				ui.h(0) // title bar
-					ui.stack(id+'.title')
-						ui.bb('bg3', null, 0, null, null, ui.sp075() * 0.75)
-						ui.p(ui.sp2(), ui.sp())
-						ui.text('', title, 0, 'l')
-					ui.end_stack()
-				ui.end_h()
+	ui.stack()
+	//ui.popup(id+'.popup', 'window', target_i ?? 'screen',
+	//	valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain'
+	//)
+	//	ui.p(1)
+	//	ui.bb('bg1', null, 1, 'intense', null, ui.sp075())
+	//	ui.stack()
+	//		scope_set('toolbox_id', id)
+	//		ui.v() // title / body split
+	//			ui.h(0) // title bar
+	//				ui.stack(id+'.title')
+	//					ui.bb('bg3', null, 0, null, null, ui.sp075() * 0.75)
+	//					ui.p(ui.sp2(), ui.sp())
+	//					ui.text('', title, 0, 'l')
+	//				ui.end_stack()
+	//			ui.end_h()
 }
 
 ui.end_toolbox = function() {
-			ui.end_v()
-			ui.resizer(scope_get('toolbox_id'))
-		ui.end_stack()
-	ui.end_popup()
+	//let id = scope_get('toolbox_id')
+	//		ui.end_v()
+	//		ui.resizer(id)
+	//	ui.end_stack()
+	//ui.end_popup()
+	ui.end_stack()
+	let rec = ui.end_record()
+	free_rec(rec)
+	//ui.state('<toolboxes>', 'records_by_id').set(id, rec)
+}
+
+ui.begin_toolboxes = function() {
+	return
+	attr(ui.state('<toolboxes>'), 'records_by_id', map).clear()
+}
+
+ui.end_toolboxes = function() {
+	return
+	let recs = ui.state('<toolboxes>', 'records_by_id')
+	if (!recs.size) return
+	let order = attr(ui.state('<toolboxes>'), 'order', array)
+	let to_top_id = ui.state('<toolboxes>', 'to_top')
+	if (0)
+	if (to_top_id || !order.length) {
+		for (let id of order) // remove toolboxes that have been removed
+			if (!recs.has(id))
+				remove_value(order, id)
+		for (let [id, rec] of recs) // add toolboxes added this frame
+			if (!order.includes(id))
+				order.push(id)
+		if (to_top_id) {
+			let src_i = order.indexOf(to_top_id)
+			let dst_i = order.length-1
+			if (src_i != dst_i)
+				array_move(order, to_top_id, src_i, dst_i)
+		}
+	}
+	//for (let id of order)
+	//	ui.play_record(recs.get(id))
 }
 
 // all-sides resizer widget --------------------------------------------------

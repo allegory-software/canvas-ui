@@ -259,6 +259,7 @@ tabs1 = [
 demos.tabs = `
 ui.m(ui.em(5))
 ui.stack('', 1, 's', 'c')
+	//ui.p(1)
 	ui.v()
 		ui.stack()
 			ui.bb('bg1')
@@ -268,7 +269,7 @@ ui.stack('', 1, 's', 'c')
 			ui.bb('bg0')
 		ui.end_stack()
 	ui.end_v()
-	ui.border(1, 'intense')
+	//ui.border(1, 'intense')
 ui.end_stack()
 `
 
@@ -738,6 +739,7 @@ for (let align of ['c', '[', ']']) {
 			)
 			ui.popup('tt'+j+i, 'tooltip', ct_i, side, align, 100, 50, 'change_side constrain')
 				ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+				ui.m(10)
 				ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 			ui.end_popup()
 		ui.end_popup()
@@ -805,18 +807,20 @@ ui.end_v()
 `
 
 demos.toolbox = `
-ui.toolbox('tb1', "I am left-aligned", '[', 100, 100)
+ui.begin_toolboxes()
+ui.toolbox('tb1', "I am left-aligned", '[', 't', 100, 100)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
-ui.toolbox('tb2', "I am also left-aligned", '[', 150, 150)
+ui.toolbox('tb2', "I am also left-aligned", '[', 't', 150, 150)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
-ui.toolbox('tb3', "I am right-aligned", ']', 100, 100)
+ui.toolbox('tb3', "I am right-aligned", ']', 't', 100, 100)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
+ui.end_toolboxes()
 `
 
 let test_template = {
