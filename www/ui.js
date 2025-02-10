@@ -214,6 +214,7 @@ BOX WIDGET DEFINITIONS
 	force_scroll    (a, i, sx, sy)  use in translate callback to force-scroll another widget
 
 	ct_i            () -> ct_i    get container index in a; use in widget creation and in measure callback
+	last_i          () -> last_i  get the index of the last cmd in a
 
 	popup_target_rect (a, i)  use in draw callback to find a popup's target rect
 
@@ -1398,6 +1399,10 @@ ui.ct_i = function() {
 	return assert(ct_stack.at(-1), 'no container')
 }
 
+ui.last_i = function() {
+	return a[a.length-1]
+}
+
 function ct_stack_check() {
 	if (ct_stack.length) {
 		for (let i of ct_stack)
@@ -1410,7 +1415,7 @@ function ct_stack_check() {
 
 // Format of a command recording array:
 //
-//  next_i, cmd, arg1..n, prev_i, next_i, cmd, arg1..n, ...
+//  next_i, cmd, arg1..n, prev_i; next_i, cmd, arg1..n, prev_i; ...
 //    |            ^        |                    ^
 //    |            |        |                    |
 //    |            +--------+                    |
