@@ -168,9 +168,9 @@ SPACINGS (MARGINS & PADDINGS)
 
 COMMAND RECORDING
 
-	record          ()
-	end_record      () -> a1
-	play_record     (a1)
+	start_recording ()
+	end_recording   () -> a1
+	play_recording  (a1)
 
 WIDGET DEFINITIONS
 
@@ -1487,7 +1487,7 @@ ui.cmd = ui_cmd
 // index after the last arg.
 let cmd_arg_end_i = (a, i) => a[i-2] - 3
 
-// command recordings --------------------------------------------------------
+// command recording strips --------------------------------------------------
 
 let rec_freelist = array_freelist()
 
@@ -1505,13 +1505,13 @@ function free_rec(a) {
 
 let rec_stack = []
 
-ui.record = function() {
+ui.start_recording = function() {
 	let a1 = rec()
 	rec_stack.push(a)
 	a = a1
 }
 
-ui.end_record = function() {
+ui.end_recording = function() {
 	let a1 = a
 	a = rec_stack.pop()
 	return a1
@@ -1519,7 +1519,7 @@ ui.end_record = function() {
 
 let reindex = []
 
-ui.play_record = function(a1) {
+ui.play_recording = function(a1) {
 
 	// fix all indexes in a1 to fit into their new place in a.
 	let offset = a.length
@@ -1543,6 +1543,8 @@ ui.play_record = function(a1) {
 function rec_stack_check() {
 	assert(!rec_stack.length, 'recordings left unplayed')
 }
+
+// secondary command recordings ----------------------------------------------
 
 let recs = []
 let rec_i
@@ -1650,7 +1652,7 @@ ui.is_flex_child = is_flex_child
 // measuring phase (per-axis) ------------------------------------------------
 
 // walk the element tree bottom-up and call the measure function for each
-// element that has it. non-recursive, uses ct_stack and containers'
+// element that has it., uses ct_stack for recursion and containers'
 // measure_end callback to do the work.
 
 function measure_rec(a, axis) {
@@ -2096,6 +2098,26 @@ ui.widget = function(cmd_name, t, is_ct) {
 		return _cmd
 	}
 }
+
+// layer command -------------------------------------------------------------
+
+let CMD_BEGIN_LAYER = cmd('begin_layer')
+ui.begin_layer(layer) {
+	ui_cmd(CMD_BEGIN_LAYER, layer, ui.last_i())
+}
+
+// doesn't have to happen on translate, any event before rendering will do.
+translate[CMD_BEGIN_LAYER] = function(a, i) {
+	begin_layer(a[i+0], a[i+1])
+}
+
+let CMD_END_LAYER = cmd('begin_layer')
+ui.end_layer = function() {
+	ui_cmd(CMD_END_LAYER)
+}
+
+// doesn't have to happen on translate, any event before rendering will do.
+translate[CMD_END_LAYER] = end_layer
 
 // box widgets ---------------------------------------------------------------
 
@@ -5699,8 +5721,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		s.set('my2', my2)
 	}
 
-	keepalive(id)
-	ui.record()
+	ui.start_recording()
 	ui.m(mx1, my1, mx2, my2)
 	ui.stack()
 	//ui.popup(id+'.popup', 'window', target_i ?? 'screen',
@@ -5727,7 +5748,7 @@ ui.end_toolbox = function() {
 	//	ui.end_stack()
 	//ui.end_popup()
 	ui.end_stack()
-	let rec = ui.end_record()
+	let rec = ui.end_recording()
 	free_rec(rec)
 	//ui.state('<toolboxes>', 'records_by_id').set(id, rec)
 }
@@ -5759,7 +5780,7 @@ ui.end_toolboxes = function() {
 		}
 	}
 	//for (let id of order)
-	//	ui.play_record(recs.get(id))
+	//	ui.play_recording(recs.get(id))
 }
 
 // all-sides resizer widget --------------------------------------------------
@@ -6828,24 +6849,24 @@ ui.color_picker = function(id, hue, sat, lum) {
 	lum = lum ?? .5
 	ui.v(1, ui.sp())
 		ui.h(1, ui.sp05())
-			ui.record()
+			ui.start_recording()
 				ui.stack('', 0, null, null, ui.em(1))
 				 	ui.hue_bar(id+'.hb', hue)
 				ui.end_stack()
-			let hue_bar = ui.end_record()
-			ui.record()
+			let hue_bar = ui.end_recording()
+			ui.start_recording()
 				ui.stack()
 					hue = ui.state(id+'.hb', 'hue')
 					ui.sat_lum_square(id+'.sl', hue, sat, lum)
 				ui.end_stack()
-			let sl_square = ui.end_record()
+			let sl_square = ui.end_recording()
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
 			ui.aspect_box(1, 1, 's', 't')
 				ui.bb(':'+hsl(hue, sat, lum))
 			ui.end_aspect_box()
-			ui.play_record(sl_square)
-			ui.play_record(hue_bar)
+			ui.play_recording(sl_square)
+			ui.play_recording(hue_bar)
 		ui.end_h()
 		ui.h(0, 0, 's')
 			ui.label(id+'.input_hsl', 'HSL', .5)
