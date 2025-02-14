@@ -1590,8 +1590,11 @@ function ui_layer(name, index) {
 ui.layer = ui_layer
 
 function clear_layers() {
-	for (let layer of layers)
+	for (let layer of layer_arr) {
 		layer.indexes.length = 0
+		if (layer.layers)
+			layer.layers.length = 0
+	}
 }
 
 const layer_base =
@@ -1604,31 +1607,36 @@ ui_layer('open'   , 4) // dropdowns, must cover tooltips
 ui_layer('handle' , 5) // dragged object
 
 let layer_stack = [] // [layer1_i, ...]
-let layer_i // current layer = layer_arr[layer_i]
+let current_layer
+
+function sub_layer(z_index, parent_layer) {
+	parent_layer ??= current_layer
+	let layers = attr(parent_layer, 'layers', array)
+	//layers[z_index] =
+}
 
 function begin_layer(layer) {
-	layer_stack.push(layer_i)
-	let layer_i0 = layer_i
-	layer_i = layer.i
+	layer_stack.push(current_layer)
 	// NOTE: adding the cmd on the same layer will just draw it twice but badly
 	// since it won't even have the right context!
 	// TODO: because of the condition below, start_recording on a layer and
 	// play_recording on another layer is not supported: either support it
 	// or prevent it!
-	if (layer_i != layer_i0) {
-		set_layer(layer_i)
-		return true
-	}
+	if (layer == current_layer)
+		return
+	current_layer = layer
+	set_layer(layer)
+	return true
 }
 
 function end_layer() {
-	layer_i = layer_stack.pop()
+	current_layer = layer_stack.pop()
 }
 
 function layer_stack_check() {
 	if (layer_stack.length) {
-		for (let layer_i of layer_stack)
-			debug('layer', layer_arr[layer_i].name, 'not closed')
+		for (let layer of layer_stack)
+			debug('layer', layer.name, 'not closed')
 		assert(false)
 	}
 }
@@ -1721,13 +1729,9 @@ function draw_cmd(a, i, recs) {
 	}
 }
 
-function draw_frame(recs, layers) {
-	let theme_stack_length0 = theme_stack.length
-	theme_stack.push(theme)
-	theme = themes[ui.default_theme]
-
+function draw_layers(layers, recs) {
 	for (let layer of layers) {
-		/*global*/ layer_i = layer.i
+		/*global*/ current_layer = layer
 		let indexes = layer.indexes
 		for (let k = 0, n = indexes.length; k < n; k += 2) {
 			reset_canvas()
@@ -1736,8 +1740,18 @@ function draw_frame(recs, layers) {
 			let a = recs[rec_i]
 			draw_cmd(a, i, recs)
 		}
-		layer_i = null
+		if (layer.layers?.length)
+			draw_layers(layer.layers, recs)
 	}
+}
+
+function draw_frame(recs, layers) {
+	let theme_stack_length0 = theme_stack.length
+	theme_stack.push(theme)
+	theme = themes[ui.default_theme]
+
+	draw_layers(layers, recs)
+	current_layer = null
 
 	theme = theme_stack.pop()
 	assert(theme_stack.length == theme_stack_length0)
@@ -1783,6 +1797,30 @@ ui.nohit = function() {
 	a.nohit_set.add(a.at(-1))
 }
 
+function hit_layers(layers, recs) {
+	// iterate layers in reverse order.
+	for (let j = layers.length-1; j >= 0; j--) {
+		let layer = layers[j]
+		if (layer.layers?.length)
+			if (hit_layers(layer.layers, recs))
+				return true
+		/*global*/ current_layer = layer
+		// iterate layer's cointainers in reverse order.
+		let indexes = layer.indexes
+		for (let k = indexes.length-2; k >= 0; k -= 2) {
+			reset_canvas()
+			let rec_i = indexes[k]
+			let i     = indexes[k+1]
+			let a = recs[rec_i]
+			let hit_f = hittest[a[i-1]]
+			if (!a.nohit_set?.has(i) && hit_f(a, i, recs)) {
+				j = -1
+				return true
+			}
+		}
+	}
+}
+
 function hit_frame(recs, layers) {
 
 	ui.set_cursor()
@@ -1800,25 +1838,8 @@ function hit_frame(recs, layers) {
 	if (ui.mx == null)
 		return
 
-	// iterate layers in reverse order.
-	for (let j = layers.length-1; j >= 0; j--) {
-		let layer = layers[j]
-		/*global*/ layer_i = layer.i
-		// iterate layer's cointainers in reverse order.
-		let indexes = layer.indexes
-		for (let k = indexes.length-2; k >= 0; k -= 2) {
-			reset_canvas()
-			let rec_i = indexes[k]
-			let i     = indexes[k+1]
-			let a = recs[rec_i]
-			let hit_f = hittest[a[i-1]]
-			if (!a.nohit_set?.has(i) && hit_f(a, i, recs)) {
-				j = -1
-				break
-			}
-		}
-	}
-	layer_i = null
+	hit_layers(layers, recs)
+	current_layer = null
 
 }
 
@@ -2083,8 +2104,8 @@ ui.widget = function(cmd_name, t, is_ct) {
 
 // puts prev cmd on a layer.
 let CMD_SET_LAYER = cmd('set_layer')
-function set_layer(layer_i) {
-	ui_cmd(CMD_SET_LAYER, layer_i)
+function set_layer(layer) {
+	ui_cmd(CMD_SET_LAYER, layer.i)
 }
 
 // doesn't have to happen on translate, any event before rendering will do.
@@ -3119,7 +3140,7 @@ const POPUP_SIDE_REAL = S+3
 const CMD_POPUP = cmd_ct('popup')
 
 ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
-	let layer = layer_name ? ui_layer(layer_name) : layer_arr[layer_i]
+	let layer = layer_name ? ui_layer(layer_name) : current_layer
 	let target_i = target == 'screen' ? 0
 		: !target || target == 'container' ? ui.ct_i()
 		: assert(num(target), 'invalid target ', target)
@@ -3347,18 +3368,20 @@ ui.popup_target_rect = function(a, i) {
 
 }
 
-draw[CMD_POPUP] = function(a, i) {
+function on_popup_layer(a, i) {
 	let popup_layer_i = a[i+POPUP_LAYER_I]
-	if (popup_layer_i != layer_i)
+	let popup_layer = layer_arr[popup_layer_i]
+	return popup_layer == current_layer
+}
+
+draw[CMD_POPUP] = function(a, i) {
+	if (!on_popup_layer(a, i))
 		return true
 }
 
 hittest[CMD_POPUP] = function(a, i, recs) {
-
-	let popup_layer_i = a[i+POPUP_LAYER_I]
-	if (popup_layer_i != layer_i)
-		return
-
+	if (!on_popup_layer(a, i))
+		return true
 	if (hit_children(a, i, recs)) {
 		hover(a[i+POPUP_ID])
 		return true
@@ -4468,7 +4491,7 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 		on_measure, on_frame,
 		rel_ct_i,
 		0, // rec_i
-		layer_i,
+		current_layer.i,
 		...args
 	)
 
@@ -4500,14 +4523,15 @@ frame.translate = function(a, i, dx, dy) {
 	let on_frame = a[i+FRAME_ON_FRAME]
 	let a0 = begin_rec()
 		a[i+FRAME_REC_I] = rec_i
-		let layer_i0 = layer_i
-		layer_i = a[i+FRAME_LAYER_I]
+		let prev_layer = current_layer
+		let layer_i = a[i+FRAME_LAYER_I]
+		current_layer = layer_arr[layer_i]
 		ui.stack()
 			force_scope_vars()
 			on_frame(a, i, x, y, w, h, cx, cy, cw, ch)
 			reset_spacings()
 		ui.end_stack()
-		layer_i = layer_i0
+		current_layer = prev_layer
 		frame_end_check()
 	let a1 = end_rec(a0)
 	// pr(json(a1).length)
@@ -4518,15 +4542,16 @@ frame.translate = function(a, i, dx, dy) {
 
 frame.draw = function(a, i, recs) {
 	let layer = layer_arr[layer_i]
-	layer_i = a[i+FRAME_LAYER_I]
+	let layer_i = a[i+FRAME_LAYER_I]
+	/*global*/ current_layer = layer_arr[layer_i]
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	draw_cmd(a1, 2, recs)
 }
 
 frame.hit = function(a, i, recs) {
-	layer_i = a[i+FRAME_LAYER_I]
-	let layer = layer_arr[layer_i]
+	let layer_i = a[i+FRAME_LAYER_I]
+	/*global*/ current_layer = layer_arr[layer_i]
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	let hit_f = hittest[a1[1]]
