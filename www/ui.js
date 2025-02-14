@@ -1569,7 +1569,7 @@ function free_recs() {
 
 let layer_freelist = obj_freelist()
 let layer_map = {} // {name->layer}
-let layer_arr = [] // [layer1,...]
+let layer_arr = [] // [layer1,...] in creation order
 
 let layers = [] // [layer1,...] in paint order
 
@@ -1606,14 +1606,17 @@ ui_layer('handle' , 5) // dragged object
 let layer_stack = [] // [layer1_i, ...]
 let layer_i // current layer = layer_arr[layer_i]
 
-function begin_layer(layer, i) {
+function begin_layer(layer) {
 	layer_stack.push(layer_i)
 	let layer_i0 = layer_i
 	layer_i = layer.i
 	// NOTE: adding the cmd on the same layer will just draw it twice but badly
 	// since it won't even have the right context!
+	// TODO: because of the condition below, start_recording on a layer and
+	// play_recording on another layer is not supported: either support it
+	// or prevent it!
 	if (layer_i != layer_i0) {
-		layer.indexes.push(rec_i, i)
+		set_layer(layer_i)
 		return true
 	}
 }
@@ -1895,7 +1898,7 @@ async function unpack_frame(cb) {
 let measure_req = []
 
 ui.measure = function(dest) {
-	let i = assert(ct_stack.at(-1), 'measure outside container')
+	let i = ui.ct_i()
 	measure_req.push(dest, a, i)
 }
 
@@ -1980,7 +1983,7 @@ function redraw_all() {
 		let i = ui.stack()
 		assert(rec_i == 0)
 		assert(i == 2)
-		begin_layer(layer_base, i)
+		begin_layer(layer_base)
 		ui.main()
 		reset_spacings()
 		ui.end()
@@ -2076,25 +2079,20 @@ ui.widget = function(cmd_name, t, is_ct) {
 	}
 }
 
-// layer command -------------------------------------------------------------
+// set_layer command ---------------------------------------------------------
 
-let CMD_BEGIN_LAYER = cmd('begin_layer')
-ui.begin_layer = function(layer) {
-	ui_cmd(CMD_BEGIN_LAYER, layer, cmd_last_i(a))
+// puts prev cmd on a layer.
+let CMD_SET_LAYER = cmd('set_layer')
+function set_layer(layer_i) {
+	ui_cmd(CMD_SET_LAYER, layer_i)
 }
 
 // doesn't have to happen on translate, any event before rendering will do.
-translate[CMD_BEGIN_LAYER] = function(a, i) {
-	begin_layer(a[i+0], a[i+1])
+translate[CMD_SET_LAYER] = function(a, i) {
+	let layer_i = a[i+0]
+	let layer = layer_arr[layer_i]
+	layer.indexes.push(rec_i, cmd_prev_i(a, i))
 }
-
-let CMD_END_LAYER = cmd('end_layer')
-ui.end_layer = function() {
-	ui_cmd(CMD_END_LAYER)
-}
-
-// doesn't have to happen on translate, any event before rendering will do.
-translate[CMD_END_LAYER] = end_layer
 
 // box widgets ---------------------------------------------------------------
 
@@ -2475,19 +2473,15 @@ function hit_children(a, i, recs) {
 	let next_ext_i = cmd_next_ext_i(a, i)
 	let end_i = cmd_prev_i(a, next_ext_i)
 	i = cmd_prev_i(a, end_i)
-	let found
 	while (i > ct_i) {
 		if (a[i-1] == CMD_END)
 			i = i+a[i+0] // start_i
 		let hit_f = hittest[a[i-1]]
 		if (hit_f && hit_f(a, i, recs)) {
-			found = true
-			break
+			return true
 		}
 		i = cmd_prev_i(a, i)
 	}
-
-	return found
 }
 
 // flex ----------------------------------------------------------------------
@@ -3124,9 +3118,11 @@ const POPUP_SIDE_REAL = S+3
 
 const CMD_POPUP = cmd_ct('popup')
 
-ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) {
+ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
 	let layer = layer_name ? ui_layer(layer_name) : layer_arr[layer_i]
-	target_i = repl(target_i, 'screen', 0) ?? ui.ct_i()
+	let target_i = target == 'screen' ? 0
+		: !target || target == 'container' ? ui.ct_i()
+		: assert(num(target), 'invalid target ', target)
 	side  = popup_parse_side  (side  ?? 't')
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
@@ -3140,11 +3136,12 @@ ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) 
 		layer.i, target_i, flags,
 		side, // side_real
 	)
-	a[i+POPUP_TARGET_I] -= i // make relative
+	if (target_i)
+		a[i+POPUP_TARGET_I] -= i // make relative
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	if (begin_layer(layer, i))
+	if (begin_layer(layer))
 		force_scope_vars()
 	return i
 }
@@ -3362,7 +3359,10 @@ hittest[CMD_POPUP] = function(a, i, recs) {
 	if (popup_layer_i != layer_i)
 		return
 
-	return hit_children(a, i, recs)
+	if (hit_children(a, i, recs)) {
+		hover(a[i+POPUP_ID])
+		return true
+	}
 }
 
 // tooltip background & border -----------------------------------------------
@@ -3762,6 +3762,17 @@ draw[CMD_BB] = function(a, i) {
 		cx.lineCap = 'butt'
 		if (border_dash)
 			cx.setLineDash(empty_array)
+	}
+}
+
+hittest[CMD_BB] = function(a, i) {
+	let bg_color = a[i+1]
+	if (!bg_color)
+		return
+	let ct_i = i+a[i+BB_CT_I]
+	if (hit_box(a, ct_i)) {
+		hit_template(a, ct_i)
+		return true
 	}
 }
 
@@ -4638,7 +4649,7 @@ targs.text  = function(t) { return [t.id, t.s, t.align, t.valign, t.fr] }
 targs.h     = function(t) { return [t.fr, t.gap, t.align, t.valign, t.min_w, t.min_h] }
 targs.v     = targs.h
 targs.stack = function(t) { return [t.id, t.fr, t.align, t.valign, t.min_w, t.min_h] }
-targs.bb    = function(t) { return [t.id, t.bg_color, t.sides, t.border_color, t.border_radius] }
+targs.bb    = function(t) { return [t.bg_color, t.sides, t.border_color, t.border_radius] }
 
 tprops.text = {
 	id     : {type: 'id'  , },
@@ -4668,10 +4679,8 @@ tprops.stack = {
 }
 
 tprops.bb = {
-	id            : {type: 'id'   , },
 	bg_color      : {type: 'color', },
 	sides         : {type: 'enum' , enum_values: 't r b l tb rl tr rb lt bl -l -b -r -t all', default: 'all'},
-	bg_color      : {type: 'color', },
 	border_color  : {type: 'color', },
 	border_radius : {type: 'size' , default: 0},
 }
@@ -4746,8 +4755,6 @@ ui.template = function(id, t, ...stack_args) {
 	let ch_t = selected_template_node_t
 	let ch_i = ch_t && ch_t.i
 	let ct_i = ch_i
-	if (a[ct_i-1] == CMD_BB)
-		ct_i = ct_i + a[ct_i+BB_CT_I]
 	if (t == selected_template_root_t) {
 		template_drag_point(id, ch_t, ct_i, 'l', '[')
 		template_drag_point(id, ch_t, ct_i, 'l', 'c')
@@ -5649,7 +5656,9 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	keepalive(id)
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
-	let [dstate, dx, dy, cs] = ui.drag(id+'.title')
+	if (hit(id) && ui.click)
+		ui.state('<toolboxes>').set('to_top', id)
+	let [dstate, dx, dy] = ui.drag(id+'.title')
 	let s = ui.state(id)
 	let mx1 =   align_start ? (s.get('mx1') ?? x0) + dx : 0
 	let mx2 =  !align_start ? (s.get('mx2') ?? x0) - dx : 0
@@ -5657,9 +5666,6 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let my2 = !valign_start ? (s.get('my2') ?? y0) - dy : 0
 	let min_w = s.get('min_w')
 	let min_h = s.get('min_h')
-	if (dstate == 'drag') {
-		ui.state('<toolboxes>').set('to_top', id)
-	}
 	if (dstate == 'drop') {
 		s.set('mx1', mx1)
 		s.set('mx2', mx2)
@@ -5669,48 +5675,42 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 
 	ui.start_recording()
 	ui.m(mx1, my1, mx2, my2)
-	ui.stack()
-	//ui.popup(id+'.popup', 'window', target_i ?? 'screen',
-	//	valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain'
-	//)
-	//	ui.p(1)
-	//	ui.bb('bg1', null, 1, 'intense', null, ui.sp075())
-	//	ui.stack()
-	//		scope_set('toolbox_id', id)
-	//		ui.v() // title / body split
-	//			ui.h(0) // title bar
-	//				ui.stack(id+'.title')
-	//					ui.bb('bg3', null, 0, null, null, ui.sp075() * 0.75)
-	//					ui.p(ui.sp2(), ui.sp())
-	//					ui.text('', title, 0, 'l')
-	//				ui.end_stack()
-	//			ui.end_h()
+	ui.popup(id, 'window', target_i ?? 'screen',
+		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain'
+	)
+		ui.p(1)
+		ui.bb('bg1', null, 1, 'intense', null, ui.sp075())
+		ui.stack()
+			scope_set('toolbox_id', id)
+			ui.v() // title / body split
+				ui.h(0) // title bar
+					ui.stack(id+'.title')
+						ui.bb('bg3', null, 0, null, null, ui.sp075() * 0.75)
+						ui.p(ui.sp2(), ui.sp())
+						ui.text('', title, 0, 'l')
+					ui.end_stack()
+				ui.end_h()
 }
 
 ui.end_toolbox = function() {
-	//let id = scope_get('toolbox_id')
-	//		ui.end_v()
-	//		ui.resizer(id)
-	//	ui.end_stack()
-	//ui.end_popup()
-	ui.end_stack()
+	let id = scope_get('toolbox_id')
+			ui.end_v()
+			ui.resizer(id)
+		ui.end_stack()
+	ui.end_popup()
 	let rec = ui.end_recording()
-	free_rec(rec)
-	//ui.state('<toolboxes>', 'records_by_id').set(id, rec)
+	ui.state('<toolboxes>', 'records_by_id').set(id, rec)
 }
 
 ui.begin_toolboxes = function() {
-	return
 	attr(ui.state('<toolboxes>'), 'records_by_id', map).clear()
 }
 
 ui.end_toolboxes = function() {
-	return
 	let recs = ui.state('<toolboxes>', 'records_by_id')
 	if (!recs.size) return
 	let order = attr(ui.state('<toolboxes>'), 'order', array)
 	let to_top_id = ui.state('<toolboxes>', 'to_top')
-	if (0)
 	if (to_top_id || !order.length) {
 		for (let id of order) // remove toolboxes that have been removed
 			if (!recs.has(id))
@@ -5721,12 +5721,15 @@ ui.end_toolboxes = function() {
 		if (to_top_id) {
 			let src_i = order.indexOf(to_top_id)
 			let dst_i = order.length-1
-			if (src_i != dst_i)
-				array_move(order, to_top_id, src_i, dst_i)
+			if (src_i != dst_i) {
+				let o1 = order.join(' ')
+				array_move(order, src_i, 1, dst_i)
+			}
 		}
+		ui.state('<toolboxes>').set('to_top', null)
 	}
-	//for (let id of order)
-	//	ui.play_recording(recs.get(id))
+	for (let id of order)
+		ui.play_recording(recs.get(id))
 }
 
 // all-sides resizer widget --------------------------------------------------

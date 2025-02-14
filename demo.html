@@ -731,14 +731,14 @@ for (let align of ['c', '[', ']']) {
 	let i = 0
 	for (let side of ['t', 'r', 'b', 'l']) {
 		let [x, y, p_i] = ui.drag_point('p'+j+i, 100+j*220, 100+i*120, 'red')
-		let ct_i = ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 50, 50)
+		ui.popup('ttc'+j+i, null, p_i, 'ic', 'c', 50, 50)
 			ui.border(1, 'light')
 			ui.m(
 				side == 'l' || side == 'r' ? ui.sp2() : 0,
 				side == 't' || side == 'b' ? ui.sp2() : 0,
 			)
 			ui.m(10)
-			ui.popup('tt'+j+i, 'tooltip', ct_i, side, align, 100, 50, 'change_side constrain')
+			ui.popup('tt'+j+i, 'tooltip', null, side, align, 100, 50, 'change_side constrain')
 				ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
 				ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
 			ui.end_popup()
@@ -808,15 +808,15 @@ ui.end_v()
 
 demos.toolbox = `
 ui.begin_toolboxes()
-ui.toolbox('tb1', "I am left-aligned", '[', 't', 100, 100)
+ui.toolbox('tb1', "(1) I am left-aligned", '[', 't', 100, 100)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
-ui.toolbox('tb2', "I am also left-aligned", '[', 't', 150, 150)
+ui.toolbox('tb2', "(2) I am also left-aligned", '[', 't', 150, 150)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
-ui.toolbox('tb3', "I am right-aligned", ']', 't', 100, 100)
+ui.toolbox('tb3', "(3) I am right-aligned", ']', 't', 100, 100)
 	ui.stack('', 1, 's', 's', 200, 300)
 	ui.end_stack()
 ui.end_toolbox()
@@ -827,7 +827,7 @@ let test_template = {
 	t: 'v', fr: 2, gap: 20, e: [
 		{t: 'text', id: 't1', s: 'TP Hello!'},
 		{t: 'stack', id: 'st1', fr: 1, e: [
-			{t: 'bb', id: 'r1', bg_color: 'bg3'},
+			{t: 'bb', bg_color: 'bg3'},
 		]},
 	]}
 demos.template = `
