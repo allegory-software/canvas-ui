@@ -184,7 +184,6 @@ WIDGET DEFINITIONS
 	t.draw          : f(a, i, recs)     draw widget
 	t.draw_end      : f(a, i)           draw widget at widget's end() call
 	t.hit           : f(a, i, recs)     hit-test widget
-	t.reindex       : f(a, i, offset)   update widget's internal indices in a
 	t.is_flex_child : t|f     has fr at a[i+FR] and min_w/h at a[i+2+axis]
 	                          so it can be a child of a flex container.
 
@@ -1395,13 +1394,8 @@ window.addEventListener('focus', function(ev) {
 let ct_stack = [] // [ct_i1,...]
 ui.ct_stack = ct_stack
 
-ui.ct_i = function() {
-	return assert(ct_stack.at(-1), 'no container')
-}
-
-ui.last_i = function() {
-	return a[a.length-1]
-}
+ui.ct_i = () => assert(ct_stack.at(-1), 'no container')
+ui.rel_ct_i = () => ui.ct_i() - (a.length+2)
 
 function ct_stack_check() {
 	if (ct_stack.length) {
@@ -1423,13 +1417,13 @@ function ct_stack_check() {
 //
 // With next_i and prev_i we can walk back and forth between commands,
 // always landing at the command's arg#1. From the arg#1 index then we have
-// the command code at a[i-1], next command's arg#1 at a[i-2] and prev
-// command's arg#1 at a[i-3]. To walk the command array as a tree, we check
+// the command code at a[i-1], next command's arg#1 at i+a[i-2] and prev
+// command's arg#1 at i+a[i-3]. To walk the command array as a tree, we check
 // when a container starts with `a[i-1] & 1` (all containers have even codes)
 // and when it ends with `a[i-1] == CMD_END` (all containers end with the same
 // "end" command). To skip all container's children and jump to the next
-// sibling we use get_next_ext_i(). To go back to the container's command
-// from its "end" command, we use a[i].
+// sibling we use cmd_next_ext_i(). To go back to the container's command
+// from its "end" command, we use i+a[i].
 
 let a = [] // current recording.
 ui.a = a // published for inspecting only.
@@ -1453,7 +1447,6 @@ function unsparse_all(i) {
 	unsparse(draw          , i)
 	unsparse(draw_end      , i)
 	unsparse(hittest       , i)
-	unsparse(reindex       , i)
 	unsparse(is_flex_child , i)
 	unsparse(cmd_names     , i)
 }
@@ -1476,16 +1469,37 @@ function cmd_ct(name) {
 	return cmd(name, true)
 }
 
+let cmd_next_i = (a, i) => i+a[i-2] // index of next cmd
+let cmd_prev_i = (a, i) => i+a[i-3] // index of prev cmd
+let cmd_last_i = (a) => cmd_prev_i(a, a.length+2) // index of last command in a
+let cmd_arg_end_i = (a, i) => cmd_next_i(a, i)-3 // index after the last arg
+
 function ui_cmd(cmd, ...args) {
-	let i0 = a.length+2   // index of this cmd's arg#1
-	let i1 = i0+args.length+3 // index of next cmd's arg#1
-	a.push(i1, cmd, ...args, i0)
-	return i0
+	let i = a.length+2 // abs index of this cmd's arg#1
+	let next_i = args.length+3 // rel index of next cmd's arg#1
+	let prev_i = -next_i // rel index of this cmd's arg#1, rel to next cmd's arg#1
+	a.push(next_i, cmd, ...args, prev_i)
+	return i
 }
 ui.cmd = ui_cmd
 
-// index after the last arg.
-let cmd_arg_end_i = (a, i) => a[i-2] - 3
+// print current recording
+ui.disas = function() {
+	let i = 2
+	while (i < a.length) {
+		let cmd_num = a[i-1]
+		let cmd = cmd_names[cmd_num]
+		let i1 = cmd_arg_end_i(a, i)
+		let args = a.slice(i, i1)
+		if (cmd == 'end')
+			console.groupEnd()
+		if (cmd_num & 1)
+			console.group(cmd, ...args)
+		else
+			console.log(cmd, ...args)
+		i = cmd_next_i(a, i)
+	}
+}
 
 // command recording strips --------------------------------------------------
 
@@ -1517,25 +1531,7 @@ ui.end_recording = function() {
 	return a1
 }
 
-let reindex = []
-
 ui.play_recording = function(a1) {
-
-	// fix all indexes in a1 to fit into their new place in a.
-	let offset = a.length
-	let i = 2
-	let n = a1.length
-	while (i < n) {
-		let next_i = a1[i-2]
-		a1[i-2] += offset
-		a1[next_i-3] += offset // this cmd's i0
-		let cmd = a1[i-1]
-		let reindex_f = reindex[cmd]
-		if (reindex_f)
-			reindex_f(a1, i, offset)
-		i = next_i
-	}
-
 	a.push(...a1)
 	free_rec(a1)
 }
@@ -1660,7 +1656,7 @@ function measure_rec(a, axis) {
 	let n = a.length
 	while (i < n) {
 		let cmd    = a[i-1]
-		let next_i = a[i-2]
+		let next_i = cmd_next_i(a, i)
 		let measure_f = measure[cmd]
 		if (measure_f)
 			measure_f(a, i, axis)
@@ -1702,7 +1698,7 @@ ui.translate = function(a, i) {
 let theme_stack = []
 
 function draw_cmd(a, i, recs) {
-	let next_ext_i = get_next_ext_i(a, i)
+	let next_ext_i = cmd_next_ext_i(a, i)
 	while (i < next_ext_i) {
 
 		let cmd = a[i-1]
@@ -1713,11 +1709,11 @@ function draw_cmd(a, i, recs) {
 
 		let draw_f = draw[cmd]
 		if (draw_f && draw_f(a, i, recs)) {
-			i = get_next_ext_i(a, i)
+			i = cmd_next_ext_i(a, i)
 			if (cmd & 1) // container
 				theme = theme_stack.pop()
 		} else {
-			i = a[i-2] // next_i
+			i += a[i-2] // next_i
 		}
 	}
 }
@@ -1824,21 +1820,6 @@ function hit_frame(recs, layers) {
 }
 
 // frame packing -------------------------------------------------------------
-
-// check that cmd is entirely typed.
-function check_types(a, i) {
-	for (let j = i; j < a[i-2] - 3; j++)
-		if (!isnum(a[j]) && !isstr(a[j]))
-			pr(C(a, i), j-i, a[j])
-}
-
-function check_types_all(a) {
-	let i = 2
-	while (i < a.length) {
-		check_types(a, i)
-		i = a[i-2] // next_i
-	}
-}
 
 let tenc = new TextEncoder()
 async function pack_frame_json() {
@@ -2067,9 +2048,6 @@ function redraw_all() {
 // widget API ----------------------------------------------------------------
 
 ui.widget = function(cmd_name, t, is_ct) {
-	let reindex_f = t.reindex
-	if (is_ct)
-		reindex_f = reindex_f ? do_after(box_ct_reindex, reindex_f) : box_ct_reindex
 	let _cmd = cmd(cmd_name, is_ct)
 	measure       [_cmd] = t.measure
 	measure_end   [_cmd] = t.measure_end
@@ -2078,7 +2056,6 @@ ui.widget = function(cmd_name, t, is_ct) {
 	draw          [_cmd] = t.draw
 	draw_end      [_cmd] = t.draw_end
 	hittest       [_cmd] = t.hit
-	reindex       [_cmd] = reindex_f
 	is_flex_child [_cmd] = t.is_flex_child
 	let create = t.create
 	if (create) {
@@ -2102,8 +2079,8 @@ ui.widget = function(cmd_name, t, is_ct) {
 // layer command -------------------------------------------------------------
 
 let CMD_BEGIN_LAYER = cmd('begin_layer')
-ui.begin_layer(layer) {
-	ui_cmd(CMD_BEGIN_LAYER, layer, ui.last_i())
+ui.begin_layer = function(layer) {
+	ui_cmd(CMD_BEGIN_LAYER, layer, cmd_last_i(a))
 }
 
 // doesn't have to happen on translate, any event before rendering will do.
@@ -2111,7 +2088,7 @@ translate[CMD_BEGIN_LAYER] = function(a, i) {
 	begin_layer(a[i+0], a[i+1])
 }
 
-let CMD_END_LAYER = cmd('begin_layer')
+let CMD_END_LAYER = cmd('end_layer')
 ui.end_layer = function() {
 	ui_cmd(CMD_END_LAYER)
 }
@@ -2383,11 +2360,11 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 
 // container-box widgets -----------------------------------------------------
 
-function get_next_ext_i(a, i) {
+function cmd_next_ext_i(a, i) {
 	let cmd = a[i-1]
 	if (cmd & 1) // container
-		return a[i+NEXT_EXT_I]
-	return a[i-2] // next_i
+		return i+a[i+NEXT_EXT_I]
+	return cmd_next_i(a, i)
 }
 
 // NOTE: `ct` is short for container, which must end with ui.end().
@@ -2408,10 +2385,6 @@ ui.box_ct_widget = function(cmd_name, t) {
 	return ret
 }
 
-function box_ct_reindex(a, i, offset) {
-	a[i+NEXT_EXT_I] += offset
-}
-
 const CMD_END = cmd('end')
 
 ui.end = function(cmd) {
@@ -2420,15 +2393,13 @@ ui.end = function(cmd) {
 	if (cmd && a[i-1] != cmd)
 		assert(false, 'closing ', cmd_names[cmd], ' instead of ', C(a, i))
 	let end_i = ui_cmd(CMD_END, i)
-	a[i+NEXT_EXT_I] = a[end_i-2] // next_i
+	a[end_i+0] -= end_i // make relative
+	let next_i = cmd_next_i(a, end_i)
+	a[i+NEXT_EXT_I] = next_i-i // next_i but relative to the ct cmd at i
 
 	if (a[i-1] == CMD_POPUP) { // TOOD: make this non-specific
 		end_layer()
 	}
-}
-
-reindex[CMD_END] = function(a, i, offset) {
-	a[i+0] += offset
 }
 
 measure[CMD_END] = function(a, _, axis) {
@@ -2450,7 +2421,7 @@ measure[CMD_END] = function(a, _, axis) {
 }
 
 draw[CMD_END] = function(a, end_i) {
-	let i = a[end_i]
+	let i = end_i + a[end_i]
 	let draw_end_f = draw_end[a[i-1]]
 	if (draw_end_f)
 		draw_end_f(a, i)
@@ -2460,7 +2431,7 @@ draw[CMD_END] = function(a, end_i) {
 
 function position_children_stacked(a, ct_i, axis, sx, sw) {
 
-	let i = a[ct_i-2] // next_i
+	let i = cmd_next_i(a, ct_i)
 	while (a[i-1] != CMD_END) {
 
 		let cmd = a[i-1]
@@ -2470,7 +2441,7 @@ function position_children_stacked(a, ct_i, axis, sx, sw) {
 			position_f(a, i, axis, sx, sw, ct_i)
 		}
 
-		i = get_next_ext_i(a, i)
+		i = cmd_next_ext_i(a, i)
 	}
 }
 
@@ -2478,10 +2449,10 @@ function position_children_stacked(a, ct_i, axis, sx, sw) {
 
 function translate_children(a, i, dx, dy) {
 	let ct_i = i
-	i = a[i-2] // next_i
+	i = cmd_next_i(a, i)
 	while (a[i-1] != CMD_END) {
 		let cmd = a[i-1]
-		let next_ext_i = get_next_ext_i(a, i)
+		let next_ext_i = cmd_next_ext_i(a, i)
 		let translate_f = translate[cmd]
 		if (translate_f)
 			translate_f(a, i, dx, dy, ct_i)
@@ -2501,19 +2472,19 @@ function hit_children(a, i, recs) {
 
 	// hit direct children in reverse paint order.
 	let ct_i = i
-	let next_ext_i = get_next_ext_i(a, i)
-	let end_i = a[next_ext_i-3] // prev_i
-	i = a[end_i-3] // prev_i
+	let next_ext_i = cmd_next_ext_i(a, i)
+	let end_i = cmd_prev_i(a, next_ext_i)
+	i = cmd_prev_i(a, end_i)
 	let found
 	while (i > ct_i) {
 		if (a[i-1] == CMD_END)
-			i = a[i] // start_i
+			i = i+a[i+0] // start_i
 		let hit_f = hittest[a[i-1]]
 		if (hit_f && hit_f(a, i, recs)) {
 			found = true
 			break
 		}
-		i = a[i-3] // prev_i
+		i = cmd_prev_i(a, i)
 	}
 
 	return found
@@ -2549,9 +2520,6 @@ function is_main_axis(cmd, axis) {
 	)
 }
 
-reindex[CMD_H] = box_ct_reindex
-reindex[CMD_V] = box_ct_reindex
-
 measure[CMD_H] = ct_stack_push
 measure[CMD_V] = ct_stack_push
 
@@ -2568,7 +2536,7 @@ function position_flex(a, i, axis, sx, sw) {
 
 		let i = ct_i
 
-		let next_i = a[i-2]
+		let next_i = cmd_next_i(a, i)
 		let gap    = a[i+FLEX_GAP]
 
 		// compute total gap and total fr.
@@ -2581,7 +2549,7 @@ function position_flex(a, i, axis, sx, sw) {
 				total_fr += a[i+FR] / 1024
 				n++
 			}
-			i = get_next_ext_i(a, i)
+			i = cmd_next_ext_i(a, i)
 		}
 		gap_w = max(0, (n - 1) * gap)
 
@@ -2607,7 +2575,7 @@ function position_flex(a, i, axis, sx, sw) {
 				total_free_w     += free_w
 
 			}
-			i = get_next_ext_i(a, i)
+			i = cmd_next_ext_i(a, i)
 		}
 
 		// distribute the overflow to children which have free space to
@@ -2652,7 +2620,7 @@ function position_flex(a, i, axis, sx, sw) {
 					position_f(a, i, axis, ct_sx, ct_sw, ct_i)
 			}
 
-			i = get_next_ext_i(a, i)
+			i = cmd_next_ext_i(a, i)
 		}
 
 	} else {
@@ -2690,8 +2658,6 @@ ui.stack = function(id, fr, align, valign, min_w, min_h) {
 		id || '')
 }
 
-reindex[CMD_STACK] = box_ct_reindex
-
 measure[CMD_STACK] = ct_stack_push
 
 position[CMD_STACK] = function(a, i, axis, sx, sw) {
@@ -2728,10 +2694,6 @@ const CMD_CLIP_CT_I = 0
 
 ui.clip     = function() { return ui_cmd(CMD_CLIP, ui.ct_i()) }
 ui.end_clip = function() { return ui_cmd(CMD_END_CLIP) }
-
-reindex[CMD_CLIP] = function(a, i, offset) {
-	a[i+CMD_CLIP_CT_I] += offset
-}
 
 draw[CMD_CLIP] = function(a, i) {
 	let ct_i = a[i+CMD_CLIP_CT_I]
@@ -2811,8 +2773,6 @@ ui.scroll_xy = function(a, i, axis) {
 
 ui.end_scrollbox = function() { ui.end(CMD_SCROLLBOX) }
 ui.end_sb = ui.end_scrollbox
-
-reindex[CMD_SCROLLBOX] = box_ct_reindex
 
 measure[CMD_SCROLLBOX] = ct_stack_push
 
@@ -3162,13 +3122,11 @@ const POPUP_TARGET_I  = S+1
 const POPUP_FLAGS     = S+2
 const POPUP_SIDE_REAL = S+3
 
-const POPUP_TARGET_SCREEN = -1
-
 const CMD_POPUP = cmd_ct('popup')
 
 ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) {
 	let layer = layer_name ? ui_layer(layer_name) : layer_arr[layer_i]
-	target_i = repl(target_i, 'screen', POPUP_TARGET_SCREEN) ?? ui.ct_i()
+	target_i = repl(target_i, 'screen', 0) ?? ui.ct_i()
 	side  = popup_parse_side  (side  ?? 't')
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
@@ -3182,18 +3140,13 @@ ui.popup = function(id, layer_name, target_i, side, align, min_w, min_h, flags) 
 		layer.i, target_i, flags,
 		side, // side_real
 	)
+	a[i+POPUP_TARGET_I] -= i // make relative
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
 	if (begin_layer(layer, i))
 		force_scope_vars()
 	return i
-}
-
-reindex[CMD_POPUP] = function(a, i, offset) {
-	box_ct_reindex(a, i, offset)
-	if (a[i+POPUP_TARGET_I] >= 0)
-		a[i+POPUP_TARGET_I] += offset
 }
 
 ui.end_popup = function() { ui.end(CMD_POPUP) }
@@ -3215,10 +3168,11 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 	let side     = a[i+POPUP_SIDE]
 	let align    = a[i+POPUP_ALIGN]
 	if (side && align == POPUP_ALIGN_STRETCH) {
-		if (target_i == POPUP_TARGET_SCREEN) {
+		if (!target_i) {
 			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
 		} else {
 			// TODO: align border rects here!
+			target_i += i // make absolute
 			let ct_w = a[target_i+2+axis] + spacings(a, target_i, axis)
 			a[i+2+axis] = max(a[i+2+axis], ct_w)
 		}
@@ -3238,7 +3192,7 @@ function get_popup_target_rect(a, i) {
 
 	let ct_i = a[i+POPUP_TARGET_I]
 
-	if (ct_i == POPUP_TARGET_SCREEN) {
+	if (!ct_i) {
 
 		let d = screen_margin
 		tx1 = d
@@ -3247,6 +3201,8 @@ function get_popup_target_rect(a, i) {
 		ty2 = screen_h - d
 
 	} else {
+
+		ct_i += i // make absolute
 
 		let px1 = a[ct_i+PX1+0]
 		let py1 = a[ct_i+PX1+1]
@@ -3458,21 +3414,18 @@ const CMD_BB_TOOLTIP = cmd('bb_tooltip')
 
 ui.bb_tooltip = function(bg_color, bg_color_state, border_color, border_color_state, border_radius) {
 	let ct_i = ui.ct_i()
+	let rel_ct_i = ui.rel_ct_i()
 	assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
-	return ui_cmd(CMD_BB_TOOLTIP, ct_i, bg_color ?? 0, parse_state(bg_color_state),
+	return ui_cmd(CMD_BB_TOOLTIP, rel_ct_i, bg_color ?? 0, parse_state(bg_color_state),
 		border_color ?? 0, parse_state(border_color_state),
 		round((border_radius ?? 0) * 128),
 	)
 }
 
-reindex[CMD_BB_TOOLTIP] = function(a, i, offset) {
-	a[i+0] += offset
-}
-
 cx.fillStyle = bg_color
 
 draw[CMD_BB_TOOLTIP] = function(a, i) {
-	let ct_i = a[i+BB_TOOLTIP_CT_I]
+	let ct_i = i+a[i+BB_TOOLTIP_CT_I]
 
 	let px1 = a[ct_i+PX1+0]
 	let py1 = a[ct_i+PX1+1]
@@ -3695,7 +3648,7 @@ ui.bb = function(
 ) {
 	if (border_dash)
 		assert(border_dashes[border_dash], 'invalid border dash ', border_dash)
-	ui_cmd(CMD_BB, ui.ct_i(), bg_color ?? 0, parse_state(bg_color_state),
+	ui_cmd(CMD_BB, ui.rel_ct_i(), bg_color ?? 0, parse_state(bg_color_state),
 		parse_border_sides(border_sides), border_color ?? 0, parse_state(border_color_state),
 		round((border_radius ?? 0) * 128),
 		border_dash ?? null,
@@ -3705,10 +3658,6 @@ ui.bb = function(
 ui.border = function(border_sides, border_color, border_color_state, border_radius, border_dash) {
 	return ui.bb(null, null, border_sides ?? true, border_color,
 		border_color_state, border_radius, border_dash)
-}
-
-reindex[CMD_BB] = function(a, i, offset) {
-	a[i+BB_CT_I] += offset
 }
 
 let border_paths
@@ -3776,7 +3725,7 @@ function border_path(cx, x1, y1, x2, y2, sides, r) {
 }
 
 draw[CMD_BB] = function(a, i) {
-	let ct_i = a[i+BB_CT_I]
+	let ct_i = i+a[i+BB_CT_I]
 
 	let px1 = a[ct_i+PX1+0]
 	let py1 = a[ct_i+PX1+1]
@@ -4501,20 +4450,17 @@ let frame = {}
 frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args) {
 
 	let ct_i = ui.ct_i()
+	let rel_ct_i = ui.rel_ct_i()
 	assert(a[ct_i-1] == CMD_SCROLLBOX, 'frame is not inside a scrollbox')
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		on_measure, on_frame,
-		ct_i,
+		rel_ct_i,
 		0, // rec_i
 		layer_i,
 		...args
 	)
 
-}
-
-frame.reindex = function(a, i, offset) {
-	a[i+FRAME_CT_I] += offset
 }
 
 frame.before_measure = function(a, i, axis) {
@@ -4534,7 +4480,7 @@ frame.translate = function(a, i, dx, dy) {
 	let w = a[i+2]
 	let h = a[i+3]
 
-	let ct_i = a[i+FRAME_CT_I]
+	let ct_i = i+a[i+FRAME_CT_I]
 	let cx = a[ct_i+0]
 	let cy = a[ct_i+1]
 	let cw = a[ct_i+2]
@@ -4748,12 +4694,12 @@ function template_find_node(a, i, t, t_i) {
 	if (i == t_i)
 		return t
 	if (t.e) {
-		let ch_t_i = a[t_i-2] // next_i
+		let ch_t_i = cmd_next_i(a, t_i)
 		for (let ch_t of t.e) {
 			let found_t = template_find_node(a, i, ch_t, ch_t_i)
 			if (found_t)
 				return found_t
-			ch_t_i = get_next_ext_i(a, ch_t_i)
+			ch_t_i = cmd_next_ext_i(a, ch_t_i)
 		}
 	}
 }
@@ -4801,7 +4747,7 @@ ui.template = function(id, t, ...stack_args) {
 	let ch_i = ch_t && ch_t.i
 	let ct_i = ch_i
 	if (a[ct_i-1] == CMD_BB)
-		ct_i = a[ct_i+BB_CT_I]
+		ct_i = ct_i + a[ct_i+BB_CT_I]
 	if (t == selected_template_root_t) {
 		template_drag_point(id, ch_t, ct_i, 'l', '[')
 		template_drag_point(id, ch_t, ct_i, 'l', 'c')
@@ -4837,7 +4783,7 @@ ui.box_widget('template_overlay', {
 			let t = selected_template_node_t
 			let i = t.i
 			if (a[i-1] == CMD_BB)
-				i = a[i+BB_CT_I]
+				i = i+a[i+BB_CT_I]
 			let x = a[i+0]
 			let y = a[i+1]
 			let w = a[i+2]
@@ -5534,7 +5480,7 @@ ui.widget('polyline', {
 		assert(points.length % 2 == 0, 'invalid point array')
 		if (!points.length)
 			return
-		return ui_cmd(cmd, id, ui.ct_i(), (closed ?? 0) ? 1 : 0,
+		return ui_cmd(cmd, id, ui.rel_ct_i(), (closed ?? 0) ? 1 : 0,
 			fill_color   ?? 0, parse_state(fill_color_state  ),
 			stroke_color ?? 0, parse_state(stroke_color_state), line_width ?? 1,
 			...points)
@@ -5571,7 +5517,7 @@ ui.widget('polyline', {
 	draw: function(a, i) {
 		let pi1 = i+POLYLINE_POINTS
 		let pi2 = cmd_arg_end_i(a, i)
-		let ct_i = a[i+1]
+		let ct_i = i+a[i+1]
 		let x0 = a[ct_i+0]
 		let y0 = a[ct_i+1]
 		let closed             = a[i+2]
@@ -5597,7 +5543,7 @@ ui.widget('polyline', {
 		let id = a[i+0]
 		if (!id)
 			return
-		let ct_i = a[i+1]
+		let ct_i = i+a[i+1]
 		let x0 = a[ct_i+0]
 		let y0 = a[ct_i+1]
 		let closed = a[i+2]
@@ -6628,10 +6574,14 @@ ui.widget('sat_lum_square', {
 		ui.state_init(id, 'sat', sat)
 		ui.state_init(id, 'lum', lum)
 
-		let cs = captured(id)
-		if (cs) {
-			ui.state(id).set('sat', cs.get('sat'))
-			ui.state(id).set('lum', cs.get('lum'))
+		let [dstate, dx, dy, cs] = ui.drag(id)
+		if (dstate == 'drag')
+			ui.focus(id)
+		if (dstate == 'drag' || dstate == 'dragging') {
+			sat = cs.get('sat')
+			lum = cs.get('lum')
+			ui.state(id).set('sat', sat)
+			ui.state(id).set('lum', lum)
 		}
 
 		if (hit(id) && ui.click) {
@@ -6656,17 +6606,13 @@ ui.widget('sat_lum_square', {
 			}
 		}
 
-		return ui_cmd(cmd, id, ui.ct_i(), hue)
-	},
-
-	reindex: function(a, i, offset) {
-		a[i+1] += offset
+		return ui_cmd(cmd, id, ui.rel_ct_i(), hue)
 	},
 
 	draw: function(a, i) {
 
 		let id   = a[i+0]
-		let ct_i = a[i+1]
+		let ct_i = i+a[i+1]
 		let hue  = a[i+2]
 
 		let x = a[ct_i+0]
@@ -6692,8 +6638,8 @@ ui.widget('sat_lum_square', {
 
 		cx.putImageData(idata, x, y)
 
-		let hit_sat = hit(id)?.get('sat')
-		let hit_lum = hit(id)?.get('lum')
+		let hit_sat = hit(id, 'sat')
+		let hit_lum = hit(id, 'lum')
 		let sel_sat = ui.state(id, 'sat')
 		let sel_lum = ui.state(id, 'lum')
 
@@ -6705,22 +6651,20 @@ ui.widget('sat_lum_square', {
 	hit: function(a, i) {
 
 		let id   = a[i+0]
-		let ct_i = a[i+1]
+		let ct_i = i+a[i+1]
 
 		let x = a[ct_i+0]
 		let y = a[ct_i+1]
 		let w = a[ct_i+2]
 		let h = a[ct_i+3]
 
-		let hit = hit_rect(x, y, w, h)
-		if (hit) {
-			let hs = hover(id)
-
+		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
+		if (hs) {
 			hs.set('sat', clamp(lerp(ui.mx - x, 0, w-1, 0, 1), 0, 1))
 			hs.set('lum', clamp(lerp(ui.my - y, h-1, 0, 0, 1), 0, 1))
 		}
 
-		return hit
+		return !!hs
 	},
 
 })
@@ -6744,12 +6688,10 @@ ui.widget('hue_bar', {
 		keepalive(id)
 		ui.state_init(id, 'hue', hue)
 
-		if (hit(id) && ui.click) {
+		let [dstate, dx, dy, cs] = ui.drag(id)
+		if (dstate == 'drag')
 			ui.focus(id)
-			ui.capture(id)
-		}
-		let cs = captured(id)
-		if (cs)
+		if (dstate == 'drag' || dstate == 'dragging')
 			ui.state(id).set('hue', cs.get('hue'))
 
 		if (ui.focused(id)) {
@@ -6761,17 +6703,13 @@ ui.widget('hue_bar', {
 			}
 		}
 
-		return ui_cmd(cmd, id, ui.ct_i())
-	},
-
-	reindex: function(a, i, offset) {
-		a[i+1] += offset
+		ui_cmd(cmd, id, ui.rel_ct_i())
 	},
 
 	draw: function(a, i) {
 
 		let id   = a[i+0]
-		let ct_i = a[i+1]
+		let ct_i = i+a[i+1]
 
 		let x = a[ct_i+0]
 		let y = a[ct_i+1]
@@ -6806,7 +6744,7 @@ ui.widget('hue_bar', {
 	hit: function(a, i) {
 
 		let id   = a[i+0]
-		let ct_i = a[i+1]
+		let ct_i = i+a[i+1]
 
 		let x = a[ct_i+0]
 		let y = a[ct_i+1]
@@ -6815,7 +6753,7 @@ ui.widget('hue_bar', {
 
 		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
 		if (hs) {
-			let hue = clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360)
+			let hue = round(clamp(lerp(ui.my - y, 0, h - 1, 0, 360), 0, 360))
 			hs.set('hue', hue)
 			return true
 		}
@@ -6850,13 +6788,13 @@ ui.color_picker = function(id, hue, sat, lum) {
 	ui.v(1, ui.sp())
 		ui.h(1, ui.sp05())
 			ui.start_recording()
-				ui.stack('', 0, null, null, ui.em(1))
+				ui.stack('s1', 0, null, null, ui.em(1))
 				 	ui.hue_bar(id+'.hb', hue)
 				ui.end_stack()
 			let hue_bar = ui.end_recording()
 			ui.start_recording()
-				ui.stack()
-					hue = ui.state(id+'.hb', 'hue')
+				ui.stack('s2')
+					hue = ui.state(id+'.hb', 'hue') ?? hue
 					ui.sat_lum_square(id+'.sl', hue, sat, lum)
 				ui.end_stack()
 			let sl_square = ui.end_recording()
@@ -6909,14 +6847,13 @@ ui.widget('bg_dots', {
 
 	create: function(cmd, id, speed) {
 		assert(id, 'id required')
-		let ct_i = ui.ct_i()
-		return ui_cmd(cmd, id, ct_i, round((speed ?? 1) * 1024))
+		return ui_cmd(cmd, id, ui.rel_ct_i(), round((speed ?? 1) * 1024))
 	},
 
 	draw: function(a, i) {
 
 		let id    = a[i+0]
-		let ct_i  = a[i+1]
+		let ct_i  = i+a[i+1]
 		let speed = a[i+2] / 1024
 
 		let x = a[ct_i+0]
@@ -7020,11 +6957,11 @@ ui.widget('bg_dots', {
 // frame graphs --------------------------------------------------------------
 
 ui.frame_graphs = {}
-function frame_graph(name, unit, decimals, min, max, duration) {
-	let n = 60 * (duration ?? 10)
+function frame_graph(name, color, unit, decimals, min, max, duration) {
+	let n = 60 * (duration ?? 2)
 	let va = []
 	let mf = 10**decimals
-	let g = {i: 0, n: n, unit: unit, min: min, max: max, decimals: decimals, mf: mf,
+	let g = {i: 0, n: n, color: color, unit: unit, min: min, max: max, decimals: decimals, mf: mf,
 		values: va}
 	for (let i = 0; i < n; i++)
 		va[i] = min
@@ -7039,60 +6976,51 @@ function frame_graph_push(name, v) {
 }
 ui.frame_graph_push = frame_graph_push
 
-frame_graph('frame_time'       , 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_make_time'  , 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_layout_time', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_draw_time'  , 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_hit_time'   , 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_bandwidth'  , 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
-frame_graph('frame_compression', '%'   , 0, 0,   100)
-frame_graph('frame_pack_time'  , 'ms'  , 1, 0,    10)
-frame_graph('frame_unpack_time', 'ms'  , 1, 0,    10)
+frame_graph('frame_time'       , '#fff', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_make_time'  , '#ff0', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_layout_time', '#0f0', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_draw_time'  , '#f00', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_hit_time'   , '#f0f', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_bandwidth'  , '', 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
+frame_graph('frame_compression', '', '%'   , 0, 0,   100)
+frame_graph('frame_pack_time'  , '', 'ms'  , 1, 0,    10)
+frame_graph('frame_unpack_time', '', 'ms'  , 1, 0,    10)
 
-ui.box_widget('frame_graph', {
-	create: function(cmd, name, fr, align, valign, min_w, min_h) {
-		ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
-			name, ui.frame_graphs[name])
-		//ui.animate()
-	},
-	draw: function(a, i) {
-		let x0 = a[i+0]
-		let y0 = a[i+1]
-		let w  = a[i+2]
-		let h  = a[i+3]
-		let name = a[i+S-1]
-		let g    = a[i+S+0]
-		if (!g) return
+function draw_graph(x0, y0, w, h, g, with_agg) {
 
-		cx.save()
-		cx.beginPath()
-		cx.rect(x0, y0, w, h)
-		cx.clip()
+	cx.save()
 
-		cx.beginPath()
-		let step = round((g.n / w) * 2)
-		let i0 = step - g.i % step
-		let min =  1/0
-		let max = -1/0
-		let sum = 0
-		let n = 0
-		for (let i = 0; i < g.n; i += step) {
-			let v = g.values[(g.i+i0+i) % g.n] / g.mf
-			min = Math.min(min, v)
-			max = Math.max(max, v)
-			sum += v
-			n++
-			let x = x0 + lerp(i0+i, 0, g.n, 0, w + step)
-			let y = y0 + lerp(v, g.min, g.max, h, 0)
-			if (!i)
-				cx.moveTo(x, y)
-			else
-				cx.lineTo(x, y)
-		}
-		cx.strokeStyle = fg_color('link')
-		cx.stroke()
+	let min =  1/0
+	let max = -1/0
+	let sum = 0
+	let avg = 0
 
-		let avg = sum / n
+	cx.beginPath()
+	cx.rect(x0, y0, w, h)
+	cx.clip()
+
+	cx.beginPath()
+	let step = round((g.n / w) * 2)
+	let i0 = step - g.i % step
+	let n = 0
+	for (let i = 0; i < g.n; i += step) {
+		let v = g.values[(g.i+i0+i) % g.n] / g.mf
+		min = Math.min(min, v)
+		max = Math.max(max, v)
+		sum += v
+		n++
+		let x = x0 + lerp(i0+i, 0, g.n, 0, w + step)
+		let y = y0 + lerp(v, g.min, g.max, h, 0)
+		if (!i)
+			cx.moveTo(x, y)
+		else
+			cx.lineTo(x, y)
+	}
+	avg = sum / n
+	cx.strokeStyle = g.color ?? fg_color('link')
+	cx.stroke()
+
+	if (with_agg) {
 
 		cx.fillStyle = fg_color('label')
 		let y1 = y0 + ui.em()
@@ -7112,7 +7040,44 @@ ui.box_widget('frame_graph', {
 		cx.fillText(dec(max, d)+g.unit, x, y); y += ui.em()
 		cx.fillText(dec(avg, d)+g.unit, x, y)
 
-		cx.restore()
+	}
+
+	cx.restore()
+
+}
+
+ui.box_widget('frame_graph_overlapped', {
+	create: function(cmd, fr, align, valign, min_w, min_h) {
+		ui_cmd_box(cmd, fr, align, valign, min_w, min_h)
+		//ui.animate()
+	},
+	draw: function(a, i) {
+		let x0 = a[i+0]
+		let y0 = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+		for (name in ui.frame_graphs) {
+			let g = ui.frame_graphs[name]
+			if (g.color)
+				draw_graph(x0, y0, w, h, g, false)
+		}
+	},
+})
+
+ui.box_widget('frame_graph', {
+	create: function(cmd, name, fr, align, valign, min_w, min_h) {
+		ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			name, ui.frame_graphs[name])
+		//ui.animate()
+	},
+	draw: function(a, i) {
+		let x0 = a[i+0]
+		let y0 = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+		let g    = a[i+S+0]
+		if (!g) return
+		draw_graph(x0, y0, w, h, g, true)
 	},
 })
 

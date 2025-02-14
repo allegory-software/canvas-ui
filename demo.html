@@ -16,7 +16,7 @@
 
 let demo_state = json_arg(load('demo_state')) ?? {}
 ui.DEBUG      = demo_state.debug ?? true
-SELECTED_DEMO = demo_state.demo ?? 'tabs'
+SELECTED_DEMO = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
 ui.set_default_theme(demo_state.theme ?? 'dark')
 
 function save_demo_state(k, v) {
@@ -838,7 +838,7 @@ demos.color_picker = `
 ui.p(ui.sp())
 ui.stack('', 0, 'c', 'c', 400)
 	ui.border(1, 'light')
-	ui.color_picker('cp1')
+	ui.color_picker('cp1', 200, .75, .25)
 ui.end_stack()
 `
 
@@ -934,6 +934,7 @@ ui.main = function() {
 
 			if (ui.DEBUG) {
 
+				if (0) {
 				ui.v(0, 0, 's', 's', 200)
 					ui.border('l', 'intense')
 
@@ -944,21 +945,33 @@ ui.main = function() {
 							ui.p(ui.sp())
 							ui.text('', graph_name, 0, 'l')
 						ui.end_stack()
-						ui.frame_graph(graph_name, fr)
+						ui.frame_graph(fr)
 					}
 					fgr('frame_time')
 					fgr('frame_make_time')
 					fgr('frame_layout_time')
 					fgr('frame_draw_time')
-					fgr('frame_pack_time')
-					fgr('frame_compression')
-					fgr('frame_bandwidth')
-					fgr('frame_unpack_time')
-
+					fgr('frame_hit_time')
+					if (0) {
+						fgr('frame_pack_time')
+						fgr('frame_compression')
+						fgr('frame_bandwidth')
+						fgr('frame_unpack_time')
+					}
 				ui.end_v()
+				}
 
+				if (1) {
 				ui.v(0, 0, 's', 's', 200)
 					ui.border('l', 'intense')
+
+					ui.stack('', 0)
+						ui.bb('bg2')
+						ui.color('text')
+						ui.p(ui.sp())
+						ui.text('', 'PROFILE', 0, 'l')
+					ui.end_stack()
+					ui.frame_graph_overlapped(.5)
 
 					ui.stack('', 0)
 						ui.bb('bg2')
@@ -1048,6 +1061,7 @@ ui.main = function() {
 					ui.end_stack()
 
 				ui.end_v()
+				}
 			}
 
 		ui.end_h()
