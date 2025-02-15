@@ -1607,7 +1607,8 @@ ui_layer('open'   , 4) // dropdowns, must cover tooltips
 ui_layer('handle' , 5) // dragged object
 
 let layer_stack = [] // [layer1_i, ...]
-let current_layer
+let current_layer   // set while building
+let current_layer_i // set while drawing
 
 function sub_layer(z_index, parent_layer) {
 	parent_layer ??= current_layer
@@ -1678,7 +1679,7 @@ function measure_rec(a, axis) {
 // positioning phase (per-axis) ----------------------------------------------
 
 // walk the element tree top-down, and call the position function for each
-// element that has it. recursive, uses call stack to pass ct_i.
+// element that has it. recursive, uses call stack to pass ct_i and ct_w.
 
 function position_rec(a, axis, ct_w) {
 	let i = 2
@@ -1729,17 +1730,22 @@ function draw_cmd(a, i, recs) {
 	}
 }
 
+function draw_layer(layer_i, indexes, recs) {
+	let prev_layer_i = current_layer_i
+	/*global*/ current_layer_i = layer_i
+	for (let k = 0, n = indexes.length; k < n; k += 2) {
+		reset_canvas()
+		let rec_i = indexes[k]
+		let i     = indexes[k+1]
+		let a = recs[rec_i]
+		draw_cmd(a, i, recs)
+	}
+	current_layer_i = prev_layer_i
+}
+
 function draw_layers(layers, recs) {
 	for (let layer of layers) {
-		/*global*/ current_layer = layer
-		let indexes = layer.indexes
-		for (let k = 0, n = indexes.length; k < n; k += 2) {
-			reset_canvas()
-			let rec_i = indexes[k]
-			let i     = indexes[k+1]
-			let a = recs[rec_i]
-			draw_cmd(a, i, recs)
-		}
+		draw_layer(layer.i, layer.indexes, recs)
 		if (layer.layers?.length)
 			draw_layers(layer.layers, recs)
 	}
@@ -1751,7 +1757,7 @@ function draw_frame(recs, layers) {
 	theme = themes[ui.default_theme]
 
 	draw_layers(layers, recs)
-	current_layer = null
+	assert(current_layer_i == null)
 
 	theme = theme_stack.pop()
 	assert(theme_stack.length == theme_stack_length0)
@@ -1797,6 +1803,21 @@ ui.nohit = function() {
 	a.nohit_set.add(a.at(-1))
 }
 
+function hit_layer(layer, recs) {
+	/*global*/ current_layer = layer
+	// iterate layer's cointainers in reverse order.
+	let indexes = layer.indexes
+	for (let k = indexes.length-2; k >= 0; k -= 2) {
+		reset_canvas()
+		let rec_i = indexes[k]
+		let i     = indexes[k+1]
+		let a = recs[rec_i]
+		let hit_f = hittest[a[i-1]]
+		if (!a.nohit_set?.has(i) && hit_f(a, i, recs))
+			return true
+	}
+}
+
 function hit_layers(layers, recs) {
 	// iterate layers in reverse order.
 	for (let j = layers.length-1; j >= 0; j--) {
@@ -1804,20 +1825,8 @@ function hit_layers(layers, recs) {
 		if (layer.layers?.length)
 			if (hit_layers(layer.layers, recs))
 				return true
-		/*global*/ current_layer = layer
-		// iterate layer's cointainers in reverse order.
-		let indexes = layer.indexes
-		for (let k = indexes.length-2; k >= 0; k -= 2) {
-			reset_canvas()
-			let rec_i = indexes[k]
-			let i     = indexes[k+1]
-			let a = recs[rec_i]
-			let hit_f = hittest[a[i-1]]
-			if (!a.nohit_set?.has(i) && hit_f(a, i, recs)) {
-				j = -1
-				return true
-			}
-		}
+		if (hit_layer(layer, recs))
+			return true
 	}
 }
 
@@ -2114,6 +2123,20 @@ translate[CMD_SET_LAYER] = function(a, i) {
 	let layer = layer_arr[layer_i]
 	layer.indexes.push(rec_i, cmd_prev_i(a, i))
 }
+
+// draw_layer command --------------------------------------------------------
+
+let CMD_DRAW_LAYER = cmd('draw_layer')
+ui.draw_layer = function(layer) {
+	ui_cmd(CMD_DRAW_LAYER, layer.i, layer.indexes)
+}
+
+draw[CMD_DRAW_LAYER] = function(a, i, recs) {
+	let layer_i = a[i+0]
+	let indexes = a[i+1]
+	draw_layer(layer_i, indexes)
+}
+
 
 // box widgets ---------------------------------------------------------------
 
@@ -2457,7 +2480,7 @@ function position_children_stacked(a, ct_i, axis, sx, sw) {
 		let position_f = position[cmd]
 		if (position_f) {
 			// position item's children recursively.
-			position_f(a, i, axis, sx, sw, ct_i)
+			position_f(a, i, axis, sx, sw)
 		}
 
 		i = cmd_next_ext_i(a, i)
@@ -2624,7 +2647,7 @@ function position_flex(a, i, axis, sx, sw) {
 
 				// position item's children recursively.
 				let position_f = position[a[i-1]]
-				position_f(a, i, axis, sx, sw, ct_i)
+				position_f(a, i, axis, sx, sw)
 
 				sx += sw + gap
 
@@ -2632,7 +2655,7 @@ function position_flex(a, i, axis, sx, sw) {
 
 				let position_f = position[a[i-1]]
 				if (position_f)
-					position_f(a, i, axis, ct_sx, ct_sw, ct_i)
+					position_f(a, i, axis, ct_sx, ct_sw)
 			}
 
 			i = cmd_next_ext_i(a, i)
@@ -3368,20 +3391,17 @@ ui.popup_target_rect = function(a, i) {
 
 }
 
-function on_popup_layer(a, i) {
-	let popup_layer_i = a[i+POPUP_LAYER_I]
-	let popup_layer = layer_arr[popup_layer_i]
-	return popup_layer == current_layer
-}
-
 draw[CMD_POPUP] = function(a, i) {
-	if (!on_popup_layer(a, i))
-		return true
+	let popup_layer_i = a[i+POPUP_LAYER_I]
+	if (popup_layer_i != current_layer_i)
+		return true // not our layer, skip
 }
 
 hittest[CMD_POPUP] = function(a, i, recs) {
-	if (!on_popup_layer(a, i))
-		return true
+	let popup_layer_i = a[i+POPUP_LAYER_I]
+	let popup_layer = layer_arr[popup_layer_i]
+	if (popup_layer != current_layer)
+		return // not our layer, skip
 	if (hit_children(a, i, recs)) {
 		hover(a[i+POPUP_ID])
 		return true
@@ -4541,9 +4561,8 @@ frame.translate = function(a, i, dx, dy) {
 }
 
 frame.draw = function(a, i, recs) {
-	let layer = layer_arr[layer_i]
 	let layer_i = a[i+FRAME_LAYER_I]
-	/*global*/ current_layer = layer_arr[layer_i]
+	/*global*/ current_layer_i = layer_arr[layer_i]
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	draw_cmd(a1, 2, recs)
@@ -4856,6 +4875,8 @@ function draw_node(id, t_t, t, depth) {
 }
 function template_editor(id, t, ch_t) {
 
+	ui.begin_toolboxes('template_editor_toolboxes')
+
 	ui.toolbox(id+'.tree_toolbox', 'Tree', ']', 't', 100, 100)
 		ui.scrollbox(id+'.tree_toolbox_sb', 1, null, null, null, null, 150, 200)
 			ui.p(10)
@@ -4895,6 +4916,7 @@ function template_editor(id, t, ch_t) {
 		ui.end_scrollbox()
 	ui.end_toolbox()
 
+	ui.end_toolboxes()
 }
 
 // drag point widget ---------------------------------------------------------
@@ -5681,8 +5703,10 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	keepalive(id)
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
-	if (hit(id) && ui.click)
-		ui.state('<toolboxes>').set('to_top', id)
+	if (hit(id) && ui.click) {
+		let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
+		ui.state(tid).set('to_top', id)
+	}
 	let [dstate, dx, dy] = ui.drag(id+'.title')
 	let s = ui.state(id)
 	let mx1 =   align_start ? (s.get('mx1') ?? x0) + dx : 0
@@ -5724,18 +5748,23 @@ ui.end_toolbox = function() {
 		ui.end_stack()
 	ui.end_popup()
 	let rec = ui.end_recording()
-	ui.state('<toolboxes>', 'records_by_id').set(id, rec)
+	let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
+	ui.state(tid, 'records_by_id').set(id, rec)
 }
 
-ui.begin_toolboxes = function() {
-	attr(ui.state('<toolboxes>'), 'records_by_id', map).clear()
+ui.begin_toolboxes = function(tid) {
+	assert(tid, 'toolboxes id required')
+	attr(ui.state(tid), 'records_by_id', map).clear()
+	scope_set('toolboxes_id', tid)
 }
 
 ui.end_toolboxes = function() {
-	let recs = ui.state('<toolboxes>', 'records_by_id')
+	let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
+	let s = ui.state(tid)
+	let recs = s.get('records_by_id')
 	if (!recs.size) return
-	let order = attr(ui.state('<toolboxes>'), 'order', array)
-	let to_top_id = ui.state('<toolboxes>', 'to_top')
+	let order = attr(s, 'order', array)
+	let to_top_id = s.get('to_top')
 	if (to_top_id || !order.length) {
 		for (let id of order) // remove toolboxes that have been removed
 			if (!recs.has(id))
@@ -5751,7 +5780,7 @@ ui.end_toolboxes = function() {
 				array_move(order, src_i, 1, dst_i)
 			}
 		}
-		ui.state('<toolboxes>').set('to_top', null)
+		s.set('to_top', null)
 	}
 	for (let id of order)
 		ui.play_recording(recs.get(id))
