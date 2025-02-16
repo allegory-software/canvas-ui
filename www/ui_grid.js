@@ -1144,8 +1144,8 @@ function init(id, e) {
 						}
 
 						if (mover && col == hit_gcol) {
-							let i = ui.popup('', 'handle', group_bar_i, 'il', '[', 0, 0)
-							ui.nohit(i) // TODO remove this explicit i hack
+							ui.popup(id+'.moving_gcol_popup', 'handle', group_bar_i, 'il', '[', 0, 0)
+							ui.nohit(id+'.moving_gcol_popup')
 						}
 
 						let col_id = id+'.gcol.'+col

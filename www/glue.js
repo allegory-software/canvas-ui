@@ -127,7 +127,7 @@ ARRAYS
 	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
 	array_move(a, i1, n, insert_i, [before])
 	array_equals(a1, a2, [i1], [i2]) -> t|f
-	binsearch(a, v, cmp, [i1, i2])
+	binsearch(a, v, cmp, [i1, i2]); cmp(a, i, v) -> a[i] < v
 	uniq_sorted(a) -> a
 	group_sorted(a, eq_cond, [i1, i2]) -> iter() -> [i1, i2]
 	remove_duplicates(a) -> a
@@ -810,17 +810,17 @@ function array_equals(a1, a2, i1, i2) {
 // binary search for an insert position that keeps the array sorted.
 // using '<' gives the first insert position, while '<=' gives the last.
 let cmps = {}
-cmps['<' ] = ((a, b) => a <  b)
-cmps['>' ] = ((a, b) => a >  b)
-cmps['<='] = ((a, b) => a <= b)
-cmps['>='] = ((a, b) => a >= b)
+cmps['<' ] = (a, i, v) => a[i] <  v
+cmps['>' ] = (a, i, v) => a[i] >  v
+cmps['<='] = (a, i, v) => a[i] <= v
+cmps['>='] = (a, i, v) => a[i] >= v
 function binsearch(a, v, cmp, i1, i2) {
 	let lo = (i1 ?? 0) - 1
 	let hi = (i2 ?? a.length)
 	cmp = cmps[cmp || '<'] || cmp
 	while (lo + 1 < hi) {
 		let mid = (lo + hi) >> 1
-		if (cmp(a[mid], v))
+		if (cmp(a, mid, v))
 			lo = mid
 		else
 			hi = mid

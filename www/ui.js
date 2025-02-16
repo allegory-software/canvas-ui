@@ -1484,7 +1484,7 @@ function ui_cmd(cmd, ...args) {
 ui.cmd = ui_cmd
 
 // print current recording
-ui.disas = function() {
+ui.disas = function(a) {
 	let i = 2
 	while (i < a.length) {
 		let cmd_num = a[i-1]
@@ -1583,7 +1583,7 @@ function ui_layer(name, index) {
 		layer_arr.push(layer)
 		layer.i = layer_arr.length-1
 		if (!layer.indexes)
-			layer.indexes = [] // [rec1_i, ct1_i, rec2_i, ct2_i, ...]
+			layer.indexes = [] // [rec1_i, ct1_i, z_index1, rec2_i, ct2_i, z_index2, ...]
 	}
 	return layer
 }
@@ -1618,7 +1618,8 @@ function sub_layer(z_index, parent_layer) {
 
 function begin_layer(layer) {
 	layer_stack.push(current_layer)
-	// NOTE: adding the cmd on the same layer will just draw it twice but badly
+	// NOTE: only adding the cmd to the layer if the layer actually changes.
+	// Adding it on the same layer will just draw it twice but badly
 	// since it won't even have the right context!
 	// TODO: because of the condition below, start_recording on a layer and
 	// play_recording on another layer is not supported: either support it
@@ -1660,19 +1661,16 @@ ui.is_flex_child = is_flex_child
 // measuring phase (per-axis) ------------------------------------------------
 
 // walk the element tree bottom-up and call the measure function for each
-// element that has it., uses ct_stack for recursion and containers'
+// element that has it. uses ct_stack for recursion and containers'
 // measure_end callback to do the work.
 
 function measure_rec(a, axis) {
-	let i = 2
-	let n = a.length
-	while (i < n) {
-		let cmd    = a[i-1]
-		let next_i = cmd_next_i(a, i)
+	for (let i = 2, n = a.length; i < n; i = cmd_next_i(a, i)) {
+		let cmd = a[i-1]
 		let measure_f = measure[cmd]
-		if (measure_f)
-			measure_f(a, i, axis)
-		i = next_i
+		if (!measure_f)
+			continue
+		measure_f(a, i, axis)
 	}
 }
 
@@ -1682,11 +1680,14 @@ function measure_rec(a, axis) {
 // element that has it. recursive, uses call stack to pass ct_i and ct_w.
 
 function position_rec(a, axis, ct_w) {
-	let i = 2
-	let cmd = a[i-1]
-	let min_w = a[i+2+axis]
-	let position_f = position[cmd]
-	position_f(a, i, axis, 0, max(min_w, ct_w))
+	for (let i = 2, n = a.length; i < n; i = cmd_next_ext_i(a, i)) {
+		let cmd = a[i-1]
+		let position_f = position[cmd]
+		if (!position_f)
+			continue
+		let min_w = a[i+2+axis]
+		position_f(a, i, axis, 0, max(min_w, ct_w))
+	}
 }
 
 // translation phase ---------------------------------------------------------
@@ -1694,11 +1695,13 @@ function position_rec(a, axis, ct_w) {
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
 function translate_rec(a, x, y) {
-	let i = 2
-	let cmd = a[i-1]
-	let translate_f = translate[cmd]
-	if (translate_f)
+	for (let i = 2, n = a.length; i < n; i = cmd_next_ext_i(a, i)) {
+		let cmd = a[i-1]
+		let translate_f = translate[cmd]
+		if (!translate_f)
+			continue
 		translate_f(a, i, x, y)
+	}
 }
 
 ui.translate = function(a, i) {
@@ -1733,7 +1736,7 @@ function draw_cmd(a, i, recs) {
 function draw_layer(layer_i, indexes, recs) {
 	let prev_layer_i = current_layer_i
 	/*global*/ current_layer_i = layer_i
-	for (let k = 0, n = indexes.length; k < n; k += 2) {
+	for (let k = 0, n = indexes.length; k < n; k += 3) {
 		reset_canvas()
 		let rec_i = indexes[k]
 		let i     = indexes[k+1]
@@ -1797,18 +1800,19 @@ function hover(id) {
 }
 ui.hover = hover
 
-// TODO: make it not depend on i but not on a.at(-1) either!
-ui.nohit = function(i) {
+// nohit command -------------------------------------------------------------
+
+ui.nohit = function(id) {
 	if (!a.nohit_set)
 		a.nohit_set = set()
-	a.nohit_set.add(i ?? a.at(-1))
+	a.nohit_set.add(id)
 }
 
 function hit_layer(layer, recs) {
 	/*global*/ current_layer = layer
 	// iterate layer's cointainers in reverse order.
 	let indexes = layer.indexes
-	for (let k = indexes.length-2; k >= 0; k -= 2) {
+	for (let k = indexes.length-3; k >= 0; k -= 3) {
 		reset_canvas()
 		let rec_i = indexes[k]
 		let i     = indexes[k+1]
@@ -2011,10 +2015,9 @@ function redraw_all() {
 		t0 = clock_ms()
 
 		begin_rec()
+		begin_layer(layer_base)
 		let i = ui.stack()
 		assert(rec_i == 0)
-		assert(i == 2)
-		begin_layer(layer_base)
 		ui.main()
 		reset_spacings()
 		ui.end()
@@ -2114,15 +2117,26 @@ ui.widget = function(cmd_name, t, is_ct) {
 
 // puts prev cmd on a layer.
 let CMD_SET_LAYER = cmd('set_layer')
-function set_layer(layer) {
-	ui_cmd(CMD_SET_LAYER, layer.i)
+function set_layer(layer, z_index) {
+	ui_cmd(CMD_SET_LAYER, layer.i, z_index ?? 0)
 }
+
+// binsearch cmp func for finding last insert position by z_index in flattened
+// array of (rec_i, i, z_index) tuples.
+let cmp_z_index = (a, i, v) => a[i*3+2] <= v
 
 // doesn't have to happen on translate, any event before rendering will do.
 translate[CMD_SET_LAYER] = function(a, i) {
 	let layer_i = a[i+0]
+	let z_index = a[i+1]
 	let layer = layer_arr[layer_i]
-	layer.indexes.push(rec_i, cmd_prev_i(a, i))
+	let cmd_i = cmd_next_i(a, i)
+	if (z_index == 0 && layer.indexes.at(-1) == 0) {
+		layer.indexes.push(rec_i, cmd_i, z_index)
+	} else {
+		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
+		layer.indexes.splice(insert_i, 0, rec_i, cmd_i, z_index)
+	}
 }
 
 // draw_layer command --------------------------------------------------------
@@ -2137,7 +2151,6 @@ draw[CMD_DRAW_LAYER] = function(a, i, recs) {
 	let indexes = a[i+1]
 	draw_layer(layer_i, indexes)
 }
-
 
 // box widgets ---------------------------------------------------------------
 
@@ -3172,6 +3185,7 @@ ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
 
+	let layer_switched = begin_layer(layer)
 	let i = ui_cmd_box_ct(CMD_POPUP,
 		null, // fr -> id
 		null, // align -> side
@@ -3186,7 +3200,7 @@ ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	if (begin_layer(layer))
+	if (layer_switched)
 		force_scope_vars()
 	return i
 }
@@ -4575,7 +4589,7 @@ frame.hit = function(a, i, recs) {
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	let hit_f = hittest[a1[1]]
-	return hit_f(a1, 2, recs)
+	return  (a1, 2, recs)
 }
 
 ui.box_widget('frame', frame)
@@ -5783,8 +5797,10 @@ ui.end_toolboxes = function() {
 		}
 		s.set('to_top', null)
 	}
-	for (let id of order)
-		ui.play_recording(recs.get(id))
+	for (let [id, rec] of recs)
+		ui.play_recording(rec)
+	//for (let id of order)
+	//	ui.play_recording(recs.get(id))
 }
 
 // all-sides resizer widget --------------------------------------------------
@@ -7035,8 +7051,8 @@ function frame_graph_push(name, v) {
 ui.frame_graph_push = frame_graph_push
 
 frame_graph('frame_time'       , '#fff', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_make_time'  , '#ff0', 'ms'  , 1, 0,  1/60 * 1000)
-frame_graph('frame_layout_time', '#0f0', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_make_time'  , '#0f0', 'ms'  , 1, 0,  1/60 * 1000)
+frame_graph('frame_layout_time', '#00f', 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_draw_time'  , '#f00', 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_hit_time'   , '#f0f', 'ms'  , 1, 0,  1/60 * 1000)
 frame_graph('frame_bandwidth'  , '', 'Mbps', 1, 0,     5) // 3Mbps=3G; 5Mbps=720p@60fps
