@@ -1797,10 +1797,11 @@ function hover(id) {
 }
 ui.hover = hover
 
-ui.nohit = function() {
+// TODO: make it not depend on i but not on a.at(-1) either!
+ui.nohit = function(i) {
 	if (!a.nohit_set)
 		a.nohit_set = set()
-	a.nohit_set.add(a.at(-1))
+	a.nohit_set.add(i ?? a.at(-1))
 }
 
 function hit_layer(layer, recs) {
