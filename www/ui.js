@@ -1802,10 +1802,19 @@ ui.hover = hover
 
 // nohit command -------------------------------------------------------------
 
-ui.nohit = function(id) {
+let NOHIT = cmd('nohit')
+ui.nohit = function(ct_i) {
+	ct_i ??= ui.ct_i()
+	let i = ui_cmd(NOHIT, ct_i)
+	a[i] -= i // make it relative
+}
+
+// doesn't have to happen on translate, any stage before hit-testing will do.
+translate[NOHIT] = function(a, i) {
+	let ct_i = i+a[i]
 	if (!a.nohit_set)
 		a.nohit_set = set()
-	a.nohit_set.add(id)
+	a.nohit_set.add(ct_i)
 }
 
 function hit_layer(layer, recs) {
@@ -1818,7 +1827,7 @@ function hit_layer(layer, recs) {
 		let i     = indexes[k+1]
 		let a = recs[rec_i]
 		let hit_f = hittest[a[i-1]]
-		if (!a.nohit_set?.has(i) && hit_f(a, i, recs))
+		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs))
 			return true
 	}
 }
@@ -2125,13 +2134,13 @@ function set_layer(layer, z_index) {
 // array of (rec_i, i, z_index) tuples.
 let cmp_z_index = (a, i, v) => a[i*3+2] <= v
 
-// doesn't have to happen on translate, any event before rendering will do.
+// doesn't have to happen on translate, any stage before drawing will do.
 translate[CMD_SET_LAYER] = function(a, i) {
 	let layer_i = a[i+0]
 	let z_index = a[i+1]
 	let layer = layer_arr[layer_i]
 	let cmd_i = cmd_next_i(a, i)
-	if (z_index == 0 && layer.indexes.at(-1) == 0) {
+	if (z_index == 0 && layer.indexes.at(-1) == 0) { // common path, z-index not used
 		layer.indexes.push(rec_i, cmd_i, z_index)
 	} else {
 		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
@@ -2535,7 +2544,7 @@ function hit_children(a, i, recs) {
 		if (a[i-1] == CMD_END)
 			i = i+a[i+0] // start_i
 		let hit_f = hittest[a[i-1]]
-		if (hit_f && hit_f(a, i, recs)) {
+		if (hit_f && !a.nohit_set?.has(i) && hit_f(a, i, recs)) {
 			return true
 		}
 		i = cmd_prev_i(a, i)
@@ -4589,7 +4598,7 @@ frame.hit = function(a, i, recs) {
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	let hit_f = hittest[a1[1]]
-	return  (a1, 2, recs)
+	return hit_f && !a.nohit_set?.has(i) && hit_f(a1, 2, recs)
 }
 
 ui.box_widget('frame', frame)
