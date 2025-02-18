@@ -1424,6 +1424,9 @@ function ct_stack_check() {
 // "end" command). To skip all container's children and jump to the next
 // sibling we use cmd_next_ext_i(). To go back to the container's command
 // from its "end" command, we use i+a[i].
+// NOTE: Using relative indexes everywhere allows creating command recordings
+// that are relocatable, i.e. can be moved into other recordings without
+// having to reoffset the indexes.
 
 let a = [] // current recording.
 ui.a = a // published for inspecting only.
@@ -1616,18 +1619,17 @@ function sub_layer(z_index, parent_layer) {
 	//layers[z_index] =
 }
 
-function begin_layer(layer) {
+function begin_layer(layer, ct_i, z_index) {
 	layer_stack.push(current_layer)
-	// NOTE: only adding the cmd to the layer if the layer actually changes.
-	// Adding it on the same layer will just draw it twice but badly
-	// since it won't even have the right context!
+	// NOTE: only adding the cmd to the layer if the current layer actually
+	// changes otherwise it will be drawn twice!
 	// TODO: because of the condition below, start_recording on a layer and
 	// play_recording on another layer is not supported: either support it
 	// or prevent it!
 	if (layer == current_layer)
 		return
 	current_layer = layer
-	set_layer(layer)
+	set_layer(layer, ct_i, z_index)
 	return true
 }
 
@@ -2024,8 +2026,8 @@ function redraw_all() {
 		t0 = clock_ms()
 
 		begin_rec()
-		begin_layer(layer_base)
 		let i = ui.stack()
+		begin_layer(layer_base, i)
 		assert(rec_i == 0)
 		ui.main()
 		reset_spacings()
@@ -2124,10 +2126,14 @@ ui.widget = function(cmd_name, t, is_ct) {
 
 // set_layer command ---------------------------------------------------------
 
-// puts prev cmd on a layer.
+// puts a cmd on a layer. the reason for generating a set_layer command
+// instead of just doing the work here is because we might be in a command
+// recording and thus we don't know the final ct_i after the recording is played.
 let CMD_SET_LAYER = cmd('set_layer')
-function set_layer(layer, z_index) {
-	ui_cmd(CMD_SET_LAYER, layer.i, z_index ?? 0)
+function set_layer(layer, ct_i, z_index) {
+	ct_i ??= ui.ct_i()
+	let i = ui_cmd(CMD_SET_LAYER, layer.i, ct_i, z_index ?? 0)
+	a[i+1] -= i // make ct_i relative
 }
 
 // binsearch cmp func for finding last insert position by z_index in flattened
@@ -2137,14 +2143,14 @@ let cmp_z_index = (a, i, v) => a[i*3+2] <= v
 // doesn't have to happen on translate, any stage before drawing will do.
 translate[CMD_SET_LAYER] = function(a, i) {
 	let layer_i = a[i+0]
-	let z_index = a[i+1]
+	let ct_i  = i+a[i+1]
+	let z_index = a[i+2]
 	let layer = layer_arr[layer_i]
-	let cmd_i = cmd_next_i(a, i)
 	if (z_index == 0 && layer.indexes.at(-1) == 0) { // common path, z-index not used
-		layer.indexes.push(rec_i, cmd_i, z_index)
+		layer.indexes.push(rec_i, ct_i, z_index)
 	} else {
 		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
-		layer.indexes.splice(insert_i, 0, rec_i, cmd_i, z_index)
+		layer.indexes.splice(insert_i, 0, rec_i, ct_i, z_index)
 	}
 }
 
@@ -3194,7 +3200,6 @@ ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
 	align = popup_parse_align (align ?? 'c')
 	flags = popup_parse_flags (flags ?? '')
 
-	let layer_switched = begin_layer(layer)
 	let i = ui_cmd_box_ct(CMD_POPUP,
 		null, // fr -> id
 		null, // align -> side
@@ -3209,7 +3214,7 @@ ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	if (layer_switched)
+	if (begin_layer(layer, i))
 		force_scope_vars()
 	return i
 }
