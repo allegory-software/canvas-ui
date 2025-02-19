@@ -412,6 +412,7 @@ html, body {
 	margin: 0;
 	border: 0;
 	overflow: hidden;
+	touch-action: none;
 }
 
 body {
@@ -831,6 +832,7 @@ function resize_canvas() {
 	canvas.style.height = (screen_h / dpr) + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
+	ui.font_size_normal = 14 * dpr
 	animate()
 }
 ui.resize = resize_canvas
@@ -1330,8 +1332,6 @@ ui.on_free = function(id, free1) {
 let color, color_state, font, font_size, font_weight, line_gap
 
 ui.get_font_size = () => font_size
-
-ui.font_size_normal = 14
 
 function reset_canvas() {
 	theme = themes[ui.default_theme]
@@ -7088,7 +7088,7 @@ function draw_graph(x0, y0, w, h, g, with_agg) {
 	cx.clip()
 
 	cx.beginPath()
-	let step = round((g.n / w) * 2)
+	let step = Math.max(1, round((g.n / w) * 2))
 	let i0 = step - g.i % step
 	let n = 0
 	for (let i = 0; i < g.n; i += step) {
