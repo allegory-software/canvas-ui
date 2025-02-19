@@ -319,7 +319,8 @@ grid_rowset = {
 	rows: rows,
 }
 demos.grid = `
-ui.stack('', 0, 'c', 'c', 500, 500)
+ui.m(ui.em(2))
+ui.stack()
 	ui.grid('grid1', {rowset: grid_rowset})
 ui.end_stack()
 `
@@ -358,7 +359,8 @@ tree_rowset = {
 	index_col: 'index',
 }
 demos.treegrid = `
-ui.stack('', 0, 'c', 'c', 500, 500)
+ui.m(ui.em(2))
+ui.stack()
 	ui.grid('treegrid', {
 		rowset: tree_rowset,
 		order_by: 'active name:desc',
@@ -401,7 +403,8 @@ food_rowset = {
 }
 grid_state = {}
 demos.grid_groups = `
-ui.stack('', 0, 'c', 'c', 500, 500)
+ui.m(ui.em(2))
+ui.stack()
 	ui.grid('groups_grid', {
 		rowset: food_rowset,
 		tree_col: 'name',
