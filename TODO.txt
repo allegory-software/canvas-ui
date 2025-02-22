@@ -75,12 +75,12 @@ IMGUI
 
 - drawing
 	* global z-index
-	- local z-index
+	* local z-index
 	* text
 	* bg-color
 	* border
 	* box-shadow
-	- images (incl. svg?)
+	* images (incl. svg)
 - layouting
 	* min width & height
 	* flexbox fr stretch
@@ -93,6 +93,8 @@ IMGUI
 	* text min-w/h
 	* popup layouting
 	* word-wrapping
+	- flex direction
+	- flex item order
 	- grid fr stretch
 	- grid min-w/h grow
 	- grid align

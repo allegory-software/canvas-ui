@@ -254,7 +254,7 @@ TEXT
 	font_weight     (weight)
 	bold            ()
 	nobold          ()
-	lh | line_gap   (gap)
+	lg | line_gap   (gap)
 	xsmall          ()      ui.font_size(.72  )
 	small           ()      ui.font_size(.8125)
 	smaller         ()      ui.font_size(.875 )
@@ -363,6 +363,7 @@ const {
 	transform_point_x,
 	transform_point_y,
 	runevery,
+	day, week, weekday, weekday_name,
 } = glue
 
 let clock_ms = () => performance.now()
@@ -1579,6 +1580,8 @@ let layer_arr = [] // [layer1,...] in creation order
 let layers = [] // [layer1,...] in paint order
 
 function ui_layer(name, index) {
+	if (!name)
+		return current_layer
 	let layer = layer_map[name]
 	if (!layer) {
 		layer = layer_freelist.alloc() // [popup1_i,...]
@@ -1772,21 +1775,26 @@ let hit_state_maps = map() // {id->map}
 
 ui._hit_state_maps = hit_state_maps
 
-function hit(id, k) {
-	if (!id) return
-	if (ui.captured_id != null) // unavailable while captured
-		return
-	let m = hit_state_maps.get(id)
-	return k ? m?.get(k) : m
-}
-ui.hit = hit
-
 function hovers(id, k) {
 	if (!id) return
 	let m = hit_state_maps.get(id)
 	return k ? m?.get(k) : m
 }
 ui.hovers = hovers
+
+function hit(id, k) {
+	if (ui.captured_id != null) // unavailable while captured
+		return
+	return hovers(id, k)
+}
+ui.hit = hit
+
+function hit_match(prefix) {
+	for (let [id] of hit_state_maps)
+		if (id.startsWith(prefix))
+			return id.substring(prefix.length)
+}
+ui.hit_match = hit_match
 
 function hover(id) {
 	if (!id) return
@@ -3968,7 +3976,7 @@ ui.line_gap = function(s) {
 	if (line_gap == s) return
 	force_line_gap(s)
 }
-ui.lh = line_gap
+ui.lg = line_gap
 
 function set_font(a, i) {
 	font = a[i]
@@ -6496,8 +6504,104 @@ ui.box_widget('slider', {
 
 // calendar ------------------------------------------------------------------
 
+function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
+
+	let id = a[i+FRAME_ARGS_I]
+
+	let now = time()
+
+
+	// break down scroll offset into start week and relative scroll offset.
+	let sy_weeks_f = sy_now / cell_h
+	let sy_weeks = trunc(sy_weeks_f)
+	let sy = (sy_weeks_f - sy_weeks) * cell_h
+	let week0 = week(start_week, -sy_weeks)
+
+	let week0 = week(now)
+	let today = day(now)
+
+	// align UTC-today to local-today.
+	let today_local = day(now, 0, true)
+	if (month_day_of(today_local, true) != month_day_of(today))
+		today = day(today, today_local < today ? -1 : 1)
+
+	let cell_w = snap(ui.em(2), 2)
+	let cell_h = snap(ui.em(2), 2)
+
+	let visible_weeks = floor(view_h / cell_h) + 2
+
+	let hit_day = num(ui.hit_match(id+'.day.'))
+	if (hit_day) {
+		let [dstate] = ui.drag(id+'.day.'+hit_day)
+		if (dstate == 'drag')
+			ui.state(id).set('day', hit_day)
+	}
+	let sel_day = ui.state(id, 'day')
+
+	ui.mt(vy - y)
+	ui.v(0)
+	let d_days = -7
+	for (let week_i = -1; week_i <= visible_weeks; week_i++) {
+		ui.h(0)
+		for (let weekday = 0; weekday < 7; weekday++) {
+			let d = day(week0, d_days)
+			let m = month(d)
+			let n = floor(1 + days(d - m))
+
+			ui.p(ui.sp())
+			ui.stack(id+'.day.'+d)
+				if (d == today)
+					ui.bb('marker')
+				else if (d == hit_day)
+					ui.bb('bg1', null)
+				else if (d == sel_day)
+					ui.bb('item', 'item-focused item-selected focused')
+				//ui.border(1, 'intense')
+				ui.text('', n+'', 0, 'r', 'c', null, ui.em(2))
+			ui.end_stack()
+
+			d_days++
+		}
+		ui.end_h()
+	}
+	ui.end_v()
+}
+
 ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 
+	let s = ui.state(id)
+	let h = s.get('h') ?? 0
+	let cell_w = snap(ui.em(2), 2)
+	let cell_h = snap(ui.em(2), 2)
+	let cells_w = cell_w * 7
+	let cells_h = h * 2
+
+	ui.v(fr, 0, align, valign, min_w, min_h ?? cell_h * 6)
+
+		let now = time()
+		let week0 = week(now)
+
+		// week days header
+		ui.h(0)
+		ui.bb('bg1')
+		for (let weekday = 0; weekday < 7; weekday++) {
+			let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
+			ui.p(ui.sp())
+			ui.text('', s, 0, 'r', 'c', null, ui.em(2))
+		}
+		ui.end_h()
+
+		// days in virtual scrollbox
+		ui.scrollbox(id, 1, null, null, 's', 's')
+		ui.measure(id)
+			ui.bb('bg0')
+			//s.set('scroll_y', round(h / 2))
+			ui.frame(noop, on_calendar_frame, 0, 'l', 't', cells_w, cells_h,
+				id,
+		)
+		ui.end_scrollbox()
+
+	ui.end_v()
 }
 
 // image ---------------------------------------------------------------------
