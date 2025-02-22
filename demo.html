@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-<body>
+<head>
 <base href="www/">
 <link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2">
 <link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2">
@@ -12,12 +12,22 @@
 <script src=ui_grid.js></script>
 <script src=adapter.js></script>
 <script src=webrtc.js></script>
+<!--
+NOTE: Setting the background color for the html element before declaring
+the <body> element prevents the body from rendering white for a split second
+(and thus flickering when refreshing the page). This happens only in Chrome.
+-->
 <script>
 
 let demo_state = json_arg(load('demo_state')) ?? {}
+ui.set_default_theme(demo_state.theme ?? 'dark')
+
 ui.DEBUG      = demo_state.debug ?? true
 SELECTED_DEMO = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
-ui.set_default_theme(demo_state.theme ?? 'dark')
+
+</script>
+<body>
+<script>
 
 function save_demo_state(k, v) {
 	demo_state[k] = v
@@ -26,16 +36,6 @@ function save_demo_state(k, v) {
 
 let tuts = []
 let demos = []
-
-ui.frame_changed = async function() {
-	if (!offer_con) return
-	let cb = await ui.pack_frame()
-	offer_con.send(cb)
-}
-
-listen('rtc', function(c) {
-	ui.animate()
-})
 
 demos.frame = `
 ui.scrollbox('sb1')
@@ -50,144 +50,6 @@ ui.scrollbox('sb1')
 	}
 	ui.frame(on_measure, on_frame)
 ui.end_scrollbox()
-`
-
-let signal_server, offer_con
-
-function demo_share_screen_init() {
-	signal_server = signal_server || rtc.demo_signal_server()
-	if (!offer_con) {
-		offer_con = rtc.offer({signal_server: signal_server})
-		let p = ui.add_pointer()
-		offer_con.pointer = p
-		offer_con.recv = function(s) {
-			let t = json_arg(s)
-			assign(p, t)
-			p.activate()
-			ui.animate()
-		}
-	}
-}
-
-demos.share_screen = `
-ui.mt(ui.sp())
-ui.v(1, ui.sp())
-	ui.ml(ui.sp())
-	demo_share_screen_init()
-	ui.h(0, ui.sp())
-		ui.text('', 'My ID', 0)
-		let my_sid = offer_con.signal_con.sid
-		ui.state('sid').set('text', my_sid)
-		ui.input('sid')
-		ui.text('', 'Other ID', 0)
-		let to_sid = ui.input('to_sid')
-		if (!offer_con.open && my_sid)
-			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10)))
-				offer_con.connect(to_sid)
-		if (offer_con.open)
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10)))
-				offer_con.close()
-	ui.end_h()
-	ui.ml(ui.sp())
-	ui.h(0)
-		ui.text('', 'Status: ', 0)
-		ui.text('', offer_con.open ? 'Open' : 'Closed')
-	ui.end_h()
-ui.end_v()
-`
-
-let answer_con
-
-function demo_see_screen_init() {
-	signal_server = signal_server || rtc.demo_signal_server()
-	answer_con = answer_con || rtc.answer({signal_server: signal_server})
-}
-
-demos.see_screen = `
-
-ui.mt(ui.sp())
-ui.v(1, ui.sp())
-	ui.ml(ui.sp())
-	demo_see_screen_init()
-	ui.h(0, ui.sp())
-		ui.text('', 'My ID', 0)
-		let my_sid = answer_con.signal_con.sid
-		ui.state('sid').set('text', my_sid)
-		ui.input('sid')
-		ui.text('', 'Other ID')
-		let to_sid = ui.input('to_sid')
-		if (!answer_con.open && my_sid)
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10)))
-				answer_con.connect(to_sid)
-		if (answer_con.open)
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10)))
-				answer_con.close()
-	ui.end_h()
-	ui.scrollbox('sb_shared_screen')
-		ui.border('t', 'light')
-		ui.shared_screen('ss1', answer_con)
-	ui.end_scrollbox()
-ui.end_v()
-
-`
-
-enter_see_this_screen = function() {
-	let signal_server = rtc.mock_signal_server()
-	let offer_con  = rtc.offer ({signal_server: signal_server, recv: pr})
-	let answer_con = rtc.answer({signal_server: signal_server, recv: pr})
-}
-
-if(0)
-demos.see_this_screen = `
-ui.mt(ui.sp())
-ui.v(1, ui.sp())
-	ui.ml(ui.sp())
-	ui.h(0, ui.sp())
-		ui.text('', 'My ID')
-		let my_sid = str(offer_con.signal_con.sid)
-		ui.state('offer_sid').set('text', my_sid)
-		ui.input('offer_sid')
-		if (offer_con.open) {
-			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
-				offer_con.close()
-			}
-		} else if (answer_con.open) {
-			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
-				answer_con.close()
-			}
-		} else {
-			if (my_sid) {
-				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
-					offer_con.connect(to_sid)
-				}
-			}
-			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
-				answer_con.connect(to_sid)
-			}
-		}
-
-		/*
-		ui.state('in_send').set('text', json(signal_queue.signals))
-		ui.input('in_send')
-		if (ui.button('btn_send')) {
-			signal_queue.signals.length = 0
-		}
-		let answer = ui.input('in_answer')
-
-		let in_recv = ui.input('in_recv')
-		if (ui.button('btn_recv')) {
-			for (let [id, k, v] of json_arg(in_recv)) {
-				rtc.signal_server.signal(id, k, v)
-			}
-		}
-		*/
-
-	ui.end_h()
-	ui.scrollbox('sb_shared_screen')
-		ui.border('t', 'light')
-		ui.shared_screen('ss1', answer_con)
-	ui.end_scrollbox()
-ui.end_v()
 `
 
 demos.silder = `
@@ -501,14 +363,14 @@ tuts.font_size = `
 // to style up the text in the current container.
 
 ui.v(0, 20, 'c', 'c')
-	ui.font_size(24)
+	ui.font_size(2)
 	ui.color(':teal')
 	ui.text('', 'Buongiorno!')
 	ui.h(0, 10, 'c')
 		// font and color changes are scoped.
 		// when this container ends, previus settings take effect.
 		ui.font('Serif')
-		ui.font_size(42)
+		ui.font_size(3.5)
 		ui.font_weight('bold')
 		ui.color(':green')
 		ui.text('', 'Hello')
@@ -826,6 +688,24 @@ ui.end_toolbox()
 ui.end_toolboxes()
 `
 
+demos.layers = `
+ui.m(ui.em(2))
+ui.sb('layers_sb', 1)
+	ui.stack('', 1, 'l', 't', 2000, 2000)
+		ui.bb('bg0')
+		//ui.ml(ui.em(5))
+		ui.popup('leyer1_popup', 'layer1', null, 'il', 'c', 100, 50,'change_side constrain')
+			ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+		ui.end_popup()
+		//ui.mt(ui.em(5))
+		ui.popup('leyer1_popup', 'layer1', null, 'it', '[', 100, 50, 'change_side constrain')
+			ui.bb_tooltip('bg2', null, 'intense', null, ui.sp1())
+		ui.end_popup()
+		ui.draw_layer('layer1')
+	ui.end_stack()
+ui.end_sb()
+`
+
 let test_template = {
 	t: 'v', fr: 2, gap: 20, e: [
 		{t: 'text', id: 't1', s: 'TP Hello!'},
@@ -845,6 +725,158 @@ ui.stack('', 0, 'c', 'c', 400)
 ui.end_stack()
 `
 
+// screen sharing ------------------------------------------------------------
+
+ui.frame_changed = async function() {
+	if (!offer_con) return
+	let cb = await ui.pack_frame()
+	offer_con.send(cb)
+}
+
+listen('rtc', function(c) {
+	ui.animate()
+})
+
+let signal_server, offer_con
+
+function demo_share_screen_init() {
+	signal_server = signal_server || rtc.demo_signal_server()
+	if (!offer_con) {
+		offer_con = rtc.offer({signal_server: signal_server})
+		let p = ui.add_pointer()
+		offer_con.pointer = p
+		offer_con.recv = function(s) {
+			let t = json_arg(s)
+			assign(p, t)
+			p.activate()
+			ui.animate()
+		}
+	}
+}
+
+demos.share_screen = `
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	demo_share_screen_init()
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID', 0)
+		let my_sid = offer_con.signal_con.sid
+		ui.state('sid').set('text', my_sid)
+		ui.input('sid')
+		ui.text('', 'Other ID', 0)
+		let to_sid = ui.input('to_sid')
+		if (!offer_con.open && my_sid)
+			if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10)))
+				offer_con.connect(to_sid)
+		if (offer_con.open)
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10)))
+				offer_con.close()
+	ui.end_h()
+	ui.ml(ui.sp())
+	ui.h(0)
+		ui.text('', 'Status: ', 0)
+		ui.text('', offer_con.open ? 'Open' : 'Closed')
+	ui.end_h()
+ui.end_v()
+`
+
+let answer_con
+
+function demo_see_screen_init() {
+	signal_server = signal_server || rtc.demo_signal_server()
+	answer_con = answer_con || rtc.answer({signal_server: signal_server})
+}
+
+demos.see_screen = `
+
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	demo_see_screen_init()
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID', 0)
+		let my_sid = answer_con.signal_con.sid
+		ui.state('sid').set('text', my_sid)
+		ui.input('sid')
+		ui.text('', 'Other ID')
+		let to_sid = ui.input('to_sid')
+		if (!answer_con.open && my_sid)
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10)))
+				answer_con.connect(to_sid)
+		if (answer_con.open)
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10)))
+				answer_con.close()
+	ui.end_h()
+	ui.scrollbox('sb_shared_screen')
+		ui.border('t', 'light')
+		ui.shared_screen('ss1', answer_con)
+	ui.end_scrollbox()
+ui.end_v()
+
+`
+
+enter_see_this_screen = function() {
+	let signal_server = rtc.mock_signal_server()
+	let offer_con  = rtc.offer ({signal_server: signal_server, recv: pr})
+	let answer_con = rtc.answer({signal_server: signal_server, recv: pr})
+}
+
+if(0)
+demos.see_this_screen = `
+ui.mt(ui.sp())
+ui.v(1, ui.sp())
+	ui.ml(ui.sp())
+	ui.h(0, ui.sp())
+		ui.text('', 'My ID')
+		let my_sid = str(offer_con.signal_con.sid)
+		ui.state('offer_sid').set('text', my_sid)
+		ui.input('offer_sid')
+		if (offer_con.open) {
+			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
+				offer_con.close()
+			}
+		} else if (answer_con.open) {
+			if (ui.button('btn_stop_seeing', 'Stop Seeing', 0, 'c', 'c', ui.em(10))) {
+				answer_con.close()
+			}
+		} else {
+			if (my_sid) {
+				if (ui.button('btn_make_offer', 'Share Screen', 0, 'c', 'c', ui.em(10))) {
+					offer_con.connect(to_sid)
+				}
+			}
+			if (ui.button('btn_accept_offer', 'See Screen', 0, 'c', 'c', ui.em(10))) {
+				answer_con.connect(to_sid)
+			}
+		}
+
+		/*
+		ui.state('in_send').set('text', json(signal_queue.signals))
+		ui.input('in_send')
+		if (ui.button('btn_send')) {
+			signal_queue.signals.length = 0
+		}
+		let answer = ui.input('in_answer')
+
+		let in_recv = ui.input('in_recv')
+		if (ui.button('btn_recv')) {
+			for (let [id, k, v] of json_arg(in_recv)) {
+				rtc.signal_server.signal(id, k, v)
+			}
+		}
+		*/
+
+	ui.end_h()
+	ui.scrollbox('sb_shared_screen')
+		ui.border('t', 'light')
+		ui.shared_screen('ss1', answer_con)
+	ui.end_scrollbox()
+ui.end_v()
+`
+
+// demo ui -------------------------------------------------------------------
+
 let demos_array; {
 let t = {}
 for (let k in tuts)
@@ -859,13 +891,13 @@ ui.main = function() {
 
 	ui.v()
 
-		ui.stack(0, 0, 's', 't', null, ui.em(4))
+		ui.stack(0, 0, 's', 't', null, ui.em(2))
 			ui.p(ui.sp4(), ui.sp4(), ui.sp2(), ui.sp2())
 			ui.h()
 				ui.bb(':rgb(0, 125, 184)')
 				let svg = 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB2ZXJzaW9uPSIxLjEiIHZpZXdCb3g9IjAgMCA3MiA5LjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6Y2M9Imh0dHA6Ly9jcmVhdGl2ZWNvbW1vbnMub3JnL25zIyIgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogPHBhdGggZD0ibTI4LjEgMC44NTd2LTAuMjkxbC0wLjEyNS0wLjA4M2gtNC45OGwtMC4wODMgMC4wODN2MC4yOTFsMC4wODMgMC4wODNoMi4xMmwwLjA4MyAwLjA4M3Y2LjA2bDAuMDgzIDAuMDgzaDAuMzc0bDAuMDgzLTAuMDgzdi02LjAybDAuMDgzLTAuMDgzaDIuMTZsMC4xMjUtMC4xMjR6bTEuMTIgMS40NWMtMS4zMyAwLTIuMTIgMC45NTQtMi4xMiAyLjMydjAuMjA5YzAgMS4zMyAwLjY2NSAyLjQ5IDIuMiAyLjQ5IDEuMzMgMCAxLjgzLTAuODcyIDEuOTEtMS40NWwtMC4wODItMC4wODJoLTAuMzc1bC0wLjA4MiAwLjA4MmMtMC4yMDggMC41ODEtMC41ODMgMC45NTUtMS4zMyAwLjk1NS0xLjI1IDAtMS42Mi0xLjE2LTEuNjItMS43NGwwLjA4NC0wLjA4MmgzLjQ1bDAuMDg0LTAuMDg0di0wLjI5MWMwLTEuMzctMC43NDctMi4zMi0yLjEyLTIuMzJ6bTAgMC40OThjMC41ODEgMCAwLjk2NCAwLjIzOSAxLjIgMC41NjEgMC4yMzkgMC4zMjIgMC4zMzIgMC43MjYgMC4zMzIgMS4wNmwtMC4wODIgMC4wODRoLTIuOTFsLTAuMDg0LTAuMDg0YzAtMC4zMzIgMC4wOTMzLTAuNzM3IDAuMzMyLTEuMDYgMC4yMzktMC4zMjIgMC42MjQtMC41NjEgMS4yMS0wLjU2MXptMy4wNyAxLjk5YzAtMS4zMyAwLjY2NC0yLjAzIDEuNjItMi4wMyAwLjk1NSAwIDEuMzMgMC41ODEgMS40NSAxLjE2bDAuMDgzIDAuMDgzaDAuNDE1bDAuMDgzLTAuMDgzYy0wLjA4My0wLjk1NS0wLjg3Mi0xLjYyLTIuMDMtMS42Mi0xLjI1IDAtMi4yIDAuNzg5LTIuMiAyLjQ5IDAgMS43NCAwLjk1NSAyLjQ5IDIuMiAyLjQ5IDEuMTYgMCAxLjkxLTAuNjY0IDIuMDMtMS42MmwtMC4wODMtMC4wODNoLTAuMzc0bC0wLjA4MyAwLjA4M2MtMC4wODMgMC41ODEtMC40OTggMS4xNi0xLjQ1IDEuMTYtMC45NTUgMC0xLjY2LTAuNjY0LTEuNjYtMi4wM3ptOC4zIDIuMzN2LTIuOTFjMC0xLjI1LTAuNjY0LTEuOTEtMS43NC0xLjkxLTAuNjY0IDAtMS4yNSAwLjI5MS0xLjU0IDAuNzg5aC0wLjA4M3YtMi40OWwtMC4xMjUtMC4xMjRoLTAuMzc0bC0wLjA4MyAwLjA4M3Y2LjU2bDAuMDgzIDAuMDgzaDAuMzc0bDAuMDgzLTAuMDgzdi0yLjYyYzAtMS4wOCAwLjQ5OC0xLjc0IDEuNTQtMS43NCAwLjc4OSAwIDEuMjUgMC40OTggMS4yNSAxLjQ1djIuOTFsMC4wODMgMC4wODNoMC4zNzRsMC4xNjYtMC4wODN6bTQuOSAwdi0yLjkxYzAtMS4yNS0wLjY2NC0xLjkxLTEuNzQtMS45MS0wLjY2NCAwLTEuMjUgMC4yOTEtMS41NCAwLjc4OWgtMC4wODNsLTAuMDgzLTAuNTgxLTAuMDgzLTAuMDgzaC0wLjI5MWwtMC4wODMgMC4wODN2NC42MWwwLjA4MyAwLjA4M2gwLjM3NGwwLjA4My0wLjA4M3YtMi42MmMwLTEuMDggMC40OTgtMS43NCAxLjU0LTEuNzQgMC43ODkgMCAxLjI1IDAuNDk4IDEuMjUgMS40NXYyLjkxbDAuMDgzIDAuMDgzaDAuNDE1bDAuMDgzLTAuMDgzem0yLjc4LTQuNzhjLTEuMjUgMC0yLjIgMC44NzMtMi4yIDIuNDkgMCAxLjYyIDAuOTU2IDIuNDkgMi4yIDIuNDlzMi4yLTAuODcxIDIuMi0yLjQ5YzAtMS42Mi0wLjk1Ni0yLjQ5LTIuMi0yLjQ5em0wIDAuNDU3YzAuNDc4IDAgMC44ODIgMC4xOTggMS4xNyAwLjU1MSAwLjI4NSAwLjM1MyAwLjQ1MSAwLjg2MiAwLjQ1MSAxLjQ4IDAgMC42MjMtMC4xNjYgMS4xMy0wLjQ1MSAxLjQ4LTAuMjg1IDAuMzUzLTAuNjkgMC41NDktMS4xNyAwLjU0OS0wLjQ3OCAwLTAuODgyLTAuMTk2LTEuMTctMC41NDktMC4yODUtMC4zNTMtMC40NTEtMC44NjItMC40NTEtMS40OCAwLTAuNjQ0IDAuMTY2LTEuMTUgMC40NTEtMS41IDAuMjg1LTAuMzQ4IDAuNjktMC41MzUgMS4xNy0wLjUzNXptMy40OSA0LjMydi02LjU2bC0wLjEyNS0wLjA4M2gtMC4zNzRsLTAuMDgzIDAuMDgzdjYuNTZsMC4wODMgMC4wODNoMC4zNzRsMC4xMjUtMC4wODN6bTIuODctNC43OGMtMS4yNSAwLTIuMiAwLjg3My0yLjIgMi40OSAwIDEuNjIgMC45NTYgMi40OSAyLjIgMi40OXMyLjItMC44NzEgMi4yLTIuNDljMC0xLjYyLTAuOTU0LTIuNDktMi4yLTIuNDl6bTAgMC40NTdjMC40NzggMCAwLjg4MSAwLjE5OCAxLjE3IDAuNTUxIDAuMjg1IDAuMzUzIDAuNDUzIDAuODYyIDAuNDUzIDEuNDggMCAwLjYyMy0wLjE2OCAxLjEzLTAuNDUzIDEuNDgtMC4yODUgMC4zNTMtMC42ODkgMC41NDktMS4xNyAwLjU0OS0wLjQ3OCAwLTAuODgyLTAuMTk2LTEuMTctMC41NDktMC4yODctMC4zNTMtMC40NTUtMC44NjItMC40NTUtMS40OCAwLTAuNjQ0IDAuMTY4LTEuMTUgMC40NTMtMS41IDAuMjg1LTAuMzQ4IDAuNjktMC41MzUgMS4xNy0wLjUzNXptNC43My0wLjQ5OGMtMS4zMyAwLTIuMDQgMS4wOC0yLjA0IDIuNDkgMCAxLjQ1IDAuNjY1IDIuNDkgMi4wNCAyLjQ5IDAuODcyIDAgMS4zMy0wLjM3NCAxLjU0LTAuNzg5djAuMDQxYzAgMS4yNS0wLjI5IDIuMi0xLjQ1IDIuMi0wLjg3MiAwLTEuMTYtMC4zNzMtMS4yNS0wLjg3MWwtMC4wODQtMC4wODRoLTAuMzczbC0wLjA4NCAwLjA4NGMwLjA4MyAwLjc4OSAwLjY2NiAxLjMzIDEuODMgMS4zMyAxLjI1IDAgMi4wNC0wLjc4OSAyLjA0LTIuN3YtMy45OWwtMC4wODQtMC4wODJoLTAuMjkxbC0wLjA4MiAwLjA4Mi0wLjA4NCAwLjU4MmgtMC4wODJjLTAuMjA4LTAuMzc0LTAuNjY1LTAuNzg5LTEuNTQtMC43ODl6bTAgMC40NTdjMC40NzggMCAwLjg2MiAwLjE2NSAxLjEzIDAuNTAyIDAuMjY1IDAuMzM3IDAuNDEgMC44NDYgMC40MSAxLjUzIDAgMC42ODUtMC4xNDUgMS4xOS0wLjQxIDEuNTMtMC4yNjUgMC4zMzctMC42NDkgMC41MDQtMS4xMyAwLjUwNC0wLjQ3OCAwLTAuODYyLTAuMTY3LTEuMTMtMC41MDQtMC4yNjUtMC4zMzctMC40MDgtMC44NDYtMC40MDgtMS41MyAwLTAuNjY0IDAuMTQ0LTEuMTcgMC40MDgtMS41MiAwLjI2NS0wLjM0MyAwLjY0OS0wLjUxOCAxLjEzLTAuNTE4em0zLjY1LTEuMnYtMC41ODFsLTAuMDgzLTAuMDgzaC0wLjM3NGwtMC4xMjUgMC4wODN2MC41ODFsMC4wODMgMC4wODNoMC4zNzRsMC4xMjUtMC4wODN6bTAgNS41NnYtNC42MWwtMC4wODMtMC4wODNoLTAuMzc0bC0wLjEyNSAwLjA4M3Y0LjYxbDAuMDgzIDAuMDgzaDAuMzc0bDAuMTI1LTAuMDgzem0yLjc4LTQuODJjLTEuMzMgMC0yLjEyIDAuOTU0LTIuMTIgMi4zMnYwLjIwOWMwIDEuMzMgMC42NjUgMi40OSAyLjIgMi40OSAxLjMzIDAgMS44My0wLjg3MiAxLjkxLTEuNDVsLTAuMDg0LTAuMDgyaC0wLjM3M2wtMC4wODQgMC4wODJjLTAuMjA4IDAuNTgxLTAuNTgxIDAuOTU1LTEuMzMgMC45NTUtMS4yNSAwLTEuNjItMS4xNi0xLjYyLTEuNzRsMC4wODQtMC4wODJoMy40NWwwLjA4NC0wLjA4NHYtMC4yOTFjMC0xLjMzLTAuNzktMi4zMi0yLjEyLTIuMzJ6bTAgMC40OThjMC41ODEgMCAwLjk2NiAwLjIzOSAxLjIxIDAuNTYxIDAuMjM5IDAuMzIyIDAuMzMyIDAuNzI2IDAuMzMyIDEuMDZsLTAuMDg0IDAuMDg0aC0yLjkxbC0wLjA4Mi0wLjA4NGMwLTAuMzMyIDAuMDkzMy0wLjczNyAwLjMzMi0xLjA2IDAuMjM5LTAuMzIyIDAuNjIyLTAuNTYxIDEuMi0wLjU2MXptNi4xOSAzLjE2YzAtMC44NzItMC40OTgtMS4yNS0xLjQ1LTEuNDUtMC45NTUtMC4yMDgtMS41NC0wLjI5MS0xLjU0LTAuOTU1IDAtMC40OTggMC4zNzQtMC43ODkgMS4wOC0wLjc4OSAwLjg3MiAwIDEuMTYgMC4zNzQgMS4xNiAwLjg3MmwwLjA4MyAwLjA4M2gwLjM3NGwwLjA4MzEtMC4wODNjMC0wLjk1NS0wLjc4OS0xLjMzLTEuNzQtMS4zMy0xLjA4IDAtMS42MiAwLjU4MS0xLjYyIDEuMjUgMCAwLjc4OSAwLjU4MSAxLjE2IDEuNTQgMS4zMyAwLjk1NSAwLjIwOCAxLjQ1IDAuMjkxIDEuNDUgMS4wOCAwIDAuNDk4LTAuMjkxIDAuODcyLTEuMjUgMC44NzItMC44NzIgMC0xLjI1LTAuNDk4LTEuMjUtMS4wOGwtMC4wODMxLTAuMDgzaC0wLjM3NGwtMC4wODMxIDAuMDgzYzAgMC44NzIgMC42NjQgMS41NCAxLjgzIDEuNTQgMS4yIDAuMDQyIDEuNzktMC41NCAxLjc5LTEuMzN6IiBmaWxsPSIjZmZmZmZmIi8+CiA8cGF0aCBkPSJtMjIuOSA1Ljc5djEuMzdoLTQuMzJ2LTYuNzhoMS41N3Y1LjRoMi43NXptLTEzLjEtNS43OS0zLjgzIDIuOTVjLTAuMzkzLTEuNDctMS42Ny0yLjU1LTMuMjQtMi41NWgtMi43NXY2Ljc4aDIuNzVjMS41NyAwIDIuOTUtMS4wOCAzLjI0LTIuNTVsMy44MyAyLjk1IDMuODMtMi45NXYyLjU1aDQuMzJ2LTEuMzhoLTIuODV2LTUuNGgtMS41N3YyLjU1bC0zLjYzIDIuOTUtMC43ODUtMC42ODggMS43Ny0xLjM4IDEuODctMS40Ny0xLjA4LTAuODgzLTMuNjMgMi44NS0wLjc4NS0wLjY4OCAzLjYzLTIuNzUtMS4wOC0wLjg4M2gtMC4wMDE5em0tOC4zNSAxLjc3aDEuMThjMC4yNDUgMCAwLjQ4NiAwLjA1NSAwLjcwNyAwLjE1NiAwLjIyMSAwLjEwMSAwLjQyNCAwLjI0OSAwLjU5NiAwLjQzNCAwLjE3MiAwLjE4NCAwLjMxMiAwLjQwNCAwLjQxIDAuNjUyIDAuMDk4MiAwLjI0OSAwLjE1MiAwLjUyNiAwLjE1MiAwLjgyIDAgMC4yNy0wLjA0ODEgMC41MzMtMC4xMzkgMC43NzctMC4wOTA2IDAuMjQ0LTAuMjIzIDAuNDY4LTAuMzg5IDAuNjU4LTAuMTY2IDAuMTktMC4zNjQgMC4zNDYtMC41OSAwLjQ1NS0wLjIyNiAwLjEwOS0wLjQ3OCAwLjE3LTAuNzQ4IDAuMTdoLTEuMTh2LTQuMTJ6IiBmaWxsPSIjZmZmZmZmIi8+Cjwvc3ZnPgo='
 				ui.img(svg, 1, 'l', 'c')
-				ui.font_size(52)
+				ui.font_size(3)
 				ui.mr(ui.sp())
 				ui.color(':white')
 				ui.text('', 'Defuser', 0, 'r')

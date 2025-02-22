@@ -14,7 +14,7 @@ GLOBLAS
 
 	scrollbar_thickness         = 6
 	scrollbar_thickness_active  = 12
-	font_size_normal            = 14
+	font_size_normal            = 12
 
 THEME DEFINITIONS
 
@@ -231,7 +231,7 @@ CONTAINERS
 	h | v           (fr, gap, align, valign, min_w, min_h)
 	stack           (id, fr, align, valign, min_w, min_h)
 	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy)
-	popup           (id, layer_name, target_i, side, align, min_w, min_h, flags)
+	popup           (id, layer, target_i, side, align, min_w, min_h, flags)
 	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
 	splitter        ()
 	toolbox         (id, title, align, valign, x0, y0, target_i)
@@ -255,11 +255,11 @@ TEXT
 	bold            ()
 	nobold          ()
 	lh | line_gap   (gap)
-	xsmall          ()      ui.font_size(font_size_normal * .72   )   // 10/14
-	small           ()      ui.font_size(font_size_normal * .8125 )   // 12/14
-	smaller         ()      ui.font_size(font_size_normal * .875  )   // 13/14
-	large           ()      ui.font_size(font_size_normal * 1.125 )   // 16/14
-	xlarge          ()      ui.font_size(font_size_normal * 1.5   )   // 21/14
+	xsmall          ()      ui.font_size(.72  )
+	small           ()      ui.font_size(.8125)
+	smaller         ()      ui.font_size(.875 )
+	large           ()      ui.font_size(1.125)
+	xlarge          ()      ui.font_size(1.5  )
 
 	get_font_size   () -> font_size
 
@@ -832,7 +832,7 @@ function resize_canvas() {
 	canvas.style.height = (screen_h / dpr) + 'px'
 	canvas.width  = screen_w
 	canvas.height = screen_h
-	ui.font_size_normal = 14 * dpr
+	ui.font_size_normal = 12 * dpr
 	animate()
 }
 ui.resize = resize_canvas
@@ -860,17 +860,18 @@ function set_screen_bg() {
 	theme = themes[ui.default_theme]
 	document.documentElement.style.background = bg_color('bg')
 }
-// prevent flicker on load by setting the screen's background color now.
 ui.set_default_theme = function(theme) {
 	ui.default_theme = theme
 	set_screen_bg()
 }
 
+// prevent flicker on load by setting the screen's background color now.
+set_screen_bg()
+
 document.addEventListener('DOMContentLoaded', function() {
 	ready = true
 	assert(ui.main, 'ui.main not set')
 	document.body.appendChild(ui.screen)
-	reset_canvas()
 	resize_canvas()
 	canvas.focus()
 })
@@ -1334,6 +1335,7 @@ let color, color_state, font, font_size, font_weight, line_gap
 ui.get_font_size = () => font_size
 
 function reset_canvas() {
+	if (!dpr) return // resize_canvas() wasn't called yet (shouldn't happen).
 	theme = themes[ui.default_theme]
 	color = 'text'
 	color_state = 0
@@ -1581,7 +1583,8 @@ function ui_layer(name, index) {
 	if (!layer) {
 		layer = layer_freelist.alloc() // [popup1_i,...]
 		layer.name = assert(name)
-		insert(layers, index, layer)
+		if (index != null)
+			insert(layers, index, layer)
 		layer_map[name] = layer
 		layer_arr.push(layer)
 		layer.i = layer_arr.length-1
@@ -2025,6 +2028,8 @@ function redraw_all() {
 
 		t0 = clock_ms()
 
+		reset_canvas()
+
 		begin_rec()
 		let i = ui.stack()
 		begin_layer(layer_base, i)
@@ -2130,6 +2135,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 // instead of just doing the work here is because we might be in a command
 // recording and thus we don't know the final ct_i after the recording is played.
 let CMD_SET_LAYER = cmd('set_layer')
+let SET_LAYER_Z_INDEX = 2
 function set_layer(layer, ct_i, z_index) {
 	ct_i ??= ui.ct_i()
 	let i = ui_cmd(CMD_SET_LAYER, layer.i, ct_i, z_index ?? 0)
@@ -2158,13 +2164,14 @@ translate[CMD_SET_LAYER] = function(a, i) {
 
 let CMD_DRAW_LAYER = cmd('draw_layer')
 ui.draw_layer = function(layer) {
+	layer = ui_layer(layer)
 	ui_cmd(CMD_DRAW_LAYER, layer.i, layer.indexes)
 }
 
 draw[CMD_DRAW_LAYER] = function(a, i, recs) {
 	let layer_i = a[i+0]
 	let indexes = a[i+1]
-	draw_layer(layer_i, indexes)
+	draw_layer(layer_i, indexes, recs)
 }
 
 // box widgets ---------------------------------------------------------------
@@ -3191,8 +3198,8 @@ const POPUP_SIDE_REAL = S+3
 
 const CMD_POPUP = cmd_ct('popup')
 
-ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
-	let layer = layer_name ? ui_layer(layer_name) : current_layer
+ui.popup = function(id, layer, target, side, align, min_w, min_h, flags, z_index) {
+	layer = ui_layer(layer)
 	let target_i = target == 'screen' ? 0
 		: !target || target == 'container' ? ui.ct_i()
 		: assert(num(target), 'invalid target ', target)
@@ -3214,12 +3221,20 @@ ui.popup = function(id, layer_name, target, side, align, min_w, min_h, flags) {
 	a[i+POPUP_ID   ] = id
 	a[i+POPUP_SIDE ] = side
 	a[i+POPUP_ALIGN] = align
-	if (begin_layer(layer, i))
+	if (begin_layer(layer, i, z_index))
 		force_scope_vars()
 	return i
 }
 
 ui.end_popup = function() { ui.end(CMD_POPUP) }
+
+function set_z_index(a, i, z_index) {
+	assert(a[i-1] == CMD_POPUP)
+	i = cmd_next_i(a, i)
+	assert(a[i-1] == CMD_SET_LAYER)
+	a[i+SET_LAYER_Z_INDEX] = z_index
+}
+ui.set_z_index = set_z_index
 
 measure[CMD_POPUP] = ct_stack_push
 
@@ -3893,11 +3908,11 @@ ui.font = function(s) {
 	force_font(s)
 }
 
-ui.xsmall  = function() { ui.font_size(ui.font_size_normal * .72   ) } // 10/14
-ui.small   = function() { ui.font_size(ui.font_size_normal * .8125 ) } // 12/14
-ui.smaller = function() { ui.font_size(ui.font_size_normal * .875  ) } // 13/14
-ui.large   = function() { ui.font_size(ui.font_size_normal * 1.125 ) } // 16/14
-ui.xlarge  = function() { ui.font_size(ui.font_size_normal * 1.5   ) }
+ui.xsmall  = function() { ui.font_size(.72   ) }
+ui.small   = function() { ui.font_size(.8125 ) }
+ui.smaller = function() { ui.font_size(.875  ) }
+ui.large   = function() { ui.font_size(1.125 ) }
+ui.xlarge  = function() { ui.font_size(1.5   ) }
 
 const CMD_FONT_SIZE = cmd('font_size')
 
@@ -3912,9 +3927,9 @@ function end_font_size(ended_scope) {
 	ui_cmd(CMD_FONT_SIZE, s)
 	font_size = s
 }
-ui.font_size = function(s) {
-	if (font_size == s) return
-	force_font_size(s)
+ui.font_size = function(x) {
+	if (font_size == x) return
+	force_font_size(ui.font_size_normal * x)
 }
 ui.fs = ui.font_size
 
@@ -5732,10 +5747,9 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	keepalive(id)
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
-	if (hit(id) && ui.click) {
-		let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
-		ui.state(tid).set('to_top', id)
-	}
+	let ts = ui.state(assert(scope_get('toolboxes_id'), 'begin_toolboxes missing'))
+	if (hit(id) && ui.click)
+		ts.set('to_top', id)
 	let [dstate, dx, dy] = ui.drag(id+'.title')
 	let s = ui.state(id)
 	let mx1 =   align_start ? (s.get('mx1') ?? x0) + dx : 0
@@ -5751,19 +5765,19 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		s.set('my2', my2)
 	}
 
-	ui.start_recording()
 	ui.m(mx1, my1, mx2, my2)
-	ui.popup(id, 'window', target_i ?? 'screen',
+	let i = ui.popup(id, 'window', target_i ?? 'screen',
 		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain'
 	)
-		ui.p(1)
-		ui.bb('bg1', null, 1, 'intense', null, ui.sp075())
+		ts.get('popups').set(id, i)
+		//ui.p(1)
+		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
 		ui.stack()
 			scope_set('toolbox_id', id)
 			ui.v() // title / body split
 				ui.h(0) // title bar
 					ui.stack(id+'.title')
-						ui.bb('bg3', null, 0, null, null, ui.sp075() * 0.75)
+						ui.bb('bg3')// , null, 1, null, null, ui.sp075())
 						ui.p(ui.sp2(), ui.sp())
 						ui.text('', title, 0, 'l')
 					ui.end_stack()
@@ -5776,29 +5790,26 @@ ui.end_toolbox = function() {
 			ui.resizer(id)
 		ui.end_stack()
 	ui.end_popup()
-	let rec = ui.end_recording()
-	let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
-	ui.state(tid, 'records_by_id').set(id, rec)
 }
 
 ui.begin_toolboxes = function(tid) {
 	assert(tid, 'toolboxes id required')
-	attr(ui.state(tid), 'records_by_id', map).clear()
+	attr(ui.state(tid), 'popups', map).clear()
 	scope_set('toolboxes_id', tid)
 }
 
 ui.end_toolboxes = function() {
 	let tid = assert(scope_get('toolboxes_id'), 'begin_toolboxes missing')
 	let s = ui.state(tid)
-	let recs = s.get('records_by_id')
-	if (!recs.size) return
+	let popups = s.get('popups')
+	if (!popups.size) return
 	let order = attr(s, 'order', array)
 	let to_top_id = s.get('to_top')
 	if (to_top_id || !order.length) {
 		for (let id of order) // remove toolboxes that have been removed
-			if (!recs.has(id))
+			if (!popups.has(id))
 				remove_value(order, id)
-		for (let [id, rec] of recs) // add toolboxes added this frame
+		for (let id of popups.keys()) // add toolboxes added this frame
 			if (!order.includes(id))
 				order.push(id)
 		if (to_top_id) {
@@ -5811,10 +5822,12 @@ ui.end_toolboxes = function() {
 		}
 		s.set('to_top', null)
 	}
-	for (let [id, rec] of recs)
-		ui.play_recording(rec)
-	//for (let id of order)
-	//	ui.play_recording(recs.get(id))
+	let z = 1
+	let window_layer = ui_layer('window')
+	for (let id of order) {
+		let popup_i = popups.get(id)
+		set_z_index(a, popup_i, z++)
+	}
 }
 
 // all-sides resizer widget --------------------------------------------------
@@ -6497,7 +6510,7 @@ function create_image(src, data) {
 	image.onload = function() {
 		ui.state(src).set('image', image)
 		ui.state(src).set('data', data)
-		ui.redraw()
+		animate() // calling redraw() won't do anything as we're not in ui.main() here.
 	}
 }
 
