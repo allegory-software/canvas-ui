@@ -59,7 +59,7 @@ RENDERING
 	cx              = access to canvas context for drawing
 	screen          = access to canvas container div
 	animate         ()  request another animation frame
-	redraw          ()  request another redraw pass in this frame
+	relayout        ()  request another layout pass in this frame
 	resize          ()  resize canvas and request another animation frame
 
 MOUSE STATE
@@ -1961,10 +1961,10 @@ function measure_req_all() {
 
 // animation frame -----------------------------------------------------------
 
-let want_redraw
+let want_relayout
 
-ui.redraw = function() {
-	want_redraw = true
+ui.relayout = function() {
+	want_relayout = true
 }
 
 function layout_rec(a, x, y, w, h) {
@@ -2002,11 +2002,11 @@ function draw_pointer(p, x0, y0) {
 
 function redraw_all() {
 
-	let redraw_count = 0
+	let relayout_count = 0
 	while (1) {
 		let t0, t1
 
-		want_redraw = false
+		want_relayout = false
 
 		t0 = clock_ms()
 
@@ -2047,7 +2047,7 @@ function redraw_all() {
 
 		id_state_gc()
 
-		if (!want_redraw) {
+		if (!want_relayout) {
 			t0 = clock_ms()
 
 			cx.clearRect(0, 0, canvas.width, canvas.height)
@@ -2082,11 +2082,11 @@ function redraw_all() {
 		ui.window_focusing = false
 		ui.window_unfocusing = false
 
-		if (!want_redraw)
+		if (!want_relayout)
 			break
-		redraw_count++
-		if (redraw_count > 2) {
-			warn('redraw loop detected')
+		relayout_count++
+		if (relayout_count > 2) {
+			warn('relayout loop detected')
 			break
 		}
 	}
@@ -2965,9 +2965,11 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 }
 
-// can be used inside the translate phase of a widget to re-scroll
-// another widget that might have already been scrolled.
+// can be used inside the translate phase of a widget to re-scroll a scrollbox
+// that might have already been scrolled.
 ui.force_scroll = function(a, i, sx, sy) {
+
+	assert(a[i-1] == CMD_SCROLLBOX)
 
 	let w   = a[i+2]
 	let h   = a[i+3]
@@ -3348,7 +3350,7 @@ function position_popup(w, h, side, align) {
 
 }
 
-translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
+translate[CMD_POPUP] = function(a, i) {
 
 	let bw = screen_w
 	let bh = screen_h
@@ -4780,7 +4782,7 @@ function template_select_node(id, root_t, node_t, node_i) {
 	selected_template_id = id
 	selected_template_root_t = root_t
 	selected_template_node_t = node_t
-	ui.redraw()
+	ui.relayout()
 }
 
 function template_find_node(a, i, t, t_i) {
@@ -5467,7 +5469,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 			all_tabs.push({id: 'newtab'+all_tabs.length, label: 'New Tab '+all_tabs.length})
 			tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
 			s.set('tabs', tabs)
-			ui.redraw()
+			ui.relayout()
 		}
 	}
 	ui.end_h()
@@ -6506,7 +6508,7 @@ function create_image(src, data) {
 	image.onload = function() {
 		ui.state(src).set('image', image)
 		ui.state(src).set('data', data)
-		animate() // calling redraw() won't do anything as we're not in ui.main() here.
+		animate() // calling relayout() won't do anything as we're not in ui.main() here.
 	}
 }
 
@@ -6612,7 +6614,7 @@ ui.box_widget('img', {
 		if (data && !image) { // have data but no image (remote image)
 			image = new Image()
 			image.onload = function() {
-				ui.redraw()
+				ui.relayout()
 			}
 			image.src = data
 			ui.state(src).set('image', image)

@@ -920,13 +920,13 @@ ui.main = function() {
 				if (ui.button('btn_light', 'lights', 0)) {
 					ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
 					save_demo_state('theme', ui.default_theme)
-					ui.redraw()
+					ui.relayout()
 				}
 
 				if (ui.button('btn_debug', 'DEBUG', 0)) {
 					ui.DEBUG = !ui.DEBUG
 					save_demo_state('debug', ui.DEBUG)
-					ui.redraw()
+					ui.relayout()
 				}
 
 				ui.color('label')

@@ -322,7 +322,7 @@ function init(id, e) {
 
 		// scroll the header scrollbox to match the scroll offset of the cell view.
 		// TODO: make this work!
-		// ui.force_scroll(a, h_sb_i, sx, 0)
+		ui.force_scroll(a, h_sb_i, sx, 0)
 
 		// find the visible row range
 
