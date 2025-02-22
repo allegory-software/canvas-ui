@@ -3400,6 +3400,8 @@ translate[CMD_POPUP] = function(a, i, dx_not_used, dy_not_used) {
 	}
 
 	// if nothing else works, adjust the offset to fit the screen.
+	// TODO: actually we should adjust the offset to fit the current viewport
+	// computed from all parent scrollboxes.
 	if (flags & POPUP_FIT_CONSTRAIN) {
 		let d = screen_margin
 		let ox1 = min(0, x - d)
