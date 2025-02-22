@@ -1616,12 +1616,6 @@ let layer_stack = [] // [layer1_i, ...]
 let current_layer   // set while building
 let current_layer_i // set while drawing
 
-function sub_layer(z_index, parent_layer) {
-	parent_layer ??= current_layer
-	let layers = attr(parent_layer, 'layers', array)
-	//layers[z_index] =
-}
-
 function begin_layer(layer, ct_i, z_index) {
 	layer_stack.push(current_layer)
 	// NOTE: only adding the cmd to the layer if the current layer actually
