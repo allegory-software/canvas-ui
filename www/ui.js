@@ -465,9 +465,6 @@ ui.alpha_adjust = alpha_adjust
 
 // themes --------------------------------------------------------------------
 
-ui.scrollbar_thickness = 6
-ui.scrollbar_thickness_active = 12
-
 function array_of_objs(n) {
 	let a = []
 	for (let i = 0; i < n; i++)
@@ -2796,16 +2793,18 @@ const SB_ID       = S+4
 const SB_SX       = S+5 // scroll x,y
 const SB_STATE    = S+7
 
-const SB_OVERFLOW_AUTO    = 0
-const SB_OVERFLOW_HIDE    = 1
-const SB_OVERFLOW_SCROLL  = 2
-const SB_OVERFLOW_CONTAIN = 3 // expand to fit content, like a stack.
+const SB_OVERFLOW_AUTO     = 0
+const SB_OVERFLOW_HIDE     = 1
+const SB_OVERFLOW_SCROLL   = 2
+const SB_OVERFLOW_CONTAIN  = 3 // expand to fit content, like a stack.
+const SB_OVERFLOW_INFINITE = 4 // special mode for the infinite calendar.
 
 function parse_sb_overflow(s) {
-	if (s == null   || s == 'auto'   ) return SB_OVERFLOW_AUTO
-	if (s === false || s == 'hide'   ) return SB_OVERFLOW_HIDE
-	if (s === true  || s == 'scroll' ) return SB_OVERFLOW_SCROLL
-	if (               s == 'contain') return SB_OVERFLOW_CONTAIN
+	if (s == null   || s == 'auto'    ) return SB_OVERFLOW_AUTO
+	if (s === false || s == 'hide'    ) return SB_OVERFLOW_HIDE
+	if (s === true  || s == 'scroll'  ) return SB_OVERFLOW_SCROLL
+	if (               s == 'contain' ) return SB_OVERFLOW_CONTAIN
+	if (               s == 'infinite') return SB_OVERFLOW_INFINITE
 	assert(false, 'invalid overflow ', s)
 }
 
@@ -2816,28 +2815,24 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 	overflow_x = parse_sb_overflow(overflow_x)
 	overflow_y = parse_sb_overflow(overflow_y)
 
-	if (overflow_x == SB_OVERFLOW_AUTO || overflow_x == SB_OVERFLOW_SCROLL)
-		assert(id, 'id required for stateful scrollbox')
+	assert(id, 'id required for scrollbox')
 
-	let ss
-	if (id) {
-		keepalive(id)
-		ss = ui.state(id)
-		sx = sx ?? ss.get('scroll_x')
-		sy = sy ?? ss.get('scroll_y')
-	}
+	keepalive(id)
+	let ss = ui.state(id)
+	sx ??= ss.get('scroll_x') ?? 0
+	sy ??= ss.get('scroll_y') ?? 0
 
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, min_w, min_h,
 		overflow_x,
 		overflow_y,
 		0, 0, // content w, h
 		id,
-		sx ?? 0, // scroll x
-		sy ?? 0, // scroll y
+		sx, // scroll x
+		sy, // scroll y
 		0, // state
 	)
-	if (ss && sx != 0) ss.set('scroll_x', sx)
-	if (ss && sy != 0) ss.set('scroll_y', sy)
+	if (sx) ss.set('scroll_x', sx)
+	if (sy) ss.set('scroll_y', sy)
 
 	return i
 }
@@ -2855,7 +2850,8 @@ measure[CMD_SCROLLBOX] = ct_stack_push
 measure_end[CMD_SCROLLBOX] = function(a, i, axis) {
 	let own_min_w = a[i+0+axis]
 	let co_min_w  = a[i+2+axis] // content min_w
-	let contain = a[i+SB_OVERFLOW+axis] == SB_OVERFLOW_CONTAIN
+	let overflow = a[i+SB_OVERFLOW+axis]
+	let contain = overflow == SB_OVERFLOW_CONTAIN
 	let sb_min_w = max(contain ? co_min_w : 0, own_min_w) // scrollbox min_w
 	sb_min_w += spacings(a, i, axis)
 	a[i+SB_CW+axis] = co_min_w
@@ -2870,6 +2866,7 @@ position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 	let content_w = a[i+SB_CW+axis]
+	let overflow = a[i+SB_OVERFLOW+axis]
 	position_children_stacked(a, i, axis, x, max(content_w, w))
 }
 is_flex_child[CMD_SCROLLBOX] = true
@@ -2897,11 +2894,21 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 	let sx = a[i+SB_SX+0]
 	let sy = a[i+SB_SX+1]
 
+	let infinite_x = a[i+SB_OVERFLOW+0] == SB_OVERFLOW_INFINITE
+	let infinite_y = a[i+SB_OVERFLOW+1] == SB_OVERFLOW_INFINITE
+
+	if (infinite_y) {
+		ch = h * 4
+		a[i+SB_CW+1] = ch
+		//sy = (ch - h) / 2
+		//a[i+SB_SX+1] = sy
+	}
+
 	a[i+0] = x
 	a[i+1] = y
 
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
+	if (!infinite_x) sx = max(0, min(sx, cw - w))
+	if (!infinite_y) sy = max(0, min(sy, ch - h))
 
 	let psx = sx / (cw - w)
 	let psy = sy / (ch - h)
@@ -2930,8 +2937,10 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 			// wheel scrolling
 			if (axis && ui.wheel_dy && hit(id)) {
-				let sy0 = ui.state(id, 'scroll_y') ?? 0
-				sy = clamp(sy - ui.wheel_dy, 0, ch - h)
+				let sy0 = ui.state(id, 'scroll_y')
+				sy = sy - ui.wheel_dy
+				if (!infinite_y)
+					sy = clamp(sy, 0, ch - h)
 				ui.state(id).set('scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
@@ -2942,13 +2951,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			let hs
 			if (cs) {
 				if (!axis) {
-					let psx0 = cs.get('ps0')
+					let psx0 = cs.get('psx0')
 					let dpsx = (ui.mx - ui.mx0) / (w - tw)
 					sx = clamp(round((psx0 + dpsx) * (cw - w)), 0, cw - w)
 					ui.state(id).set('scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
-					let psy0 = cs.get('ps0')
+					let psy0 = cs.get('psy0')
 					let dpsy = (ui.my - ui.my0) / (h - th)
 					sy = clamp(round((psy0 + dpsy) * (ch - h)), 0, ch - h)
 					ui.state(id).set('scroll_y', sy)
@@ -2960,7 +2969,10 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 					continue
 				let cs = ui.capture(sbar_id)
 				if (cs)
-					cs.set('ps0', !axis ? psx : psy)
+					if (!axis)
+						cs.set('psx0', psx)
+					else
+						cs.set('psy0', psy)
 			}
 
 			// bits 0..1 = horiz state; bits 2..3 = vert. state.
@@ -3020,9 +3032,12 @@ draw[CMD_SCROLLBOX] = function(a, i) {
 	cx.clip()
 }
 
+ui.scrollbar_thickness = 6
+ui.scrollbar_thickness_active = 12
+
 let scrollbar_rect; {
 let r = [false, 0, 0, 0, 0]
-scrollbar_rect = function(a, i, axis, active) {
+scrollbar_rect = function(a, i, axis, state) {
 	let x  = a[i+0]
 	let y  = a[i+1]
 	let w  = a[i+2]
@@ -3033,6 +3048,10 @@ scrollbar_rect = function(a, i, axis, active) {
 	let sy = a[i+SB_SX+1]
 	let overflow_x = a[i+SB_OVERFLOW+0]
 	let overflow_y = a[i+SB_OVERFLOW+1]
+	if (overflow_y == SB_OVERFLOW_INFINITE) {
+		if (state != 'active')
+			sy = (ch - h) / 2
+	}
 	sx = max(0, min(sx, cw - w))
 	sy = max(0, min(sy, ch - h))
 	let psx = sx / (cw - w)
@@ -3040,7 +3059,7 @@ scrollbar_rect = function(a, i, axis, active) {
 	let pw = w / cw
 	let ph = h / ch
 	let thickness = ui.scrollbar_thickness
-	let thickness_active = active ? ui.scrollbar_thickness_active : thickness
+	let thickness_active = state ? ui.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
 	let h_visible = overflow_x != SB_OVERFLOW_HIDE && pw < 1
 	let v_visible = overflow_y != SB_OVERFLOW_HIDE && ph < 1
@@ -3083,7 +3102,7 @@ draw_end[CMD_SCROLLBOX] = function(a, i) {
 		let state = (a[i+SB_STATE] >> (2 * axis)) & 3
 		state = state == 2 && 'active' || state && 'hover' || null
 
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, !!state)
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, state)
 
 		if (!visible)
 			continue
@@ -3109,7 +3128,7 @@ hittest[CMD_SCROLLBOX] = function(a, i, recs) {
 
 	// test the scrollbars
 	for (let axis = 0; axis < 2; axis++) {
-		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, true)
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis, 'hover')
 		if (!visible)
 			continue
 		if (!hit_rect(tx, ty, tw, th))
@@ -6510,23 +6529,23 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
 	let now = time()
 
+	let cell_w = snap(ui.em(2), 2)
+	let cell_h = snap(ui.em(2), 2)
+	let start_week = week(time())
 
 	// break down scroll offset into start week and relative scroll offset.
+	let sy_now = 0
 	let sy_weeks_f = sy_now / cell_h
 	let sy_weeks = trunc(sy_weeks_f)
 	let sy = (sy_weeks_f - sy_weeks) * cell_h
 	let week0 = week(start_week, -sy_weeks)
 
-	let week0 = week(now)
 	let today = day(now)
 
 	// align UTC-today to local-today.
 	let today_local = day(now, 0, true)
 	if (month_day_of(today_local, true) != month_day_of(today))
 		today = day(today, today_local < today ? -1 : 1)
-
-	let cell_w = snap(ui.em(2), 2)
-	let cell_h = snap(ui.em(2), 2)
 
 	let visible_weeks = floor(view_h / cell_h) + 2
 
@@ -6538,7 +6557,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	}
 	let sel_day = ui.state(id, 'day')
 
-	ui.mt(vy - y)
+	//ui.mt(vy - y)
 	ui.v(0)
 	let d_days = -7
 	for (let week_i = -1; week_i <= visible_weeks; week_i++) {
@@ -6592,11 +6611,11 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 		ui.end_h()
 
 		// days in virtual scrollbox
-		ui.scrollbox(id, 1, null, null, 's', 's')
+		ui.scrollbox(id, 1, null, 'infinite')
 		ui.measure(id)
 			ui.bb('bg0')
 			//s.set('scroll_y', round(h / 2))
-			ui.frame(noop, on_calendar_frame, 0, 'l', 't', cells_w, cells_h,
+			ui.frame(noop, on_calendar_frame, 1, null, null, 0, 0,
 				id,
 		)
 		ui.end_scrollbox()
