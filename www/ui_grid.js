@@ -1243,7 +1243,7 @@ function init(id, e) {
 				ui.end_h()
 			}
 
-			h_sb_i = ui.scrollbox('', 0, e.auto_expand ? 'contain' : 'hide', 'contain')
+			h_sb_i = ui.scrollbox(id+'.header', 0, e.auto_expand ? 'contain' : 'hide', 'contain')
 
 				ui.stack(id+'.header')
 				ui.measure(id+'.header')
