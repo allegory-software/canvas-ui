@@ -2897,11 +2897,13 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 	let infinite_x = a[i+SB_OVERFLOW+0] == SB_OVERFLOW_INFINITE
 	let infinite_y = a[i+SB_OVERFLOW+1] == SB_OVERFLOW_INFINITE
 
+	if (infinite_x) {
+		cw = w * 4
+		a[i+SB_CW+0] = cw
+	}
 	if (infinite_y) {
 		ch = h * 4
 		a[i+SB_CW+1] = ch
-		//sy = (ch - h) / 2
-		//a[i+SB_SX+1] = sy
 	}
 
 	a[i+0] = x
@@ -2953,13 +2955,17 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 				if (!axis) {
 					let psx0 = cs.get('psx0')
 					let dpsx = (ui.mx - ui.mx0) / (w - tw)
-					sx = clamp(round((psx0 + dpsx) * (cw - w)), 0, cw - w)
+					sx = round((psx0 + dpsx) * (cw - w))
+					if (!infinite_x)
+						sx = clamp(sx, 0, cw - w)
 					ui.state(id).set('scroll_x', sx)
 					a[i+SB_SX+0] = sx
 				} else {
 					let psy0 = cs.get('psy0')
 					let dpsy = (ui.my - ui.my0) / (h - th)
-					sy = clamp(round((psy0 + dpsy) * (ch - h)), 0, ch - h)
+					sy = round((psy0 + dpsy) * (ch - h))
+					if (!infinite_y)
+						sy = clamp(sy, 0, ch - h)
 					ui.state(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
@@ -3048,10 +3054,8 @@ scrollbar_rect = function(a, i, axis, state) {
 	let sy = a[i+SB_SX+1]
 	let overflow_x = a[i+SB_OVERFLOW+0]
 	let overflow_y = a[i+SB_OVERFLOW+1]
-	if (overflow_y == SB_OVERFLOW_INFINITE) {
-		if (state != 'active')
-			sy = (ch - h) / 2
-	}
+	if (overflow_x == SB_OVERFLOW_INFINITE) sx = (cw - w) / 2
+	if (overflow_y == SB_OVERFLOW_INFINITE) sy = (ch - h) / 2
 	sx = max(0, min(sx, cw - w))
 	sy = max(0, min(sy, ch - h))
 	let psx = sx / (cw - w)
@@ -4044,9 +4048,10 @@ const TEXT_ASC      = S-1
 const TEXT_DSC      = S-0
 const TEXT_X        = S+1
 const TEXT_W        = S+2
-const TEXT_ID       = S+3
-const TEXT_S        = S+4
-const TEXT_FLAGS    = S+5
+const TEXT_H        = S+3
+const TEXT_ID       = S+4
+const TEXT_S        = S+5
+const TEXT_FLAGS    = S+6
 
 // TEXT_FLAGS
 const TEXT_WRAP      = 3 // bits 0 and 1
@@ -4079,6 +4084,7 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 		0, // descent
 		0, // text_x
 		max_min_w ?? -1, // -1=inf
+		0, // text_h
 		id,
 		s,
 		wrap | (editable ? TEXT_EDITABLE : 0) | (ui.focused(id) ? TEXT_FOCUSED : 0), // flags
@@ -4342,8 +4348,8 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let min_w = a[i+0]
 		let min_h = a[i+1]
 		let max_min_w = a[i+TEXT_W]
-		if (min_w == -1) min_w = text_w
 		if (min_h == -1) min_h = text_h
+		if (min_w == -1) min_w = text_w
 		if (max_min_w != -1)
 			min_w = min(max_min_w, min_w)
 		a[i+2] = min_w
@@ -4351,6 +4357,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		a[i+TEXT_ASC] = round(asc)
 		a[i+TEXT_DSC] = round(dsc)
 		a[i+TEXT_W] = text_w + spacings(a, i, 0)
+		a[i+TEXT_H] = text_h + spacings(a, i, 1)
 	}
 	a[i+2+axis] += spacings(a, i, axis)
 	let min_w = a[i+2+axis]
@@ -4370,6 +4377,8 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 		// store the segment we might have to clip the text to.
 		a[i+TEXT_X] = sx + a[i+MX1] + a[i+PX1]
 		a[i+TEXT_W] = sw - spacings(a, i, 0)
+	} else {
+		a[i+3] = a[i+TEXT_H] // we're positioning text_h, not min_h!
 	}
 	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
@@ -6527,18 +6536,20 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
 	let id = a[i+FRAME_ARGS_I]
 
-	let now = time()
+	let cell_w = snap(ui.em(3), 2)
+	let cell_h = snap(ui.em(3), 2)
 
-	let cell_w = snap(ui.em(2), 2)
-	let cell_h = snap(ui.em(2), 2)
-	let start_week = week(time())
+	let visible_weeks = floor(view_h / cell_h) + 2
+
+	let now = time()
+	let start_week = week(now)
 
 	// break down scroll offset into start week and relative scroll offset.
-	let sy_now = 0
+	let sy_now = vy - y
 	let sy_weeks_f = sy_now / cell_h
 	let sy_weeks = trunc(sy_weeks_f)
-	let sy = (sy_weeks_f - sy_weeks) * cell_h
-	let week0 = week(start_week, -sy_weeks)
+	let sy = floor((sy_weeks_f - sy_weeks) * cell_h)
+	let week0 = week(start_week, sy_weeks)
 
 	let today = day(now)
 
@@ -6546,8 +6557,6 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	let today_local = day(now, 0, true)
 	if (month_day_of(today_local, true) != month_day_of(today))
 		today = day(today, today_local < today ? -1 : 1)
-
-	let visible_weeks = floor(view_h / cell_h) + 2
 
 	let hit_day = num(ui.hit_match(id+'.day.'))
 	if (hit_day) {
@@ -6557,7 +6566,8 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	}
 	let sel_day = ui.state(id, 'day')
 
-	//ui.mt(vy - y)
+	pr(sy_now - sy, sy_now, sy)
+	ui.mt(sy_now - sy)
 	ui.v(0)
 	let d_days = -7
 	for (let week_i = -1; week_i <= visible_weeks; week_i++) {
@@ -6567,8 +6577,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 			let m = month(d)
 			let n = floor(1 + days(d - m))
 
-			ui.p(ui.sp())
-			ui.stack(id+'.day.'+d)
+			ui.stack(id+'.day.'+d, 0, 'l', 't', cell_w, cell_h)
 				if (d == today)
 					ui.bb('marker')
 				else if (d == hit_day)
@@ -6576,7 +6585,8 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 				else if (d == sel_day)
 					ui.bb('item', 'item-focused item-selected focused')
 				//ui.border(1, 'intense')
-				ui.text('', n+'', 0, 'r', 'c', null, ui.em(2))
+				ui.p(ui.sp(), ui.sp05())
+				ui.text('x', n+'', 0, 'r', 'c')
 			ui.end_stack()
 
 			d_days++
@@ -6590,8 +6600,8 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 
 	let s = ui.state(id)
 	let h = s.get('h') ?? 0
-	let cell_w = snap(ui.em(2), 2)
-	let cell_h = snap(ui.em(2), 2)
+	let cell_w = snap(ui.em(3), 2)
+	let cell_h = snap(ui.em(3), 2)
 	let cells_w = cell_w * 7
 	let cells_h = h * 2
 
@@ -6605,8 +6615,10 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 		ui.bb('bg1')
 		for (let weekday = 0; weekday < 7; weekday++) {
 			let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
-			ui.p(ui.sp())
-			ui.text('', s, 0, 'r', 'c', null, ui.em(2))
+			ui.stack('', 0, null, null, cell_w, cell_h)
+				ui.p(ui.sp(), ui.sp05())
+				ui.text('', s, 0, 'r', 'c')
+			ui.end_stack()
 		}
 		ui.end_h()
 
@@ -6614,7 +6626,6 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 		ui.scrollbox(id, 1, null, 'infinite')
 		ui.measure(id)
 			ui.bb('bg0')
-			//s.set('scroll_y', round(h / 2))
 			ui.frame(noop, on_calendar_frame, 1, null, null, 0, 0,
 				id,
 		)

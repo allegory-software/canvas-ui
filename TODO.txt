@@ -1,3 +1,8 @@
+* means done
+- means TODO
+------------------------------------------------------------------------------
+
+
 WIDGET INTER-DEPENDENCY PROBLEM
 ------------------------------------------------------------------------------
 - solve the IMGUI achilles heel: widgets depending on the state of
@@ -25,9 +30,9 @@ other widgets that appear later in the frame.
 
 BUGS UI
 ------------------------------------------------------------------------------
-- force-scroll with popups double-translate bug
+- force-scroll with popups double-translate bug (repro: h-scroll a grid and
+drag a gcol back to the col header)
 - text hit clip (repro: hover to the right of the first grid gcol)
-- hit through scrollbox padding (fix: prevent hitting outside clip rect)
 
 TODO GRID
 ------------------------------------------------------------------------------
