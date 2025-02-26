@@ -713,7 +713,7 @@ ui.bg_style('light', 'bg2'   , 'hover'  ,   0, 0.00, 0.82)
 ui.bg_style('light', 'bg3'   , 'normal' ,   0, 0.00, 0.70)
 ui.bg_style('light', 'bg3'   , 'hover'  ,   0, 0.00, 0.75)
 ui.bg_style('light', 'bg3'   , 'active' ,   0, 0.00, 0.80)
-ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 1.08) // bg alternate for grid cells
+ui.bg_style('light', 'alt'   , 'normal' ,   0, 0.00, 0.95) // bg alternate for grid cells
 ui.bg_style('light', 'smoke' , 'normal' ,   0, 0.00, 1.00, 0.80)
 ui.bg_style('light', 'input' , 'normal' ,   0, 0.00, 0.98)
 ui.bg_style('light', 'input' , 'hover'  ,   0, 0.00, 0.94)
@@ -6580,8 +6580,8 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		ui.h(0)
 		for (let weekday = 0; weekday < 7; weekday++) {
 			let d = day(week0, d_days)
-			let m = month(d)
-			let n = floor(1 + days(d - m))
+			let n = floor(1 + days(d - month(d)))
+			let m = month_of(d)
 
 			ui.stack(id+'.day.'+d, 0, 'l', 't', cell_w, cell_h)
 				if (d == today)
@@ -6593,6 +6593,9 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 					)
 				else if (d == hit_day)
 					ui.bb('bg1', 'hover')
+				else if (m % 2) {
+					ui.bb('alt')
+				}
 				//ui.bb('bg2', null, 'ltb', 'intense', null, 1/0)
 				ui.pr(ui.em(0.65))
 				ui.text('', n+'', 0, 'r', 'c')
@@ -6602,7 +6605,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 					ui.color('marker')
 					let s = month_name(d).toUpperCase()
 					ui.text('', s, 0, 'c', 'c')
-				} else if (n == 2 && month_of(d) == 1) {
+				} else if (n == 2 && m == 1) {
 					ui.mt(ui.em(1.5))
 					ui.xsmall()
 					ui.color('marker')
