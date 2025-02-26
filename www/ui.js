@@ -1387,6 +1387,14 @@ window.addEventListener('focus', function(ev) {
 	animate()
 })
 
+// tab focusing --------------------------------------------------------------
+
+ui.focusables = set()
+
+ui.taborder = function(id, order) {
+	//
+}
+
 // container stack -----------------------------------------------------------
 
 // used in both frame creation and measuring stages.
@@ -6541,8 +6549,8 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	let id     = a[i+FRAME_ARGS_I+0]
 	let ranges = a[i+FRAME_ARGS_I+1]
 
-	let cell_w = snap(ui.em(3.0), 2)
-	let cell_h = snap(ui.em(3.0), 2)
+	let cell_w = snap(ui.em(2.5), 2)
+	let cell_h = snap(ui.em(2.5), 2)
 
 	let now = time()
 	let start_week = week(now)
@@ -6562,19 +6570,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		today = day(today, today_local < today ? -1 : 1)
 
 	let sel_day = ui.state(id, 'day')
-	let hit_day = num(ui.hit_match(id+'.day.'))
-	let day_changed
-	if (hit_day) {
-		let [dstate] = ui.drag(id+'.day.'+hit_day)
-		if (dstate == 'drag') {
-			ui.focus(id)
-			if (hit_day != sel_day) {
-				sel_day = hit_day
-				ui.state(id).set('day', sel_day)
-				day_changed = true
-			}
-		}
-	}
+	let hit_day = ui.hit(id, 'day')
 
 	ui.mt(sy - rel_sy)
 	ui.v(0)
@@ -6598,7 +6594,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 				else if (d == hit_day)
 					ui.bb('bg1', 'hover')
 				//ui.bb('bg2', null, 'ltb', 'intense', null, 1/0)
-				ui.pr(rem(0.9))
+				ui.pr(ui.em(0.65))
 				ui.text('x', n+'', 0, 'r', 'c')
 			ui.end_stack()
 
@@ -6607,17 +6603,32 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		ui.end_h()
 	}
 	ui.end_v()
-	return day_changed ? sel_day : null
 }
 
 ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	let s = ui.state(id)
 	let h = s.get('h') ?? 0
-	let cell_w = snap(ui.em(3.0), 2)
-	let cell_h = snap(ui.em(3.0), 2)
+	let cell_w = snap(ui.em(2.5), 2)
+	let cell_h = snap(ui.em(2.5), 2)
 	let cells_w = cell_w * 7
 	let cells_h = h * 2
+
+	let sel_day = s.get('day')
+	let hit_day = num(ui.hit_match(id+'.day.'))
+	let day_changed
+	if (hit_day) {
+		ui.hover(id).set('day', hit_day)
+		let [dstate] = ui.drag(id+'.day.'+hit_day)
+		if (dstate == 'drag') {
+			ui.focus(id)
+			if (hit_day != sel_day) {
+				sel_day = hit_day
+				s.set('day', sel_day)
+				day_changed = true
+			}
+		}
+	}
 
 	ui.v(fr, 0, align, valign, min_w, min_h ?? cell_h * 6)
 
@@ -6646,6 +6657,8 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 		ui.end_scrollbox()
 
 	ui.end_v()
+
+	return day_changed ? sel_day : null
 }
 
 // image ---------------------------------------------------------------------

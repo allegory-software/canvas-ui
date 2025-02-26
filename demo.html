@@ -80,9 +80,20 @@ let cal1_ranges = [
 	{from: 0, to: 1},
 	{from: 0, to: 1},
 ]
+let cal_sel_days = []
 demos.calendar = `
 ui.m(ui.em(2))
-ui.calendar('cal1', cal1_ranges, 0, 'l', 's')
+ui.h(1, ui.em())
+	let sel_day = ui.calendar('cal1', cal1_ranges, 0, 'l', 's')
+	if (sel_day != null)
+		cal_sel_days.push(sel_day)
+	ui.sb('cal1_sb')
+		ui.v(1, ui.sp05(), 'l', 't')
+		for (let day of cal_sel_days)
+			ui.text('', format_date(day))
+		ui.end_v()
+	ui.end_sb()
+ui.end_h()
 `
 
 demos.radio = `
