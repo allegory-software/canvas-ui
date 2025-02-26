@@ -2508,8 +2508,10 @@ String.prototype.parse_timeofday  = m(parse_timeofday )
 String.prototype.parse_date       = m(parse_date      )
 String.prototype.parse_duration   = m(parse_duration  )
 
-alias(String.prototype, 'starts', 'startsWith')
-alias(String.prototype, 'ends'  , 'endsWith'  )
+alias(String.prototype, 'starts', 'startsWith' )
+alias(String.prototype, 'ends'  , 'endsWith'   )
+alias(String.prototype, 'upper' , 'toUpperCase')
+alias(String.prototype, 'lower' , 'toLowerCase')
 
 // Number extensions ---------------------------------------------------------
 

@@ -6595,7 +6595,20 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 					ui.bb('bg1', 'hover')
 				//ui.bb('bg2', null, 'ltb', 'intense', null, 1/0)
 				ui.pr(ui.em(0.65))
-				ui.text('x', n+'', 0, 'r', 'c')
+				ui.text('', n+'', 0, 'r', 'c')
+				if (n == 1) {
+					ui.mt(ui.em(1.5))
+					ui.xsmall()
+					ui.color('marker')
+					let s = month_name(d).toUpperCase()
+					ui.text('', s, 0, 'c', 'c')
+				} else if (n == 2 && month_of(d) == 1) {
+					ui.mt(ui.em(1.5))
+					ui.xsmall()
+					ui.color('marker')
+					let s = ' ' + year_of(d)
+					ui.text('', s, 0, 'c', 'c')
+				}
 			ui.end_stack()
 
 			d_days++
@@ -6637,7 +6650,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 		// week days header
 		ui.h(0)
-		ui.bb('bg1')
+		ui.bb('bg1', null, 'b', 'intense')
 		for (let weekday = 0; weekday < 7; weekday++) {
 			let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
 			ui.stack('', 0, null, null, cell_w, cell_h)
