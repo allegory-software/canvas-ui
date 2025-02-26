@@ -76,9 +76,13 @@ ui.v(1, ui.sp(), 'c', 'c')
 ui.end_v()
 `
 
+let cal1_ranges = [
+	{from: 0, to: 1},
+	{from: 0, to: 1},
+]
 demos.calendar = `
 ui.m(ui.em(2))
-ui.calendar('cal1', 0, 'l', 's')
+ui.calendar('cal1', cal1_ranges, 0, 'l', 's')
 `
 
 demos.radio = `

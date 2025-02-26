@@ -6534,21 +6534,20 @@ ui.box_widget('slider', {
 
 function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
-	let id = a[i+FRAME_ARGS_I]
+	let id     = a[i+FRAME_ARGS_I+0]
+	let ranges = a[i+FRAME_ARGS_I+1]
 
-	let cell_w = snap(ui.em(3), 2)
-	let cell_h = snap(ui.em(3), 2)
-
-	let visible_weeks = floor(view_h / cell_h) + 2
+	let cell_w = snap(ui.em(3.0), 2)
+	let cell_h = snap(ui.em(3.0), 2)
 
 	let now = time()
 	let start_week = week(now)
 
 	// break down scroll offset into start week and relative scroll offset.
-	let sy_now = vy - y
-	let sy_weeks_f = sy_now / cell_h
-	let sy_weeks = trunc(sy_weeks_f)
-	let sy = floor((sy_weeks_f - sy_weeks) * cell_h)
+	let sy = vy - y
+	let sy_weeks_f = sy / cell_h
+	let sy_weeks = floor(sy_weeks_f)
+	let rel_sy = floor((sy_weeks_f - sy_weeks) * cell_h)
 	let week0 = week(start_week, sy_weeks)
 
 	let today = day(now)
@@ -6566,10 +6565,10 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	}
 	let sel_day = ui.state(id, 'day')
 
-	pr(sy_now - sy, sy_now, sy)
-	ui.mt(sy_now - sy)
+	ui.mt(sy - rel_sy)
 	ui.v(0)
 	let d_days = -7
+	let visible_weeks = floor(view_h / cell_h)
 	for (let week_i = -1; week_i <= visible_weeks; week_i++) {
 		ui.h(0)
 		for (let weekday = 0; weekday < 7; weekday++) {
@@ -6584,8 +6583,8 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 					ui.bb('bg1', null)
 				else if (d == sel_day)
 					ui.bb('item', 'item-focused item-selected focused')
-				//ui.border(1, 'intense')
-				ui.p(ui.sp(), ui.sp05())
+				ui.border(1, 'intense', null, 1000)
+				ui.pr(rem(1))
 				ui.text('x', n+'', 0, 'r', 'c')
 			ui.end_stack()
 
@@ -6596,12 +6595,12 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	ui.end_v()
 }
 
-ui.calendar = function(id, fr, align, valign, min_w, min_h) {
+ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 	let s = ui.state(id)
 	let h = s.get('h') ?? 0
-	let cell_w = snap(ui.em(3), 2)
-	let cell_h = snap(ui.em(3), 2)
+	let cell_w = snap(ui.em(3.0), 2)
+	let cell_h = snap(ui.em(3.0), 2)
 	let cells_w = cell_w * 7
 	let cells_h = h * 2
 
@@ -6616,7 +6615,7 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 		for (let weekday = 0; weekday < 7; weekday++) {
 			let s = weekday_name(day(week0, weekday), 'short', lang()).slice(0, 1).toUpperCase()
 			ui.stack('', 0, null, null, cell_w, cell_h)
-				ui.p(ui.sp(), ui.sp05())
+				ui.pr(rem(1))
 				ui.text('', s, 0, 'r', 'c')
 			ui.end_stack()
 		}
@@ -6627,7 +6626,7 @@ ui.calendar = function(id, fr, align, valign, min_w, min_h) {
 		ui.measure(id)
 			ui.bb('bg0')
 			ui.frame(noop, on_calendar_frame, 1, null, null, 0, 0,
-				id,
+				id, ranges,
 		)
 		ui.end_scrollbox()
 
