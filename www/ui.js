@@ -3801,6 +3801,7 @@ if (!c2d.roundRect) { // Firefox doesn't have it
 	c2d.roundRect = function(x1, y1, w, h, r) {
 		let x2 = x1 + w
 		let y2 = y1 + h
+		r = min(r, round(min(w, h) / 2))
 		cx.moveTo(x2-r, y1); if (r) cx.arcTo(x2, y1, x2, y1+r, r)
 		cx.lineTo(x2, y2-r); if (r) cx.arcTo(x2, y2, x2-r, y2, r)
 		cx.lineTo(x1+r, y2); if (r) cx.arcTo(x1, y2, x1, y2-r, r)
@@ -3817,6 +3818,7 @@ function bg_path(cx, x1, y1, x2, y2, sides, r) {
 		else
 			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
 	} else {
+		r = min(r, round(min(x2-x1, y2-y1) / 2))
 		let rlb = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_B) && r || 0
 		let rlt = (sides & BORDER_SIDE_L) && (sides & BORDER_SIDE_T) && r || 0
 		let rrt = (sides & BORDER_SIDE_R) && (sides & BORDER_SIDE_T) && r || 0
@@ -3836,8 +3838,10 @@ function border_path(cx, x1, y1, x2, y2, sides, r) {
 			cx.rect(x1, y1, x2-x1, y2-y1)
 		else
 			cx.roundRect(x1, y1, x2-x1, y2-y1, r)
-	else
+	else {
+		r = min(r, round(min(x2-x1, y2-y1) / 2))
 		border_paths[sides](cx, x1, y1, x2, y2, r)
+	}
 }
 
 draw[CMD_BB] = function(a, i) {
@@ -6557,13 +6561,20 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	if (month_day_of(today_local, true) != month_day_of(today))
 		today = day(today, today_local < today ? -1 : 1)
 
+	let sel_day = ui.state(id, 'day')
 	let hit_day = num(ui.hit_match(id+'.day.'))
+	let day_changed
 	if (hit_day) {
 		let [dstate] = ui.drag(id+'.day.'+hit_day)
-		if (dstate == 'drag')
-			ui.state(id).set('day', hit_day)
+		if (dstate == 'drag') {
+			ui.focus(id)
+			if (hit_day != sel_day) {
+				sel_day = hit_day
+				ui.state(id).set('day', sel_day)
+				day_changed = true
+			}
+		}
 	}
-	let sel_day = ui.state(id, 'day')
 
 	ui.mt(sy - rel_sy)
 	ui.v(0)
@@ -6579,12 +6590,15 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 			ui.stack(id+'.day.'+d, 0, 'l', 't', cell_w, cell_h)
 				if (d == today)
 					ui.bb('marker')
-				else if (d == hit_day)
-					ui.bb('bg1', null)
 				else if (d == sel_day)
-					ui.bb('item', 'item-focused item-selected focused')
-				ui.border(1, 'intense', null, 1000)
-				ui.pr(rem(1))
+					ui.bb('item', ui.focused(id)
+						? 'item-focused item-selected focused'
+						: 'item-focused item-selected'
+					)
+				else if (d == hit_day)
+					ui.bb('bg1', 'hover')
+				//ui.bb('bg2', null, 'ltb', 'intense', null, 1/0)
+				ui.pr(rem(0.9))
 				ui.text('x', n+'', 0, 'r', 'c')
 			ui.end_stack()
 
@@ -6593,6 +6607,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 		ui.end_h()
 	}
 	ui.end_v()
+	return day_changed ? sel_day : null
 }
 
 ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
