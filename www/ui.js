@@ -675,12 +675,14 @@ ui.border_style('light', 'light'   , 'normal' ,   0,    0,    0, 0.10)
 ui.border_style('light', 'light'   , 'hover'  ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'normal' ,   0,    0,    0, 0.30)
 ui.border_style('light', 'intense' , 'hover'  ,   0,    0,    0, 0.40)
+ui.border_style('light', 'max'     , 'normal' ,   0,    0,    0, 1.00)
 ui.border_style('light', 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00) // TODO
 
 ui.border_style('dark' , 'light'   , 'normal' ,   0,    0,    1, 0.09)
 ui.border_style('dark' , 'light'   , 'hover'  ,   0,    0,    1, 0.03)
 ui.border_style('dark' , 'intense' , 'normal' ,   0,    0,    1, 0.20)
 ui.border_style('dark' , 'intense' , 'hover'  ,   0,    0,    1, 0.40)
+ui.border_style('dark' , 'max'     , 'normal' ,   0,    0,    1, 1.00)
 ui.border_style('dark' , 'marker'  , 'normal' ,  61, 1.00, 0.57, 1.00)
 
 // background colors ---------------------------------------------------------
@@ -1115,14 +1117,17 @@ ui.drag = function(id, axis) {
 
 // keyboard state ------------------------------------------------------------
 
-let key_state_now = map()
+let key_downs = set()
+let key_ups   = set()
 let key_state = set()
 
 ui.key_events = []
 
 canvas.addEventListener('keydown', function(ev) {
 	let key = ev.key.toLowerCase()
-	key_state_now.set(key, 'down')
+	if (key == 'tab')
+		ev.preventDefault()
+	key_downs.add(key)
 	ui.key_events.push(['down', key])
 	key_state.add(key)
 	animate()
@@ -1130,27 +1135,32 @@ canvas.addEventListener('keydown', function(ev) {
 
 canvas.addEventListener('keyup', function(ev) {
 	let key = ev.key.toLowerCase()
-	key_state_now.set(key, 'up')
+	key_ups.add(key)
 	ui.key_events.push(['up', key])
 	key_state.delete(key)
 	animate()
 })
 
 ui.capture_keys = function() {
-	key_state_now.clear()
+	key_downs.clear()
+	key_ups.clear()
 }
 
 ui.keydown = function(key, capture) {
-	return key_state_now.get(key) == 'down'
+	return key_downs.has(key)
 }
 
 ui.keyup = function(key, capture) {
-	return key_state_now.get(key) == 'up'
+	return key_ups.has(key)
 }
 
 ui.key = function(key, capture) {
 	return key_state.has(key)
 }
+
+ui.keys_down   = () => key_downs.size
+ui.keys_up     = () => key_ups.size
+ui.key_changes = () => key_downs.size + key_ups.size
 
 // custom events -------------------------------------------------------------
 
@@ -1355,10 +1365,12 @@ function reset_canvas() {
 // focus state ---------------------------------------------------------------
 
 ui.focused_id = null
+ui.focused_by_key = null
 let focusing_id
 
-ui.focus = function(id) {
+ui.focus = function(id, by_key) {
 	ui.focused_id = id
+	ui.focused_by_key = by_key
 	focusing_id = id
 }
 
@@ -1374,7 +1386,8 @@ window.addEventListener('blur', function(ev) {
 	ui.window_unfocusing = true
 	ui.window_focused = false
 	key_state.clear()
-	key_state_now.clear()
+	key_downs.clear()
+	key_ups.clear()
 	ui.key_events.length = 0
 	animate()
 })
@@ -1389,10 +1402,11 @@ window.addEventListener('focus', function(ev) {
 
 // tab focusing --------------------------------------------------------------
 
-ui.focusables = set()
-
-ui.taborder = function(id, order) {
-	//
+// TODO: tab_order
+// TODO: tab groups
+ui.focusables = []
+ui.focusable = function(id, tab_order) {
+	ui.focusables.push(id)
 }
 
 // container stack -----------------------------------------------------------
@@ -2025,6 +2039,16 @@ function redraw_all() {
 
 		hit_frame(recs, layers)
 
+		if (ui.keydown('tab')) {
+			let i = ui.focusables.indexOf(ui.focused_id)
+			if (i != -1) {
+				let next_i = (i + (ui.key('shift') ? -1 : 1)) % ui.focusables.length
+				let id = ui.focusables[next_i]
+				ui.focus(id, true)
+			}
+		}
+		ui.focusables.length = 0
+
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
 
@@ -2088,10 +2112,14 @@ function redraw_all() {
 			reset_pointer_state(p)
 		reset_pointer_state(ui)
 
-		key_state_now.clear()
+		key_downs.clear()
+		key_ups.clear()
 		ui.key_events.length = null
+
 		event_state.clear()
+
 		focusing_id = null
+
 		ui.window_focusing = false
 		ui.window_unfocusing = false
 
@@ -4652,7 +4680,7 @@ frame.translate = function(a, i, dx, dy) {
 
 frame.draw = function(a, i, recs) {
 	let layer_i = a[i+FRAME_LAYER_I]
-	/*global*/ current_layer_i = layer_arr[layer_i]
+	/*global*/ current_layer_i = layer_i
 	let rec_i = a[i+FRAME_REC_I]
 	let a1 = recs[rec_i]
 	draw_cmd(a1, 2, recs)
@@ -5346,6 +5374,7 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	let s = ui.state(id)
 	s.set('items', items)
 	keepalive(id, list_update)
+	ui.focusable(id)
 	let fi = s.get('focused_item_i')
 	let list_focused = ui.focused(id)
 	let i = 0
@@ -5357,19 +5386,21 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 		ui.p(ui.sp(), ui.sp05())
 		ui.stack(item_id, 0)
 			let item_focused = fi == i
-			 ui.bb(
-			 	item_focused ? 'item' : 'bg',
-			 	item_focused
-			 		? list_focused
-			 			? 'item-focused item-selected focused'
-			 			: 'item-focused item-selected'
-			 		: null
-			 )
+			ui.bb(
+				item_focused ? 'item' : 'bg',
+				item_focused
+					? list_focused
+						? 'item-focused item-selected focused'
+						: 'item-focused item-selected'
+					: null
+			)
 			ui.color('text', hit(item_id) ? 'hover' : null)
 			ui.text('', item, item_fr,
 				item_align  ?? hv == 'v' ? 'l' : 'c',
 				item_valign ?? hv == 'v' ? 'c' : 'c',
 				max_min_w)
+			if (list_focused && item_focused)
+				ui.focus_ring()
 		ui.end_stack()
 		i++
 	}
@@ -5706,6 +5737,7 @@ ui.widget('polyline', {
 ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 
 	keepalive(id)
+	ui.focusable(id)
 	let open = ui.state(id, 'open')
 	let foc_i = open ? ui.state(id+'.list', 'focused_item_i') : null
 	let sel_i = foc_i ?? ui.state(id, 'i') ?? 0
@@ -6319,6 +6351,7 @@ ui.box_widget('slider', {
 	create: function(cmd, id, from, to, decimals, markers, scale_base, scales) {
 
 		keepalive(id)
+		ui.focusable(id)
 
 		markers = (markers ?? 1) ? 1 : 0
 
@@ -6544,6 +6577,15 @@ ui.box_widget('slider', {
 
 // calendar ------------------------------------------------------------------
 
+ui.focus_ring = function(id) {
+	if (!ui.focused_by_key)
+		return
+	ui.m(-2)
+	ui.popup('', 'overlay', null, 'ic', 's')
+		ui.bb(null, null, 1, 'max')
+	ui.end_popup()
+}
+
 function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
 	let id     = a[i+FRAME_ARGS_I+0]
@@ -6572,6 +6614,8 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 	let sel_day = ui.state(id, 'day')
 	let hit_day = ui.hit(id, 'day')
 
+	let calendar_focused = ui.focused(id)
+
 	ui.mt(sy - rel_sy)
 	ui.v(0)
 	let d_days = -7
@@ -6584,16 +6628,22 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 			let m = month_of(d)
 
 			ui.stack(id+'.day.'+d, 0, 'l', 't', cell_w, cell_h)
-				if (d == today)
+
+				if (d == today) {
 					ui.bb('marker')
-				else if (d == sel_day)
-					ui.bb('item', ui.focused(id)
+				} else if (d == sel_day) {
+
+					ui.bb('item', calendar_focused
 						? 'item-focused item-selected focused'
 						: 'item-focused item-selected'
 					)
-				else if (d == hit_day)
+
+					if (calendar_focused)
+						ui.focus_ring()
+
+				} else if (d == hit_day) {
 					ui.bb('bg1', 'hover')
-				else if (m % 2) {
+				} else if (m % 2) {
 					ui.bb('alt')
 				}
 				//ui.bb('bg2', null, 'ltb', 'intense', null, 1/0)
@@ -6623,6 +6673,7 @@ function on_calendar_frame(a, i, x, y, w, h, vx, vy, view_w, view_h) {
 
 ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
+	ui.focusable(id)
 	let s = ui.state(id)
 	let h = s.get('h') ?? 0
 	let cell_w = snap(ui.em(2.5), 2)
@@ -6643,6 +6694,77 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 				s.set('day', sel_day)
 				day_changed = true
 			}
+		}
+	}
+
+	if (ui.focused(id) && ui.keys_down()) {
+		let mode = 'day'
+		let focused_range
+		let ctrl  = ui.key('ctrl')
+		let shift = ui.key('shift')
+		if (mode == 'ranges' && ui.keydown('delete')) {
+			if (focused_range) {
+				if (!e.can_remove_range(focused_range))
+					return
+				ranges.remove_value(focused_range)
+				focused_range = null
+				ranges_changed(ev)
+				sort_ranges()
+				return false
+			}
+		}
+
+		if (ctrl && (ui.keydown('arrowup') || ui.keydown('arrowdown'))) {
+			e.scroll_by_pages((key == 'arrowup' ? 1 : -1) * 0.5)
+			e.capture_keys()
+		}
+
+		if (ui.keydown('pageup') || ui.keydown('pagedown')) {
+			e.scroll_by_pages((ui.keydown('pageup') ? 1 : -1))
+			e.capture_keys()
+		}
+
+		if (!ctrl && focused_range && (
+				ui.keydown('arrowdown') || ui.keydown('arrowup') ||
+				ui.keydown('arrowleft') || ui.keydown('arrowright')
+			) && e.can_change_range(focused_range)
+		) {
+			let r = focused_range
+			let ddays = (ui.keydown('arrowup') || ui.keydown('arrowdown') ? 7 : 1)
+				* ((ui.keydown('arrowdown') || ui.keydown('arrowright') ? 1 : -1))
+
+			if (mode == 'day') {
+				e.value = day(e.value ?? time(), ddays)
+				e.fireup('input', ev)
+				e.scroll_to_view_range(e.value, e.value, 0)
+			} else {
+				let min_range = e.min_range - 24 * 3600
+				let max_range = e.max_range - 24 * 3600
+				let d0 = r[0]
+				let d1 = r[1]
+				let days = d1 - d0
+				if (!shift) { // move
+					d0 = day(d0, ddays)
+					d1 = d0 + days
+				} else { // resize
+					d1 = day(d1, ddays)
+				}
+				days = clamp(d1 - d0, min_range, max_range)
+				r[0] = d0
+				r[1] = d0 + days
+				ranges_changed(ev)
+				sort_ranges()
+				e.scroll_to_view_range(r[0], r[1], 0)
+			}
+			return false
+		}
+
+		if (0 && ui.keydown('tab')) {
+			if (e.focus_next_range(shift)) {
+				e.capture_keys()
+				return false // prevent tabbing out on internal focusing
+			}
+			e.focus_range(null)
 		}
 	}
 
@@ -6842,6 +6964,7 @@ ui.widget('sat_lum_square', {
 	create: function(cmd, id, hue, sat, lum) {
 
 		keepalive(id)
+		ui.focusable(id)
 
 		hue = hue ?? 0
 		sat = sat ?? .5
@@ -6962,6 +7085,7 @@ ui.widget('hue_bar', {
 	create: function(cmd, id, hue) {
 
 		keepalive(id)
+		ui.focusable(id)
 		ui.state_init(id, 'hue', hue)
 
 		let [dstate, dx, dy, cs] = ui.drag(id)
