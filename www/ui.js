@@ -1400,14 +1400,6 @@ window.addEventListener('focus', function(ev) {
 	animate()
 })
 
-// tab focusing --------------------------------------------------------------
-
-// TODO: tab_order
-// TODO: tab groups
-ui.focusable = function(id) {
-	a.focusables.push(id)
-}
-
 // container stack -----------------------------------------------------------
 
 // used in both frame creation and measuring stages.
@@ -1432,8 +1424,6 @@ let rec_freelist = array_freelist()
 
 function rec() {
 	let a = rec_freelist.alloc()
-	if (!a.focusables)
-		a.focusables = []
 	return a
 }
 
@@ -1441,7 +1431,6 @@ function free_rec(a) {
 	a.length = 0
 	if (a.nohit_set)
 		a.nohit_set.clear()
-	a.focusables.length = 0
 	rec_freelist.free(a)
 }
 
@@ -1461,7 +1450,6 @@ ui.end_recording = function() {
 
 ui.play_recording = function(a1) {
 	a.push(...a1)
-	extend(a.focusables, a1.focusables)
 	free_rec(a1)
 }
 
@@ -1829,6 +1817,25 @@ function hover(id) {
 }
 ui.hover = hover
 
+// tab focusing --------------------------------------------------------------
+
+ui.focusables = []
+
+let FOCUSABLE = cmd('focusable')
+
+// TODO: tab_order
+// TODO: tab groups
+ui.focusable = function(id) {
+	ui_cmd(FOCUSABLE, id)
+}
+
+// must happen on translate because that's when secondary recordings appear
+// in the layout in the right order.
+translate[FOCUSABLE] = function(a, i) {
+	let id = a[i]
+	ui.focusables.push(id)
+}
+
 // nohit command -------------------------------------------------------------
 
 let NOHIT = cmd('nohit')
@@ -2042,17 +2049,15 @@ function redraw_all() {
 
 		hit_frame(recs, layers)
 
-		/*
 		if (ui.keydown('tab')) {
-			let i = a.focusables.indexOf(ui.focused_id)
+			let i = ui.focusables.indexOf(ui.focused_id)
 			if (i != -1) {
-				let next_i = (i + (ui.key('shift') ? -1 : 1)) % a.focusables.length
-				let id = a.focusables[next_i]
+				let next_i = (i + (ui.key('shift') ? -1 : 1)) % ui.focusables.length
+				let id = ui.focusables[next_i]
 				ui.focus(id, true)
 			}
 		}
-		a.focusables.length = 0
-		*/
+		ui.focusables.length = 0
 
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
