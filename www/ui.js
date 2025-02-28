@@ -1404,9 +1404,8 @@ window.addEventListener('focus', function(ev) {
 
 // TODO: tab_order
 // TODO: tab groups
-ui.focusables = []
-ui.focusable = function(id, tab_order) {
-	ui.focusables.push(id)
+ui.focusable = function(id) {
+	a.focusables.push(id)
 }
 
 // container stack -----------------------------------------------------------
@@ -1425,6 +1424,75 @@ function ct_stack_check() {
 			debug(C(a, i), 'not closed')
 		assert(false)
 	}
+}
+
+// command recordings --------------------------------------------------------
+
+let rec_freelist = array_freelist()
+
+function rec() {
+	let a = rec_freelist.alloc()
+	if (!a.focusables)
+		a.focusables = []
+	return a
+}
+
+function free_rec(a) {
+	a.length = 0
+	if (a.nohit_set)
+		a.nohit_set.clear()
+	a.focusables.length = 0
+	rec_freelist.free(a)
+}
+
+let rec_stack = []
+
+ui.start_recording = function() {
+	let a1 = rec()
+	rec_stack.push(a)
+	a = a1
+}
+
+ui.end_recording = function() {
+	let a1 = a
+	a = rec_stack.pop()
+	return a1
+}
+
+ui.play_recording = function(a1) {
+	a.push(...a1)
+	extend(a.focusables, a1.focusables)
+	free_rec(a1)
+}
+
+function rec_stack_check() {
+	assert(!rec_stack.length, 'recordings left unplayed')
+}
+
+// secondary command recordings ----------------------------------------------
+
+let recs = []
+let rec_i
+
+function begin_rec() {
+	let a0 = a
+	a = rec()
+	ui.a = a
+	rec_i = recs.length
+	recs.push(a)
+	return a0
+}
+
+function end_rec(a0) {
+	let a1 = a
+	a = a0
+	return a1
+}
+
+function free_recs() {
+	for (let a of recs)
+		free_rec(a)
+	recs.length = 0
 }
 
 // current command recording -------------------------------------------------
@@ -1450,8 +1518,7 @@ function ct_stack_check() {
 // that are relocatable, i.e. can be moved into other recordings without
 // having to reoffset the indexes.
 
-let a = [] // current recording.
-ui.a = a // published for inspecting only.
+let a // current recording
 
 let cmd_names = []
 let cmd_name_map = map()
@@ -1524,70 +1591,6 @@ ui.disas = function(a) {
 			console.log(cmd, ...args)
 		i = cmd_next_i(a, i)
 	}
-}
-
-// command recording strips --------------------------------------------------
-
-let rec_freelist = array_freelist()
-
-function rec() {
-	let a = rec_freelist.alloc()
-	return a
-}
-
-function free_rec(a) {
-	a.length = 0
-	if (a.nohit_set)
-		a.nohit_set.clear()
-	rec_freelist.free(a)
-}
-
-let rec_stack = []
-
-ui.start_recording = function() {
-	let a1 = rec()
-	rec_stack.push(a)
-	a = a1
-}
-
-ui.end_recording = function() {
-	let a1 = a
-	a = rec_stack.pop()
-	return a1
-}
-
-ui.play_recording = function(a1) {
-	a.push(...a1)
-	free_rec(a1)
-}
-
-function rec_stack_check() {
-	assert(!rec_stack.length, 'recordings left unplayed')
-}
-
-// secondary command recordings ----------------------------------------------
-
-let recs = []
-let rec_i
-
-function begin_rec() {
-	let a0 = a
-	a = rec()
-	rec_i = recs.length
-	recs.push(a)
-	return a0
-}
-
-function end_rec(a0) {
-	let a1 = a
-	a = a0
-	return a1
-}
-
-function free_recs() {
-	for (let a of recs)
-		free_rec(a)
-	recs.length = 0
 }
 
 // z-layers ------------------------------------------------------------------
@@ -2039,15 +2042,17 @@ function redraw_all() {
 
 		hit_frame(recs, layers)
 
+		/*
 		if (ui.keydown('tab')) {
-			let i = ui.focusables.indexOf(ui.focused_id)
+			let i = a.focusables.indexOf(ui.focused_id)
 			if (i != -1) {
-				let next_i = (i + (ui.key('shift') ? -1 : 1)) % ui.focusables.length
-				let id = ui.focusables[next_i]
+				let next_i = (i + (ui.key('shift') ? -1 : 1)) % a.focusables.length
+				let id = a.focusables[next_i]
 				ui.focus(id, true)
 			}
 		}
-		ui.focusables.length = 0
+		a.focusables.length = 0
+		*/
 
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
