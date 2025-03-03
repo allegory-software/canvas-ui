@@ -23,6 +23,7 @@ let demo_state = json_arg(load('demo_state')) ?? {}
 ui.set_default_theme(demo_state.theme ?? 'dark')
 
 ui.DEBUG      = demo_state.debug ?? true
+ui.TUI        = demo_state.tui   ?? false
 SELECTED_DEMO = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
 
 </script>
@@ -942,6 +943,12 @@ ui.main = function() {
 				if (ui.button('btn_debug', 'DEBUG', 0)) {
 					ui.DEBUG = !ui.DEBUG
 					save_demo_state('debug', ui.DEBUG)
+					ui.relayout()
+				}
+
+				if (ui.button('btn_tui', 'TUI', 0)) {
+					ui.TUI = !ui.TUI
+					save_demo_state('tui', ui.TUI)
 					ui.relayout()
 				}
 

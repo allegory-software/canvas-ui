@@ -876,6 +876,28 @@ document.addEventListener('DOMContentLoaded', function() {
 	canvas.focus()
 })
 
+// TUI -----------------------------------------------------------------------
+
+ui.TUI = false
+
+function ceil_center(x, w) {
+	return ((x + w * .5) / w) * w - (w * .5)
+}
+function tui_padding_x(px) { return px ? ceil_center(px, tui_cell_w) : px }
+function tui_padding_y(py) { return py ? ceil_center(py, tui_cell_h) : py }
+
+function tui_snap_paddings() {
+	if (!ui.TUI) return
+	px1 = tui_padding_x(px1)
+	px2 = tui_padding_x(px2)
+	py1 = tui_padding_y(py1)
+	py2 = tui_padding_y(py2)
+	mx1 = tui_padding_x(mx1)
+	mx2 = tui_padding_x(mx2)
+	my1 = tui_padding_y(my1)
+	my2 = tui_padding_y(my2)
+}
+
 // mouse state ---------------------------------------------------------------
 
 // We support multiple pointers for screen sharing / remote control situations
@@ -1342,12 +1364,25 @@ let color, color_state, font, font_size, font_weight, line_gap
 
 ui.get_font_size = () => font_size
 
+ui.TUI = false
+let tui_cell_w
+let tui_cell_h
+function reset_tui() {
+	if (!ui.TUI) return
+	cx.font = font_size + 'px monospace'
+	let m = measure_text(cx, '0')
+	let asc = m.actualBoundingBoxAscent
+	let dsc = m.actualBoundingBoxDescent
+	tui_cell_w = m.width
+	tui_cell_h = asc + dsc
+}
+
 function reset_canvas() {
 	if (!dpr) return // resize_canvas() wasn't called yet (shouldn't happen).
 	theme = themes[ui.default_theme]
 	color = 'text'
 	color_state = 0
-	font = ui.default_font
+	font = ui.TUI ? 'monospace' : ui.default_font
 	font_size = ui.font_size_normal
 	font_weight = 'normal'
 	line_gap = 0.5
@@ -1358,6 +1393,7 @@ function reset_canvas() {
 	scope_set('font_size', font_size)
 	scope_set('font_weight', font_weight)
 	scope_set('line_gap', line_gap)
+	reset_tui()
 	cx.font = font_weight + ' ' + font_size + 'px ' + font
 	reset_shadow()
 }
@@ -2345,6 +2381,7 @@ reset_spacings()
 // box command
 
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
+	tui_snap_paddings()
 	let i = ui_cmd(cmd,
 		min_w ?? 0, // min_w in measuring phase; x in positioning phase
 		min_h ?? 0, // min_h in measuring phase; y in positioning phase
