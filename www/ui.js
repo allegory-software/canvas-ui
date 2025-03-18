@@ -766,7 +766,7 @@ ui.bg_style('*', 'error'  , 'normal',   0,  0.54, 0.43) // error bubbles
 ui.bg_style('light', 'item', 'new'           , 240, 1.00, 0.97)
 ui.bg_style('light', 'item', 'modified'      , 120, 1.00, 0.93)
 ui.bg_style('light', 'item', 'new modified'  , 180, 0.55, 0.87)
-															,
+
 ui.bg_style('dark' , 'item', 'new'           , 240, 0.35, 0.27)
 ui.bg_style('dark' , 'item', 'modified'      , 120, 0.59, 0.24)
 ui.bg_style('dark' , 'item', 'new modified'  , 157, 0.18, 0.20)
@@ -1525,7 +1525,6 @@ function free_recs() {
 //
 //  next_i, cmd, arg1..n, prev_i; next_i, cmd, arg1..n, prev_i; ...
 //    |            ^        |                    ^
-//    |            |        |                    |
 //    |            +--------+                    |
 //    +------------------------------------------+
 //
@@ -1727,14 +1726,14 @@ function measure_rec(a, axis) {
 // walk the element tree top-down, and call the position function for each
 // element that has it. recursive, uses call stack to pass ct_i and ct_w.
 
-function position_rec(a, axis, ct_w) {
+function position_rec(a, axis, ct_wh) {
 	for (let i = 2, n = a.length; i < n; i = cmd_next_ext_i(a, i)) {
 		let cmd = a[i-1]
 		let position_f = position[cmd]
 		if (!position_f)
 			continue
-		let min_w = a[i+2+axis]
-		position_f(a, i, axis, 0, max(min_w, ct_w))
+		let min_wh = a[i+2+axis]
+		position_f(a, i, axis, 0, max(min_wh, ct_wh))
 	}
 }
 
@@ -1853,42 +1852,6 @@ function hover(id) {
 }
 ui.hover = hover
 
-// tab focusing --------------------------------------------------------------
-
-ui.focusables = []
-
-let FOCUSABLE = cmd('focusable')
-
-// TODO: tab_order
-// TODO: tab groups
-ui.focusable = function(id) {
-	ui_cmd(FOCUSABLE, id)
-}
-
-// must happen on translate because that's when secondary recordings appear
-// in the layout in the right order.
-translate[FOCUSABLE] = function(a, i) {
-	let id = a[i]
-	ui.focusables.push(id)
-}
-
-// nohit command -------------------------------------------------------------
-
-let NOHIT = cmd('nohit')
-ui.nohit = function(ct_i) {
-	ct_i ??= ui.ct_i()
-	let i = ui_cmd(NOHIT, ct_i)
-	a[i] -= i // make it relative
-}
-
-// doesn't have to happen on translate, any stage before hit-testing will do.
-translate[NOHIT] = function(a, i) {
-	let ct_i = i+a[i]
-	if (!a.nohit_set)
-		a.nohit_set = set()
-	a.nohit_set.add(ct_i)
-}
-
 function hit_layer(layer, recs) {
 	/*global*/ current_layer = layer
 	// iterate layer's cointainers in reverse order.
@@ -1936,6 +1899,42 @@ function hit_frame(recs, layers) {
 	hit_layers(layers, recs)
 	current_layer = null
 
+}
+
+// tab focusing --------------------------------------------------------------
+
+ui.focusables = []
+
+let FOCUSABLE = cmd('focusable')
+
+// TODO: tab_order
+// TODO: tab groups
+ui.focusable = function(id) {
+	ui_cmd(FOCUSABLE, id)
+}
+
+// must happen on translate because that's when secondary recordings appear
+// in the layout in the right order.
+translate[FOCUSABLE] = function(a, i) {
+	let id = a[i]
+	ui.focusables.push(id)
+}
+
+// nohit command -------------------------------------------------------------
+
+let NOHIT = cmd('nohit')
+ui.nohit = function(ct_i) {
+	ct_i ??= ui.ct_i()
+	let i = ui_cmd(NOHIT, ct_i)
+	a[i] -= i // make it relative
+}
+
+// doesn't have to happen on translate, any stage before hit-testing will do.
+translate[NOHIT] = function(a, i) {
+	let ct_i = i+a[i]
+	if (!a.nohit_set)
+		a.nohit_set = set()
+	a.nohit_set.add(ct_i)
 }
 
 // frame packing -------------------------------------------------------------
@@ -2233,7 +2232,7 @@ translate[CMD_SET_LAYER] = function(a, i) {
 	let ct_i  = i+a[i+1]
 	let z_index = a[i+2]
 	let layer = layer_arr[layer_i]
-	if (z_index == 0 && layer.indexes.at(-1) == 0) { // common path, z-index not used
+	if (!z_index && !layer.indexes.at(-1)) { // common path, z-index not used
 		layer.indexes.push(rec_i, ct_i, z_index)
 	} else {
 		let insert_i = binsearch(layer.indexes, z_index, cmp_z_index, 0, layer.indexes.length / 3) * 3
@@ -2383,10 +2382,10 @@ reset_spacings()
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	tui_snap_paddings()
 	let i = ui_cmd(cmd,
-		min_w ?? 0, // min_w in measuring phase; x in positioning phase
-		min_h ?? 0, // min_h in measuring phase; y in positioning phase
-		0, // children's min_w in measuring phase; w in positioning phase
-		0, // children's min_h in measuring phase; h in positioning phase
+		min_w ?? 0, // user min_w in measuring phase; x in positioning phase
+		min_h ?? 0, // user min_h in measuring phase; y in positioning phase
+		0, // children's min_w -> min_w in measuring phase; w in positioning phase
+		0, // children's min_h -> min_h in measuring phase; h in positioning phase
 		px1, py1, px2, py2,
 		mx1, my1, mx2, my2,
 		round(max(0, fr ?? 1) * 1024),
@@ -2401,18 +2400,18 @@ ui.cmd_box = ui_cmd_box
 
 // box measure phase
 
-function add_ct_min_wh(a, axis, w) {
-	let i = ct_stack.at(-1)
-	if (i == null) // root ct
+function add_ct_min_wh(a, axis, child_min_wh) {
+	let ct_i = ct_stack.at(-1)
+	if (ct_i == null) // root ct
 		return
-	let cmd = a[i-1]
+	let cmd = a[ct_i-1]
 	let main_axis = is_main_axis(cmd, axis)
-	let min_w = a[i+2+axis]
+	let ct_min_wh = a[ct_i+2+axis]
 	if (main_axis) {
-		let gap = a[i+FLEX_GAP]
-		a[i+2+axis] = min_w + w + gap
+		let gap = a[ct_i+FLEX_GAP]
+		a[ct_i+2+axis] = ct_min_wh + child_min_wh + gap
 	} else {
-		a[i+2+axis] = max(min_w, w)
+		a[ct_i+2+axis] = max(ct_min_wh, child_min_wh)
 	}
 }
 ui.add_ct_min_wh = add_ct_min_wh
@@ -2424,10 +2423,12 @@ function ct_stack_push(a, i) {
 // calculate a[i+2]=min_w (for axis=0) or a[i+3]=min_h (for axis=1).
 // the minimum dimensions include margins and paddings.
 function box_measure(a, i, axis) {
-	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis]) // apply own min_w|h
-	a[i+2+axis] += spacings(a, i, axis)
-	let min_w = a[i+2+axis]
-	add_ct_min_wh(a, axis, min_w)
+	let user_min_wh = a[i+0+axis]
+	let min_wh = a[i+2+axis]
+	min_wh = max(min_wh, user_min_wh)
+	min_wh += spacings(a, i, axis)
+	a[i+2+axis] = min_wh
+	add_ct_min_wh(a, axis, min_wh)
 }
 
 // box position phase
@@ -2509,9 +2510,9 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 		}
 	}
 	return ui.widget(cmd_name, {
-		measure   : do_after(do_before(box_measure   , t.before_measure  ), t.after_measure  ),
-		position  : do_after(do_before(box_position  , t.before_position ), t.after_position ),
-		translate : do_after(do_before(box_translate , t.before_translate), t.after_translate),
+		measure   : box_measure   ,
+		position  : box_position  ,
+		translate : box_translate ,
 		hit       : ID != null && box_hit,
 		is_flex_child: true,
 		...t,
@@ -2570,11 +2571,11 @@ measure[CMD_END] = function(a, _, axis) {
 		measure_end_f(a, i, axis)
 	} else {
 		let main_axis = is_main_axis(cmd, axis)
-		let own_min_w = a[i+0+axis]
-		let min_w     = a[i+2+axis]
+		let user_min_w = a[i+0+axis]
+		let min_w      = a[i+2+axis]
 		if (main_axis)
 			min_w = max(0, min_w - a[i+FLEX_GAP]) // remove last element's gap
-		min_w = max(min_w, own_min_w) + spacings(a, i, axis)
+		min_w = max(min_w, user_min_w) + spacings(a, i, axis)
 		a[i+2+axis] = min_w
 		add_ct_min_wh(a, axis, min_w)
 	}
@@ -2608,15 +2609,13 @@ function position_children_stacked(a, ct_i, axis, sx, sw) {
 // translate phase utils
 
 function translate_children(a, i, dx, dy) {
-	let ct_i = i
 	i = cmd_next_i(a, i)
 	while (a[i-1] != CMD_END) {
 		let cmd = a[i-1]
-		let next_ext_i = cmd_next_ext_i(a, i)
 		let translate_f = translate[cmd]
 		if (translate_f)
-			translate_f(a, i, dx, dy, ct_i)
-		i = next_ext_i
+			translate_f(a, i, dx, dy)
+		i = cmd_next_ext_i(a, i)
 	}
 }
 
@@ -2931,11 +2930,11 @@ ui.end_sb = ui.end_scrollbox
 measure[CMD_SCROLLBOX] = ct_stack_push
 
 measure_end[CMD_SCROLLBOX] = function(a, i, axis) {
-	let own_min_w = a[i+0+axis]
-	let co_min_w  = a[i+2+axis] // content min_w
+	let user_min_w = a[i+0+axis]
+	let co_min_w   = a[i+2+axis] // content min_w
 	let overflow = a[i+SB_OVERFLOW+axis]
 	let contain = overflow == SB_OVERFLOW_CONTAIN
-	let sb_min_w = max(contain ? co_min_w : 0, own_min_w) // scrollbox min_w
+	let sb_min_w = max(contain ? co_min_w : 0, user_min_w) // scrollbox min_w
 	sb_min_w += spacings(a, i, axis)
 	a[i+SB_CW+axis] = co_min_w
 	a[i+2+axis] = sb_min_w
@@ -3148,8 +3147,8 @@ scrollbar_rect = function(a, i, axis, state) {
 	let thickness = ui.scrollbar_thickness
 	let thickness_active = state ? ui.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
-	let h_visible = overflow_x != SB_OVERFLOW_HIDE && pw < 1
-	let v_visible = overflow_y != SB_OVERFLOW_HIDE && ph < 1
+	let h_visible = overflow_x == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO && pw < 1
+	let v_visible = overflow_y == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO && ph < 1
 	let both_visible = h_visible && v_visible && 1 || 0
 	let bar_min_len = round(2 * ui.font_size_normal)
 	if (!axis) {
@@ -4401,11 +4400,14 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			a[i+2] = min_w
 			a[i+TEXT_ASC] = round(ww.asc)
 			a[i+TEXT_DSC] = round(ww.dsc)
+			add_ct_min_wh(a, axis, min_w)
 		} else {
 			let min_h = a[i+3]
 			if (min_h == -1)
 				min_h = ww.h
 			a[i+3] = min_h
+			a[i+TEXT_H] = ww.h
+			add_ct_min_wh(a, axis, ww.h)
 		}
 	} else if (!axis) {
 		// measure everything once on the x-axis phase.
@@ -4475,7 +4477,6 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 is_flex_child[CMD_TEXT] = true
 
 translate[CMD_TEXT] = function(a, i, dx, dy) {
-	let s = a[i+TEXT_S]
 	a[i+0] += dx
 	a[i+1] += dy
 	a[i+TEXT_X] += dx
@@ -4682,11 +4683,12 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 
 }
 
-frame.before_measure = function(a, i, axis) {
+frame.measure = function(a, i, axis) {
 	let on_measure = a[i+FRAME_ON_MEASURE]
 	let min_w = on_measure(axis)
 	if (min_w != null)
 		add_ct_min_wh(a, axis, min_w)
+	box_measure(a, i, axis)
 }
 
 frame.translate = function(a, i, dx, dy) {
@@ -6891,7 +6893,7 @@ ui.box_widget('img', {
 
 	},
 
-	before_measure: function(a, i, axis) {
+	measure: function(a, i, axis) {
 		if (!axis) return // can't impose a width (min_w still works)
 
 		let sw        = a[i+2]
@@ -6906,7 +6908,9 @@ ui.box_widget('img', {
 
 		let max_h = (ih / iw) * sw // max h for max w that fits
 		let min_h = min(max_h, repl(max_min_h, -1, 1/0))
-		a[i+0+1] = max(a[i+0+1], min_h)
+		let user_min_h = a[i+0+1]
+		a[i+0+1] = max(user_min_h, min_h)
+		box_measure(a, i, axis)
 	},
 
 	position: function(a, i, axis, sx, sw) {

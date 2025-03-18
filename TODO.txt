@@ -1,6 +1,14 @@
+LEGEND
+------------------------------------------------------------------------------
 * means done
 - means TODO
+
+
+REFACTORINGS FROM IMTUI
 ------------------------------------------------------------------------------
+S -> BOX_CT_S
+NEXT_EXT_I -> BOX_CT_NEXT_EXT_I
+box_widget box_hit -> use hit_box
 
 
 WIDGET INTER-DEPENDENCY PROBLEM
