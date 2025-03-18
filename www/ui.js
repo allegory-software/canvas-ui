@@ -2447,7 +2447,7 @@ function align_x(a, i, axis, sx, sw) {
 		return sx + sw - min_w
 	} else if (align == ALIGN_CENTER) {
 		let min_w = a[i+2+axis]
-		return sx + round((sw - min_w) / 2)
+		return sx + max(0, round((sw - min_w) / 2))
 	} else {
 		return sx
 	}
@@ -4391,7 +4391,7 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let ww = a[i+TEXT_S]
 		if (!axis) {
 			ww.measure()
-			let min_w = a[i+2]
+			let min_w = a[i+0]
 			let max_min_w = a[i+TEXT_W]
 			if (min_w == -1)
 				min_w = ww.min_w
@@ -4400,14 +4400,12 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			a[i+2] = min_w
 			a[i+TEXT_ASC] = round(ww.asc)
 			a[i+TEXT_DSC] = round(ww.dsc)
-			add_ct_min_wh(a, axis, min_w)
 		} else {
-			let min_h = a[i+3]
+			let min_h = a[i+1]
 			if (min_h == -1)
 				min_h = ww.h
 			a[i+3] = min_h
 			a[i+TEXT_H] = ww.h
-			add_ct_min_wh(a, axis, ww.h)
 		}
 	} else if (!axis) {
 		// measure everything once on the x-axis phase.
