@@ -2678,6 +2678,14 @@ function is_main_axis(cmd, axis) {
 measure[CMD_H] = ct_stack_push
 measure[CMD_V] = ct_stack_push
 
+function is_last_flex_child(a, i) {
+	while (1) {
+		i = cmd_next_ext_i(a, i)
+		if (is_flex_child[a[i-1]]) return
+		if (a[i-1] == CMD_END) return true
+	}
+}
+
 function position_flex(a, i, axis, sx, sw) {
 
 	sx = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
@@ -2711,9 +2719,8 @@ function position_flex(a, i, axis, sx, sw) {
 		if (!total_fr)
 			total_fr	= 1
 
-		let total_w = sw - gap_w
-
 		// compute total overflow width and total free width.
+		let total_w = sw - gap_w
 		let total_overflow_w = 0
 		let total_free_w     = 0
 		i = next_i
@@ -2759,8 +2766,10 @@ function position_flex(a, i, axis, sx, sw) {
 					sw = floor(flex_w - shrink_w)
 				}
 
-				// TODO: check if this is the last element and if it is,
-				// set `sw = total_w - sx` so that it eats up all rounding errors.
+
+				// let the last child eat up any rounding errors.
+				if (is_last_flex_child(a, i))
+					sw = ct_sw - (sx - ct_sx)
 
 				// position item's children recursively.
 				let position_f = position[a[i-1]]
@@ -3024,7 +3033,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 				let sy0 = ui.state(id, 'scroll_y')
 				sy = sy - ui.wheel_dy
 				if (!infinite_y)
-					sy = clamp(sy, 0, ch - h)
+					sy = clamp(sy, 0, max(0, ch - h))
 				ui.state(id).set('scroll_y', sy)
 				a[i+SB_SX+1] = sy
 			}
@@ -3047,7 +3056,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 					let dpsy = (ui.my - ui.my0) / (h - th)
 					sy = round((psy0 + dpsy) * (ch - h))
 					if (!infinite_y)
-						sy = clamp(sy, 0, ch - h)
+						sy = clamp(sy, 0, max(0, ch - h))
 					ui.state(id).set('scroll_y', sy)
 					a[i+SB_SX+1] = sy
 				}
