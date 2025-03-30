@@ -5232,7 +5232,7 @@ ui.tool_button = function(id, font, icon, fr, align, valign, min_w, min_h, style
 }
 
 ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
-	ui.button_stack(id, fr, align, valign, min_w, min_h)
+	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c', min_w, min_h)
 	let state = ui.button_state(id)
 	ui.button_bb(style, state)
 	ui.button_text(s, state)
