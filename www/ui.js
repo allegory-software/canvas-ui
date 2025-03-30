@@ -1042,7 +1042,7 @@ canvas.addEventListener('pointerleave', function(ev) {
 
 // NOTE: wheelDeltaY is 150 in chrome and 120 if FF. Browser developers...
 canvas.addEventListener('wheel', function(ev) {
-	ui.mouse.wheel_dy = -ev.deltaY
+	ui.mouse.wheel_dy = ev.deltaY
 	if (!ui.mouse.wheel_dy)
 		return
 	ui.mouse.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
@@ -2473,6 +2473,7 @@ function box_position(a, i, axis, sx, sw) {
 	a[i+0+axis] = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	a[i+2+axis] = inner_w(a, i, axis, align_w(a, i, axis, sw))
 }
+ui.box_position = box_position
 
 // box translate phase
 
@@ -2480,6 +2481,7 @@ function box_translate(a, i, dx, dy) {
 	a[i+0] += dx
 	a[i+1] += dy
 }
+ui.box_translate = box_translate
 
 // box hit phase
 
@@ -3031,7 +3033,7 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 			// wheel scrolling
 			if (axis && ui.wheel_dy && hit(id)) {
 				let sy0 = ui.state(id, 'scroll_y')
-				sy = sy - ui.wheel_dy
+				sy = sy + ui.wheel_dy
 				if (!infinite_y)
 					sy = clamp(sy, 0, max(0, ch - h))
 				ui.state(id).set('scroll_y', sy)
@@ -5431,7 +5433,7 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	s.set('items', items)
 	keepalive(id, list_update)
 	ui.focusable(id)
-	let fi = s.get('focused_item_i')
+	let fi = s.get('focused_item_i') ?? 0
 	let list_focused = ui.focused(id)
 	let i = 0
 	hv = hv || 'v'
