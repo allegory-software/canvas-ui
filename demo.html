@@ -10,6 +10,7 @@
 <script src=ui_validation.js></script>
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
+<script src=ui_ast_edit.js></script>
 <script src=adapter.js></script>
 <script src=webrtc.js></script>
 <!--
@@ -888,6 +889,22 @@ ui.v(1, ui.sp())
 		ui.shared_screen('ss1', answer_con)
 	ui.end_scrollbox()
 ui.end_v()
+`
+
+demos.ast_edit = `
+
+let ast = {
+	root: {
+		s: 'hello',
+		c: [
+			{s: 'cruel'},
+			{s: 'world'},
+		],
+	},
+}
+
+ui.ast_edit('ast_edit1', ast, 1, 's', 's')
+
 `
 
 // demo ui -------------------------------------------------------------------
