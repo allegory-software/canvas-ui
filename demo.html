@@ -11,6 +11,7 @@
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
 <script src=ui_ast_edit.js></script>
+<script src=ui_code_edit.js></script>
 <script src=adapter.js></script>
 <script src=webrtc.js></script>
 <!--
@@ -907,6 +908,15 @@ let ast = {
 }
 
 ui.ast_edit('ast_edit1', ast, 1, 's', 's')
+
+`
+
+demos.code_edit = `
+
+let code = "Hello world!\\nLine 2\\n\\tLine 3\\n"
+code = code.repeat(1000)
+
+ui.code_edit('code_edit1', {code: code}, 1, 's', 's')
 
 `
 
