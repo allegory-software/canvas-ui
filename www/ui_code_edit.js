@@ -41,13 +41,13 @@ ui.widget('code_edit_text', {
 
 		// draw selection
 		cx.fillStyle = ui.bg_color('bg1')
-		cx.fillRect(vx, vy, vw, line_h)
+		cx.fillRect(vx, y + hit_line * line_h, vw, line_h)
 
 		// draw side bar
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 		for (let i = vi1; i < vi2; i++) {
-			cx.fillText(i, x + text_x - sidebar_gap, y + i * line_h)
+			cx.fillText(i, x + text_x - sidebar_gap, y + i * line_h - font_descent - 1)
 		}
 
 		// draw text
@@ -130,7 +130,7 @@ function code_edit_view(id, opt) {
 		// set mouse state
 		;[drag_state, dx, dy, cs] = ui.drag(id+'.text_contentbox')
 		if (drag_state == 'hover' || drag_state == 'drag') {
-			hit_line = floor((ui.mx - x) / line_h)
+			hit_line = floor((ui.my - y) / line_h)
 		}
 
 		ui.stack(id+'.text_contentbox')
@@ -174,85 +174,6 @@ function code_edit_view(id, opt) {
 		ui.end_v()
 
 	}
-
-	/*
-	e.draw = function(a, i) {
-		let x0 = a[i+0]
-		let y0 = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
-		let id      = a[i+VIEW_ID]
-		let edit_id = a[i+EDIT_ID]
-
-		let ss = ui.state(edit_id)
-		let lines = ss.get('lines')
-
-		let text_size = 16
-		let line_h = round(text_size * 1.25)
-		let char_w = text_size
-		let gap = char_w
-		let sidebar_w = (lines.length+'').length * char_w
-		let text_x = x0 + sidebar_w + gap
-
-		cx.save()
-
-		cx.font = text_size+'px monospace'
-
-		cx.fillStyle = 'black'
-		cx.fillRect(x0, y0, w, h)
-
-		let hs = ui.hit(id)
-		let hit_line = hs?.get('line')
-		if (hit_line != null) {
-			cx.fillStyle = ui.bg_color('bg1')
-			cx.fillRect(text_x, y0 + hit_line * line_h, w, line_h)
-		}
-		let vi0 = 0
-		let vi1 = 10 //lines.length
-
-		for (let i = vi0; i < vi1; i++) {
-			let y = y0 + i * line_h + line_h - 5
-			cx.fillStyle = 'gray'
-			cx.textAlign = 'right'
-			cx.fillText(i+'', text_x - gap, y)
-			let s = lines[i]
-			cx.fillStyle = 'white'
-			cx.textAlign = 'left'
-			cx.fillText(s, text_x, y)
-		}
-
-		cx.restore()
-	}
-
-	e.hit = function(a, i) {
-		let x = a[i+0]
-		let y = a[i+1]
-		let w = a[i+2]
-		let h = a[i+3]
-		let id      = a[i+VIEW_ID]
-		let edit_id = a[i+EDIT_ID]
-
-		let ss = ui.state(edit_id)
-		let lines = ss.get('lines')
-
-		let text_size = 16
-		let line_h = round(text_size * 1.25)
-		let char_w = 12
-		let gap = 10
-		let sidebar_w = (lines.length+'').length * char_w
-		let text_x = sidebar_w + gap
-
-		if (ui.hit_box(a, i)) {
-			let hs = ui.hover(id)
-			let line = floor((ui.my - y) / line_h)
-			let col = floor((ui.mx - text_x) / char_w)
-			hs.set('line', line)
-			hs.set('col', col)
-			return true
-		}
-
-	}
-	*/
 
 	e.free = function() {}
 
