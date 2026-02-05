@@ -282,7 +282,7 @@
     position. If 1, it'll move into nodes that start at the
     position. With 0, it'll only enter nodes that cover the position
     from both sides.
-    
+
     Note that this will not enter
     [overlays](#common.MountedTree.overlay), and you often want
     [`resolveInner`](#common.Tree.resolveInner) instead.
@@ -1580,7 +1580,7 @@
     Start a parse, returning a [partial parse](#common.PartialParse)
     object. [`fragments`](#common.TreeFragment) can be passed in to
     make the parse incremental.
-    
+
     By default, the entire input is parsed. You can pass `ranges`,
     which should be a sorted array of non-empty, non-overlapping
     ranges, to parse only those ranges. The tree returned in that
@@ -2647,7 +2647,7 @@
     Look at a code unit near the stream position. `.peek(0)` equals
     `.next`, `.peek(-1)` gives you the previous character, and so
     on.
-    
+
     Note that looking around during tokenizing creates dependencies
     on potentially far-away content, which may reduce the
     effectiveness incremental parsing—when looking forward—or even
@@ -3798,7 +3798,7 @@
     same modifier to a twice tag will return the same value (`m1(t1)
     == m1(t1)`) and applying multiple modifiers will, regardless or
     order, produce the same tag (`m1(m2(t1)) == m2(m1(t1))`).
-    
+
     When multiple modifiers are applied to a given base tag, each
     smaller set of modifiers is registered as a parent, so that for
     example `m1(m2(m3(t1)))` is a subtype of `m1(m2(t1))`,
@@ -7242,4 +7242,6 @@
     md: parser5,
     lua: parser6
   };
+  window.lz_parseMixed = parseMixed;
+
 })();
