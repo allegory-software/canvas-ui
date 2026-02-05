@@ -20,29 +20,45 @@ ui.widget('code_edit_text', {
 	draw: function(a, i) {
 		let x           = a[i+0]
 		let y           = a[i+1]
-		let line_h      = a[i+2]
-		let font_size   = a[i+3]
-		let text_x      = a[i+4]
-		let sidebar_gap = a[i+5]
-		let char_w      = a[i+6]
-		let vi1         = a[i+7]
-		let vi2         = a[i+8]
-		let lines       = a[i+9]
+		let vx          = a[i+2]
+		let vy          = a[i+3]
+		let vw          = a[i+4]
+		let vh          = a[i+5]
+		let line_h      = a[i+6]
+		let font_size   = a[i+7]
+		let font_descent= a[i+8]
+		let text_x      = a[i+9]
+		let sidebar_gap = a[i+10]
+		let char_w      = a[i+11]
+		let vi1         = a[i+12]
+		let vi2         = a[i+13]
+		let lines       = a[i+14]
+		let hit_line    = a[i+15]
 		cx.save()
+
 		cx.font = font_size+'px mono'
 		cx.fontKerning = 'none'
+
+		// draw selection
+		cx.fillStyle = ui.bg_color('bg1')
+		cx.fillRect(vx, vy, vw, line_h)
+
+		// draw side bar
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 		for (let i = vi1; i < vi2; i++) {
 			cx.fillText(i, x + text_x - sidebar_gap, y + i * line_h)
 		}
+
+		// draw text
 		cx.textAlign = 'left'
 		cx.fillStyle = 'white'
 		for (let i = vi1; i < vi2; i++) {
 			let s = lines[(i-vi1)]
 			let indent_w = indent_n(s) * char_w * 3
-			cx.fillText(s, x + text_x + indent_w, y + i * line_h)
+			cx.fillText(s, x + text_x + indent_w, y + (i + 1) * line_h - font_descent - 1)
 		}
+
 		cx.restore()
 	}
 })
@@ -54,6 +70,7 @@ function code_edit_view(id, opt) {
 	// context-sensitive thus set on each frame
 	let lines
 	let font_size
+	let font_descent
 	let line_h
 	let char_w
 	let max_line_len
@@ -65,9 +82,10 @@ function code_edit_view(id, opt) {
 	let visible_lines = []
 
 	// mouse state
-	// let drag_state, dx, dy, cs
-	// let gcol_mover
-	// let hit_zone // sort_icon, col_divider, col, gcol, cell
+	let drag_state, dx, dy, cs
+	let hit_zone //
+	let hit_line
+	let hit_char
 	// let drag_op  // col_move, col_group, row_move
 	// let hit_ri // row index
 	// let hit_fi // field index
@@ -109,9 +127,20 @@ function code_edit_view(id, opt) {
 			last_vi2 = vi2
 		}
 
-		ui.code_edit_text(x, y,
-			line_h, font_size, text_x, sidebar_gap, char_w,
-			vi1, vi2, visible_lines)
+		// set mouse state
+		;[drag_state, dx, dy, cs] = ui.drag(id+'.text_contentbox')
+		if (drag_state == 'hover' || drag_state == 'drag') {
+			hit_line = floor((ui.mx - x) / line_h)
+		}
+
+		ui.stack(id+'.text_contentbox')
+			ui.code_edit_text(x, y, vx, vy, vw, vh,
+				line_h, font_size, font_descent, text_x, sidebar_gap, char_w,
+				vi1, vi2, visible_lines,
+				hit_line,
+		)
+
+		ui.end_stack()
 	}
 
 	e.render = function(fr, align, valign, min_w, min_h) {
@@ -124,6 +153,7 @@ function code_edit_view(id, opt) {
 		line_h = round(font_size * 1.5)
 		let m = ui.measure_text(cx, '0')
 		char_w = m.width
+		font_descent = m.fontBoundingBoxDescent
 		sidebar_gap = sp
 		let sidebar_w = (lines.length+'').length * char_w
 		text_x = sidebar_w + sidebar_gap
@@ -131,7 +161,6 @@ function code_edit_view(id, opt) {
 		text_h = lines.length * line_h
 
 		// set keyboard state
-
 		focused = ui.focused(id)
 		shift = ui.key('shift')
 		ctrl  = ui.key('control')
