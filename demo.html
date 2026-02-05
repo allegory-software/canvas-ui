@@ -12,6 +12,12 @@
 <script src=ui_code_edit.js></script>
 <script src=adapter.js></script>
 <script src=webrtc.js></script>
+<script type="module">
+  // Import parsers from CDN (Skypack)
+  import {parser as htmlParser} from 'https://cdn.skypack.dev/@lezer/html'
+  import {parser as jsParser} from 'https://cdn.skypack.dev/@lezer/javascript'
+  import {parser as cssParser} from 'https://cdn.skypack.dev/@lezer/css'
+</script>
 <!--
 NOTE: Setting the background color for the html element before declaring
 the <body> element prevents the body from rendering white for a split second
@@ -911,7 +917,7 @@ ui.ast_edit('ast_edit1', ast, 1, 's', 's')
 
 demos.code_edit = `
 
-let code = document.documentElement.innerHTML
+let code = document.documentElement.outerHTML
 
 ui.bb('bg0')
 ui.code_edit('code_edit1', {code: code}, 1, 's', 's')
