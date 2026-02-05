@@ -12,12 +12,7 @@
 <script src=ui_code_edit.js></script>
 <script src=adapter.js></script>
 <script src=webrtc.js></script>
-<script type="module">
-  // Import parsers from CDN (Skypack)
-  import {parser as htmlParser} from 'https://cdn.skypack.dev/@lezer/html'
-  import {parser as jsParser} from 'https://cdn.skypack.dev/@lezer/javascript'
-  import {parser as cssParser} from 'https://cdn.skypack.dev/@lezer/css'
-</script>
+<script src=lezer.js></script>
 <!--
 NOTE: Setting the background color for the html element before declaring
 the <body> element prevents the body from rendering white for a split second

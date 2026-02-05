@@ -47,7 +47,7 @@ ui.widget('code_edit_text', {
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 		for (let i = vi1; i < vi2; i++) {
-			cx.fillText(i, x + text_x - sidebar_gap, y + i * line_h - font_descent - 1)
+			cx.fillText(i+1, x + text_x - sidebar_gap, y + (i + 1) * line_h - font_descent - 2)
 		}
 
 		// draw text
@@ -56,7 +56,7 @@ ui.widget('code_edit_text', {
 		for (let i = vi1; i < vi2; i++) {
 			let s = lines[(i-vi1)]
 			let indent_w = indent_n(s) * char_w * 3
-			cx.fillText(s, x + text_x + indent_w, y + (i + 1) * line_h - font_descent - 1)
+			cx.fillText(s, x + text_x + indent_w, y + (i + 1) * line_h - font_descent - 2)
 		}
 
 		cx.restore()
@@ -69,6 +69,7 @@ function code_edit_view(id, opt) {
 
 	// context-sensitive thus set on each frame
 	let lines
+	let tree
 	let font_size
 	let font_descent
 	let line_h
@@ -97,9 +98,14 @@ function code_edit_view(id, opt) {
 	let keydown = key => focused && ui.keydown(key)
 
 	function update_text_state() {
-		if (!lines)
+		if (!lines) {
 			lines = opt.code.split('\n')
-
+			tree = lz_parser.html.parse(opt.code)
+			//let c = tree.cursor()
+			//do {
+			//	console.log(c.name, c.from, c.to)
+			//} while (c.next())
+		}
 		max_line_len = 0
 		for (let s of lines)
 			max_line_len = max(max_line_len, s.length)
