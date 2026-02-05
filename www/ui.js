@@ -405,6 +405,7 @@ ui.css(`
 @font-face { font-family: 'lab'    ; src: url('icons/la-brands-400.woff2'); }
 @font-face { font-family: 'remix'  ; src: url('icons/remixicon.woff2'); }
 @font-face { font-family: 'mio'    ; src: url('icons/material-icons-outlined.woff2'); }
+@font-face { font-family: 'mono'   ; src: url('fonts/jetbrains-mono-nl-regular.woff2'); }
 
 html, body {
 	width: 100%;
@@ -868,7 +869,8 @@ ui.set_default_theme = function(theme) {
 // prevent flicker on load by setting the screen's background color now.
 set_screen_bg()
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+	await document.fonts.ready
 	ready = true
 	assert(ui.main, 'ui.main not set')
 	document.body.appendChild(ui.screen)

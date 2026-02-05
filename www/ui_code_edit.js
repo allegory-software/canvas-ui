@@ -7,16 +7,62 @@ const {
 	cx,
 } = ui
 
+function indent_n(s) {
+	let i = 0
+	while (s[i] === '\t') i++
+	return i
+}
+
+ui.widget('code_edit_text', {
+	create: function(...args) {
+		return ui.cmd(...args)
+	},
+	draw: function(a, i) {
+		let x           = a[i+0]
+		let y           = a[i+1]
+		let line_h      = a[i+2]
+		let font_size   = a[i+3]
+		let text_x      = a[i+4]
+		let sidebar_gap = a[i+5]
+		let char_w      = a[i+6]
+		let vi1         = a[i+7]
+		let vi2         = a[i+8]
+		let lines       = a[i+9]
+		cx.save()
+		cx.font = font_size+'px mono'
+		cx.fontKerning = 'none'
+		cx.textAlign = 'right'
+		cx.fillStyle = 'gray'
+		for (let i = vi1; i < vi2; i++) {
+			cx.fillText(i, x + text_x - sidebar_gap, y + i * line_h)
+		}
+		cx.textAlign = 'left'
+		cx.fillStyle = 'white'
+		for (let i = vi1; i < vi2; i++) {
+			let s = lines[(i-vi1)]
+			let indent_w = indent_n(s) * char_w * 3
+			cx.fillText(s, x + text_x + indent_w, y + i * line_h)
+		}
+		cx.restore()
+	}
+})
+
 function code_edit_view(id, opt) {
+
+	let e = {}
 
 	// context-sensitive thus set on each frame
 	let lines
 	let font_size
-	let line_height
-	let char_w
 	let line_h
+	let char_w
 	let max_line_len
-	let cells_w
+	let sidebar_gap
+	let text_x
+	let text_w
+	let text_h
+	let last_vi1 = -1, last_vi2 = -1 // visible line range
+	let visible_lines = []
 
 	// mouse state
 	// let drag_state, dx, dy, cs
@@ -41,9 +87,31 @@ function code_edit_view(id, opt) {
 			max_line_len = max(max_line_len, s.length)
 	}
 
-	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
-		//
+	function on_text_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
+		let sx = vx - x
+		let sy = vy - y
+
+		// number of lines fully or partially in the viewport.
+		let vn = floor(vh / line_h) + 2 // 2 is right, think it!
+		let vi1 = floor(sy / line_h)
+		let vi2 = vi1 + vn
+		vi1 = max(0, min(vi1, lines.length - 1))
+		vi2 = max(0, min(vi2, lines.length))
+
+		if (last_vi1 != vi1 || last_vi2 != vi2) {
+			visible_lines.length = 0
+			for (let i = vi1; i < vi2; i++) {
+				let s = lines[i]
+				visible_lines.push(s)
+			}
+			last_vi1 = vi1
+			last_vi2 = vi2
+		}
+
+		ui.code_edit_text(x, y,
+			line_h, font_size, text_x, sidebar_gap, char_w,
+			vi1, vi2, visible_lines)
 	}
 
 	e.render = function(fr, align, valign, min_w, min_h) {
@@ -53,15 +121,14 @@ function code_edit_view(id, opt) {
 		let sp  = ui.sp1()
 		let sp2 = ui.sp2()
 		font_size = ui.get_font_size()
-		line_h = font_size * 1.5
-		let m = measure_text(cx, '0')
-		cell_w = m.width
-		let line_h = round(text_size * 1.25)
-		let char_w = 12
-		let gap = sp
+		line_h = round(font_size * 1.5)
+		let m = ui.measure_text(cx, '0')
+		char_w = m.width
+		sidebar_gap = sp
 		let sidebar_w = (lines.length+'').length * char_w
-		let text_x = sidebar_w + gap
-		let cells_w =
+		text_x = sidebar_w + sidebar_gap
+		text_w = ceil(max_line_len * char_w)
+		text_h = lines.length * line_h
 
 		// set keyboard state
 
@@ -72,15 +139,15 @@ function code_edit_view(id, opt) {
 		ui.v(fr, 0, align, valign, min_w, min_h)
 			ui.h(0)
 			ui.end_h()
-			ui.scrollbox(id+'.text_scrollbox', 1, overflow, overflow, 's', 's')
-				ui.frame(noop, on_text_frame, 0, 'l', 't', cells_w, cells_h)
+			ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll', 's', 's')
+				ui.frame(noop, on_text_frame, 0, 'l', 't', text_w, text_h)
 			ui.end_scrollbox()
 		ui.end_v()
 
 	}
 
 	/*
-	view.draw = function(a, i) {
+	e.draw = function(a, i) {
 		let x0 = a[i+0]
 		let y0 = a[i+1]
 		let w = a[i+2]
@@ -88,7 +155,6 @@ function code_edit_view(id, opt) {
 		let id      = a[i+VIEW_ID]
 		let edit_id = a[i+EDIT_ID]
 
-		let cx = ui.cx
 		let ss = ui.state(edit_id)
 		let lines = ss.get('lines')
 
@@ -129,7 +195,7 @@ function code_edit_view(id, opt) {
 		cx.restore()
 	}
 
-	view.hit = function(a, i) {
+	e.hit = function(a, i) {
 		let x = a[i+0]
 		let y = a[i+1]
 		let w = a[i+2]
@@ -137,7 +203,6 @@ function code_edit_view(id, opt) {
 		let id      = a[i+VIEW_ID]
 		let edit_id = a[i+EDIT_ID]
 
-		let cx = ui.cx
 		let ss = ui.state(edit_id)
 		let lines = ss.get('lines')
 
@@ -160,9 +225,11 @@ function code_edit_view(id, opt) {
 	}
 	*/
 
-	view.free = function() {}
+	e.free = function() {}
 
 	update_text_state()
+
+	return e
 }
 
 ui.code_edit = function(id, opt, fr, align, valign, min_w, min_h) {

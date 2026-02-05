@@ -2,8 +2,6 @@
 <html>
 <head>
 <base href="www/">
-<link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2">
-<link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2">
 <script src=glue.js global></script>
 <script src=arena.js></script>
 <script src=ui.js></script>
@@ -913,9 +911,9 @@ ui.ast_edit('ast_edit1', ast, 1, 's', 's')
 
 demos.code_edit = `
 
-let code = "Hello world!\\nLine 2\\n\\tLine 3\\n"
-code = code.repeat(1000)
+let code = document.documentElement.innerHTML
 
+ui.bb('bg0')
 ui.code_edit('code_edit1', {code: code}, 1, 's', 's')
 
 `
