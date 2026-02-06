@@ -10,6 +10,7 @@ const {
 
 let node_colors = {
 	OpenTag: 'yellow',
+	CloseTag: 'yellow',
 }
 
 ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
@@ -107,6 +108,8 @@ ui.widget('code_edit_text', {
 		let lines       = a[i+12]
 		let line_colors = a[i+13]
 		let hit_line    = a[i+14]
+		let cursors     = a[i+15]
+
 		cx.save()
 
 		cx.font = font_size+'px mono'
@@ -152,6 +155,15 @@ ui.widget('code_edit_text', {
 		cx.fillStyle = ui.bg_color('bg1')
 		cx.fillRect(vx, y0 + hit_line * line_h, vw, line_h)
 
+		// draw cursors.
+		//cx.globalCompositeOperation = 'source-over'
+		cx.fillStyle = ui.fg_color('text')
+		for (let cursor of cursors)
+			cx.fillRect(
+				x0 + cursor.char * char_w,
+				y0 + cursor.line * line_h,
+				3, line_h)
+
 		// draw background.
 		cx.fillStyle = ui.bg_color('bg0')
 		cx.fillRect(vx, vy, vw, vh)
@@ -173,7 +185,8 @@ function code_edit_view(id, opt) {
 	let max_line_len
 	let text_w
 	let text_h
-	let last_vi1 = -1, last_vi2 = -1 // visible line range
+	let last_vi1 = -1
+	let last_vi2 = -1 // visible line range
 	let visible_lines = [] // [line1, ...]
 	let visible_colors = [] // [line_i, i, w, color, ...]
 
@@ -188,9 +201,8 @@ function code_edit_view(id, opt) {
 	// let hit_indent
 	// let row_move_state
 
-	// keyboard state
-	let focused, shift, ctrl
-	let keydown = key => focused && ui.keydown(key)
+	// cursors state.
+	let cursors = [{line: 0, char: 0, want_char: 0}]
 
 	lz_parser.html = lz_parser.html.configure({
 		wrap: lz_parseMixed(node => {
@@ -227,28 +239,31 @@ function code_edit_view(id, opt) {
 				line_colors[i] = []
 		}
 
-		for (let a of line_colors)
-			a.length = 0
-		let tree = lz_parser.html.parse(text)
-		let cursor = tree.cursor()
-		do {
-			let color = node_colors[cursor.name]
-			if (!color)
-				continue
-			let line1_i = binsearch(line_offsets, cursor.from, '<=')
-			let line2_i = binsearch(line_offsets, cursor.to  , '<=')
-			let i = cursor.from
-			let w = cursor.to - i
-			i -= (line1_i > 0 ? line_offsets[line1_i-1] : 0)
-			if (line2_i > line1_i) {
-				line_colors[line1_i].push(i, lines[line1_i].length, color)
-				for (let line_i = line1_i + 1; line_i < line2_i; line_i++)
-					line_colors[line_i].push(0, lines[line_i].length, color)
-				line_colors[line2_i].push(0, w, color)
-			} else {
-				line_colors[line1_i].push(i, w, color)
-			}
-		} while (cursor.next())
+		// parse syntax for highlighting.
+		{
+			for (let a of line_colors)
+				a.length = 0
+			let tree = lz_parser.html.parse(text)
+			let cursor = tree.cursor()
+			do {
+				let color = node_colors[cursor.name]
+				if (!color)
+					continue
+				let line1_i = binsearch(line_offsets, cursor.from, '<=')
+				let line2_i = binsearch(line_offsets, cursor.to  , '<=')
+				let i = cursor.from
+				let w = cursor.to - i
+				i -= (line1_i > 0 ? line_offsets[line1_i-1] : 0)
+				if (line2_i > line1_i) {
+					line_colors[line1_i].push(i, lines[line1_i].length, color)
+					for (let line_i = line1_i + 1; line_i < line2_i; line_i++)
+						line_colors[line_i].push(0, lines[line_i].length, color)
+					line_colors[line2_i].push(0, w, color)
+				} else {
+					line_colors[line1_i].push(i, w, color)
+				}
+			} while (cursor.next())
+		}
 
 		max_line_len = 0
 		for (let s of lines)
@@ -289,6 +304,9 @@ function code_edit_view(id, opt) {
 
 		// set mouse state
 		;[drag_state, dx, dy, cs] = ui.drag(id+'.text_contentbox')
+		if (drag_state == 'drag') {
+			ui.focus(id)
+		}
 		if (drag_state == 'hover' || drag_state == 'drag') {
 			hit_line = floor((ui.my - y) / line_h)
 		}
@@ -297,7 +315,7 @@ function code_edit_view(id, opt) {
 			ui.code_edit_text(x, y, vx, vy, vw, vh,
 				line_h, font_size, font_descent, char_w,
 				vi1, vi2, visible_lines, visible_colors,
-				hit_line,
+				hit_line, ui.focused(id) ? cursors : empty_array,
 		)
 
 		ui.end_stack()
@@ -307,8 +325,6 @@ function code_edit_view(id, opt) {
 
 		// set layout vars
 
-		let sp  = ui.sp1()
-		let sp2 = ui.sp2()
 		font_size = ui.get_font_size()
 		line_h = round(font_size * 1.5)
 		let m = ui.measure_text(cx, '0')
@@ -318,10 +334,68 @@ function code_edit_view(id, opt) {
 		text_w = ceil(max_line_len * char_w)
 		text_h = lines.length * line_h
 
-		// set keyboard state
-		focused = ui.focused(id)
-		shift = ui.key('shift')
-		ctrl  = ui.key('control')
+		let cursor = cursors[0]
+
+		// process keyboard input
+
+		let lines_n = 0
+		let chars_n = 0
+		let scroll_lines = 0
+		if (ui.focused(id)) {
+			let shift = ui.key('shift')
+			let ctrl  = ui.key('control')
+			if      (ui.keydown('arrowup'   )) lines_n = -1
+			else if (ui.keydown('arrowdown' )) lines_n =  1
+			else if (ui.keydown('pageup'    )) lines_n = -(last_vi2 - last_vi1)
+			else if (ui.keydown('pagedown'  )) lines_n =  (last_vi2 - last_vi1)
+			else if (ui.keydown('home'      ) && ctrl) lines_n = -1/0
+			else if (ui.keydown('end'       ) && ctrl) lines_n =  1/0
+			else if (ui.keydown('arrowleft' ) && !ctrl) chars_n = -1
+			else if (ui.keydown('arrowright') && !ctrl) chars_n =  1
+			else if (ui.keydown('arrowleft' ) && ctrl) scroll_lines = -1
+			else if (ui.keydown('arrowright') && ctrl) scroll_lines =  1
+		}
+		if (chars_n) {
+			if (chars_n < 0) {
+				if (cursor.char > 0) {
+					cursor.char--
+					cursor.want_char = cursor.char
+				} else if (cursor.line) {
+					cursor.line--
+					cursor.char = lines[cursor.line].length
+					cursor.want_char = cursor.char
+				}
+			} else {
+				if (cursor.char < lines[cursor.line].length) {
+					cursor.char++
+					cursor.want_char = cursor.char
+				} else if (cursor.line < lines.length) {
+					cursor.line++
+					cursor.char = 0
+					cursor.want_char = cursor.char
+				}
+			}
+		} else if (lines_n) {
+			if (lines_n < 0) {
+				if (cursor.line) {
+					cursor.line = max(cursor.line + lines_n, 0)
+					cursor.char = min(cursor.want_char, lines[cursor.line].length)
+				} else {
+					cursor.char = 0
+				}
+			} else {
+				if (cursor.line < lines.length-1) {
+					cursor.line = min(cursor.line + lines_n, lines.length-1)
+					cursor.char = min(cursor.want_char, lines[cursor.line].length)
+				} else {
+					cursor.char = lines[cursor.line].length
+				}
+			}
+		} else if (scroll_lines) {
+			//
+		}
+
+		// build editor
 
 		ui.v(fr, 0, align, valign, min_w, min_h)
 			ui.h(1, ui.sp025())
