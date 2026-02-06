@@ -8,7 +8,7 @@ const {
 } = ui
 
 let node_colors = {
-	OpenTag: '#663',
+	OpenTag: 'yellow',
 }
 
 function indent_n(s) {
@@ -75,7 +75,22 @@ ui.widget('code_edit_text', {
 			cx.fillText(i+1, x0 + text_x - sidebar_gap, y0 + (i + 1) * line_h - font_descent - 2)
 		}
 
-		// draw highlighting
+		// reset viewport to alpha 0 so we can blend text with highlighting rectangles.
+		cx.clearRect(vx, vy, vw, vh)
+
+		// draw the text.
+		cx.textAlign = 'left'
+		cx.fillStyle = 'white'
+		for (let i = vi1; i < vi2; i++) {
+			let s = lines[(i-vi1)]
+			let indent_w = indent_n(s) * char_w * 3
+			cx.fillText(s, x0 + text_x + indent_w, y0 + (i + 1) * line_h - font_descent - 2)
+		}
+
+		// this blending mode will draw only where alpha != 0, i.e. over the text.
+		cx.globalCompositeOperation = 'source-atop'
+
+		// draw highlighting rectangles.
 		for (let i = vi1; i < vi2; i++) {
 			let s = lines[(i-vi1)]
 			let indent_w = indent_n(s) * char_w * 3
@@ -93,14 +108,12 @@ ui.widget('code_edit_text', {
 			}
 		}
 
-		// draw text
-		cx.textAlign = 'left'
-		cx.fillStyle = 'white'
-		for (let i = vi1; i < vi2; i++) {
-			let s = lines[(i-vi1)]
-			let indent_w = indent_n(s) * char_w * 3
-			cx.fillText(s, x0 + text_x + indent_w, y0 + (i + 1) * line_h - font_descent - 2)
-		}
+		// this blending mode will draw only where alpha == 0, i.e. around the text.
+		cx.globalCompositeOperation = 'destination-over'
+
+		// draw background.
+		cx.fillStyle = ui.bg_color('bg0')
+		cx.fillRect(vx, vy, vw, vh)
 
 		cx.restore()
 	}
@@ -254,7 +267,7 @@ function code_edit_view(id, opt) {
 		font_size = ui.get_font_size()
 		line_h = round(font_size * 1.5)
 		let m = ui.measure_text(cx, '0')
-		char_w = m.width
+		char_w = ceil(m.width)
 		font_descent = m.fontBoundingBoxDescent
 		sidebar_gap = sp
 		let sidebar_w = (lines.length+'').length * char_w
