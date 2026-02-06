@@ -6,8 +6,6 @@ LEGEND
 
 REFACTORINGS FROM IMTUI
 ------------------------------------------------------------------------------
-S -> BOX_CT_S
-NEXT_EXT_I -> BOX_CT_NEXT_EXT_I
 box_widget box_hit -> use hit_box
 
 
@@ -17,7 +15,8 @@ WIDGET INTER-DEPENDENCY PROBLEM
 other widgets that appear later in the frame.
 
 * cmd record buffers:
-	* use case: update widget state before the widget appears in the frame
+	* allows widgets to be built before being added to the layout.
+	* use case: update widget state before the widget appears in the frame.
 		* alt: keepalive update callback.
 	* use case: dynamic child order in flexbox.
 		* alt: TODO: `order` attribute for flex children.
@@ -34,6 +33,7 @@ other widgets that appear later in the frame.
 	* pro: solves the later-in-the-frame problem.
 	* con: must split updating and building phases in code, which prevents
 	the updating part to create local state for the building part to use.
+	* con: doesn't solve the sync'ed scrollboxes problem (which is translate phase).
 
 
 BUGS UI

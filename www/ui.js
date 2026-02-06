@@ -2280,9 +2280,9 @@ const MX2        = 10
 
 const FR         = 12 // all `is_flex_child` widgets: fraction from main-axis size.
 const ALIGN      = 13 // vert. align at ALIGN+1
-const NEXT_EXT_I = 15 // all container-boxes: next command after this one's END command.
-const BOX_CT_S   = 16 // first index after the ui_cmd_box_ct header.
-const BOX_S      = 15 // first index after the ui_cmd_box header.
+const BOX_CT_NEXT_EXT_I = 15 // all container-boxes: next command after this one's END command.
+const BOX_CT_ARGS = 16 // first index after the ui_cmd_box_ct header.
+const BOX_ARGS    = 15 // first index after the ui_cmd_box header.
 
 ui.PX1   = PX1
 ui.PX2   = PX2
@@ -2290,8 +2290,8 @@ ui.MX1   = MX1
 ui.MX2   = MX2
 ui.FR    = FR
 ui.ALIGN = ALIGN
-ui.BOX_CT_S = BOX_CT_S
-ui.BOX_S = BOX_S
+ui.BOX_CT_ARGS = BOX_CT_ARGS
+ui.BOX_ARGS = BOX_ARGS
 
 function spacings(a, i, axis) {
 	return (
@@ -2541,7 +2541,7 @@ ui.box_widget = function(cmd_name, t, is_ct) {
 function cmd_next_ext_i(a, i) {
 	let cmd = a[i-1]
 	if (cmd & 1) // container
-		return i+a[i+NEXT_EXT_I]
+		return i+a[i+BOX_CT_NEXT_EXT_I]
 	return cmd_next_i(a, i)
 }
 
@@ -2573,7 +2573,7 @@ ui.end = function(cmd) {
 	let end_i = ui_cmd(CMD_END, i)
 	a[end_i+0] -= end_i // make relative
 	let next_i = cmd_next_i(a, end_i)
-	a[i+NEXT_EXT_I] = next_i-i // next_i but relative to the ct cmd at i
+	a[i+BOX_CT_NEXT_EXT_I] = next_i-i // next_i but relative to the ct cmd at i
 
 	if (a[i-1] == CMD_POPUP) { // TOOD: make this non-specific
 		end_layer()
@@ -2664,7 +2664,7 @@ function hit_children(a, i, recs) {
 
 // flex ----------------------------------------------------------------------
 
-const FLEX_GAP = BOX_CT_S+0
+const FLEX_GAP = BOX_CT_ARGS+0
 
 function ui_hv(cmd, fr, gap, align, valign, min_w, min_h) {
 	return ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h,
@@ -2830,7 +2830,7 @@ hittest[CMD_V] = hit_flex
 
 // stack ---------------------------------------------------------------------
 
-const STACK_ID = BOX_CT_S+0
+const STACK_ID = BOX_CT_ARGS+0
 
 const CMD_STACK = cmd_ct('stack')
 
@@ -2895,11 +2895,11 @@ draw[CMD_END_CLIP] = function() {
 
 // scrollbox -----------------------------------------------------------------
 
-const SB_OVERFLOW = BOX_CT_S+0 // overflow x,y
-const SB_CW       = BOX_CT_S+2 // content w,h
-const SB_ID       = BOX_CT_S+4
-const SB_SX       = BOX_CT_S+5 // scroll x,y
-const SB_STATE    = BOX_CT_S+7
+const SB_OVERFLOW = BOX_CT_ARGS+0 // overflow x,y
+const SB_CW       = BOX_CT_ARGS+2 // content w,h
+const SB_ID       = BOX_CT_ARGS+4
+const SB_SX       = BOX_CT_ARGS+5 // scroll x,y
+const SB_STATE    = BOX_CT_ARGS+7
 
 const SB_OVERFLOW_AUTO     = 0
 const SB_OVERFLOW_HIDE     = 1
@@ -3326,10 +3326,10 @@ function popup_parse_flags(s) {
 const POPUP_ID        = FR      // because fr is not used
 const POPUP_SIDE      = ALIGN   // because align is not used
 const POPUP_ALIGN     = ALIGN+1 // because valign is not used
-const POPUP_LAYER_I   = BOX_CT_S+0
-const POPUP_TARGET_I  = BOX_CT_S+1
-const POPUP_FLAGS     = BOX_CT_S+2
-const POPUP_SIDE_REAL = BOX_CT_S+3
+const POPUP_LAYER_I   = BOX_CT_ARGS+0
+const POPUP_TARGET_I  = BOX_CT_ARGS+1
+const POPUP_FLAGS     = BOX_CT_ARGS+2
+const POPUP_SIDE_REAL = BOX_CT_ARGS+3
 
 const CMD_POPUP = cmd_ct('popup')
 
@@ -3347,7 +3347,7 @@ ui.popup = function(id, layer, target, side, align, min_w, min_h, flags, z_index
 		null, // align -> side
 		null, // valign -> align
 		min_w, min_h,
-		// BOX_S+0
+		// BOX_ARGS+0
 		layer.i, target_i, flags,
 		side, // side_real
 	)
@@ -4156,14 +4156,14 @@ function force_scope_vars() {
 
 // text box ------------------------------------------------------------------
 
-const TEXT_ASC      = BOX_S+0
-const TEXT_DSC      = BOX_S+1
-const TEXT_X        = BOX_S+2
-const TEXT_W        = BOX_S+3
-const TEXT_H        = BOX_S+4
-const TEXT_ID       = BOX_S+5
-const TEXT_S        = BOX_S+6
-const TEXT_FLAGS    = BOX_S+7
+const TEXT_ASC      = BOX_ARGS+0
+const TEXT_DSC      = BOX_ARGS+1
+const TEXT_X        = BOX_ARGS+2
+const TEXT_W        = BOX_ARGS+3
+const TEXT_H        = BOX_ARGS+4
+const TEXT_ID       = BOX_ARGS+5
+const TEXT_S        = BOX_ARGS+6
+const TEXT_FLAGS    = BOX_ARGS+7
 
 // TEXT_FLAGS
 const TEXT_WRAP      = 3 // bits 0 and 1
@@ -4680,12 +4680,12 @@ hittest[CMD_TEXT] = function(a, i) {
 
 // frame widget --------------------------------------------------------------
 
-const FRAME_ON_MEASURE = BOX_S+0
-const FRAME_ON_FRAME   = BOX_S+1
-const FRAME_CT_I       = BOX_S+2
-const FRAME_REC_I      = BOX_S+3
-const FRAME_LAYER_I    = BOX_S+4
-const FRAME_ARGS_I     = BOX_S+5
+const FRAME_ON_MEASURE = BOX_ARGS+0
+const FRAME_ON_FRAME   = BOX_ARGS+1
+const FRAME_CT_I       = BOX_ARGS+2
+const FRAME_REC_I      = BOX_ARGS+3
+const FRAME_LAYER_I    = BOX_ARGS+4
+const FRAME_ARGS_I     = BOX_ARGS+5
 
 ui.FRAME_ARGS_I = FRAME_ARGS_I
 
@@ -4772,7 +4772,7 @@ ui.box_widget('frame', frame)
 
 // shared screen widget ------------------------------------------------------
 
-let SS_ID = BOX_S+0
+let SS_ID = BOX_ARGS+0
 
 let ss = {}
 
@@ -5007,10 +5007,10 @@ ui.box_widget('template_overlay', {
 		return ui_cmd_box(cmd, 1, 's', 's', 0, 0, id, t, i0, i1)
 	},
 	hit: function(a, i) {
-		let id = a[i+BOX_S+0]
-		let t  = a[i+BOX_S+1]
-		let i0 = a[i+BOX_S+2]
-		let i1 = a[i+BOX_S+3]
+		let id = a[i+BOX_ARGS+0]
+		let t  = a[i+BOX_ARGS+1]
+		let i0 = a[i+BOX_ARGS+2]
+		let i1 = a[i+BOX_ARGS+3]
 		if (hit_box(a, i)) {
 			hit_template_id = id
 			hit_template_i0 = i0
@@ -5019,7 +5019,7 @@ ui.box_widget('template_overlay', {
 		}
 	},
 	draw: function(a, i) {
-		let id = a[i+BOX_S+0]
+		let id = a[i+BOX_ARGS+0]
 		let sel_id = selected_template_id
 		if (sel_id && sel_id == id) {
 			let t = selected_template_node_t
@@ -6045,8 +6045,8 @@ ui.widget('resizer', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let id    = a[i+BOX_S+0]
-		let ct_id = a[i+BOX_S+1]
+		let id    = a[i+BOX_ARGS+0]
+		let ct_id = a[i+BOX_ARGS+1]
 
 		let borders = 2
 
@@ -6106,7 +6106,7 @@ ui.bg_style('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
 ui.bg_style('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
 ui.bg_style('*', 'toggle-thumb', '*', 'text')
 
-let TOGGLE_ID = BOX_S+0
+let TOGGLE_ID = BOX_ARGS+0
 
 let toggle = {}
 
@@ -6231,7 +6231,7 @@ ui.box_widget('checkbox', checkbox)
 
 let radio = {...checkbox}
 
-let RADIO_GROUP_ID = BOX_CT_S+0
+let RADIO_GROUP_ID = BOX_CT_ARGS+0
 
 //|| hit(id+'.label')
 radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
@@ -6327,15 +6327,15 @@ function compute_step_and_range(wanted_n, min, max, scale_base, scales, decimals
 	return [step, min, max]
 }
 
-let SLIDER_ID         = BOX_S+0
-let SLIDER_FROM       = BOX_S+1
-let SLIDER_TO         = BOX_S+2
-let SLIDER_DECIMALS   = BOX_S+3
-let SLIDER_P          = BOX_S+4 // progress in 0..1
-let SLIDER_MARKERS    = BOX_S+5
-let SLIDER_SCALE_BASE = BOX_S+6
-let SLIDER_SCALES     = BOX_S+7
-let SLIDER_THUMB_I    = BOX_S+8
+let SLIDER_ID         = BOX_ARGS+0
+let SLIDER_FROM       = BOX_ARGS+1
+let SLIDER_TO         = BOX_ARGS+2
+let SLIDER_DECIMALS   = BOX_ARGS+3
+let SLIDER_P          = BOX_ARGS+4 // progress in 0..1
+let SLIDER_MARKERS    = BOX_ARGS+5
+let SLIDER_SCALE_BASE = BOX_ARGS+6
+let SLIDER_SCALES     = BOX_ARGS+7
+let SLIDER_THUMB_I    = BOX_ARGS+8
 
 let fr0, align0, valign0, min_w0, min_h0
 
@@ -6921,8 +6921,8 @@ ui.box_widget('img', {
 		if (!axis) return // can't impose a width (min_w still works)
 
 		let sw        = a[i+2]
-		let src       = a[i+BOX_S+0]
-		let max_min_h = a[i+BOX_S+1]
+		let src       = a[i+BOX_ARGS+0]
+		let max_min_h = a[i+BOX_ARGS+1]
 
 		let image = ui.state(src, 'image')
 		if (!image?.complete) return
@@ -6948,8 +6948,8 @@ ui.box_widget('img', {
 			sx            = a[i+0+0]
 			sw            = a[i+2+0]
 			let min_h     = a[i+0+1]
-			let src       = a[i+BOX_S+0]
-			let max_min_h = a[i+BOX_S+1]
+			let src       = a[i+BOX_ARGS+0]
+			let max_min_h = a[i+BOX_ARGS+1]
 
 			let image = ui.state(src, 'image')
 			if (!image?.complete) return
@@ -6981,8 +6981,8 @@ ui.box_widget('img', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let src  = a[i+BOX_S+0]
-		let data = a[i+BOX_S+2]
+		let src  = a[i+BOX_ARGS+0]
+		let data = a[i+BOX_ARGS+2]
 
 		let image = ui.state(src, 'image')
 		if (data && !image) { // have data but no image (remote image)
@@ -7247,7 +7247,7 @@ ui.box_ct_widget('aspect_box', {
 		ct_stack_push(a, i)
 		let w = a[i+2+axis]
 		if (axis) {
-			let aspect = a[i+BOX_CT_S+0]
+			let aspect = a[i+BOX_CT_ARGS+0]
 			w = round(a[i+2] / aspect)
 		}
 		add_ct_min_wh(a, axis, w)
@@ -7550,7 +7550,7 @@ ui.box_widget('frame_graph', {
 		let y0 = a[i+1]
 		let w  = a[i+2]
 		let h  = a[i+3]
-		let g    = a[i+BOX_CT_S+0]
+		let g    = a[i+BOX_CT_ARGS+0]
 		if (!g) return
 		draw_graph(x0, y0, w, h, g, true)
 	},
