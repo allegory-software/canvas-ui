@@ -387,6 +387,21 @@ ui.set_cursor = function(cursor) {
 
 // styles --------------------------------------------------------------------
 
+let fonts_to_load = []
+ui.load_font = function(name, url) {
+	fonts_to_load.push([name, url])
+}
+
+ui.load_font('far'   , 'icons/fa-regular-400.woff2')
+//ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
+//ui.load_font('fab'   , 'icons/fa-brands-400.woff2')
+//ui.load_font('lar'   , 'icons/la-regular-400.woff2')
+//ui.load_font('las'   , 'icons/la-solid-900.woff2')
+//ui.load_font('lab'   , 'icons/la-brands-400.woff2')
+//ui.load_font('remix' , 'icons/remixicon.woff2')
+//ui.load_font('mio'   , 'icons/material-icons-outlined.woff2')
+ui.load_font('mono'  , 'fonts/jetbrains-mono-nl-regular.woff2')
+
 ui.css = function(s) {
 	let style = document.createElement('style')
 	style.innerHTML = s
@@ -396,16 +411,6 @@ ui.css = function(s) {
 ui.css(`
 
 * { box-sizing: border-box; }
-
-@font-face { font-family: 'far'    ; src: url('icons/fa-regular-400.woff2'); }
-@font-face { font-family: 'fas'    ; src: url('icons/fa-solid-900.woff2'); }
-@font-face { font-family: 'fab'    ; src: url('icons/fa-brands-400.woff2'); }
-@font-face { font-family: 'lar'    ; src: url('icons/la-regular-400.woff2'); }
-@font-face { font-family: 'las'    ; src: url('icons/la-solid-900.woff2'); }
-@font-face { font-family: 'lab'    ; src: url('icons/la-brands-400.woff2'); }
-@font-face { font-family: 'remix'  ; src: url('icons/remixicon.woff2'); }
-@font-face { font-family: 'mio'    ; src: url('icons/material-icons-outlined.woff2'); }
-@font-face { font-family: 'mono'   ; src: url('fonts/jetbrains-mono-nl-regular.woff2'); }
 
 html, body {
 	width: 100%;
@@ -870,6 +875,12 @@ ui.set_default_theme = function(theme) {
 set_screen_bg()
 
 document.addEventListener('DOMContentLoaded', async function() {
+	let promises = []
+	for (let [name, url] of fonts_to_load) {
+		let font = new FontFace(name, `url(${url})`, {})
+		promises.push(font.load().then(loaded => document.fonts.add(loaded)))
+	}
+	await Promise.all(promises)
 	await document.fonts.ready
 	ready = true
 	assert(ui.main, 'ui.main not set')
