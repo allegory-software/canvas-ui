@@ -5453,7 +5453,7 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	let i = 0
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
-	ui.hv(hv, fr, 0, align, valign, min_w ?? 120)
+	ui.hv(hv, fr, 0, align ?? '[', valign ?? '[', min_w ?? 120)
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(ui.sp(), ui.sp05())
