@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base href="www/">
+<script src=glue.js global></script>
+<script src=ui.js></script>
+<script src=ui_code_edit.js></script>
+<script src=lezer.js></script>
+<!--
+NOTE: Setting the background color for the html element before declaring
+the <body> element prevents the body from rendering white for a split second
+(and thus flickering when refreshing the page). This happens only in Chrome.
+-->
+<script>
+
+let demo_state = json_arg(load('demo_state')) ?? {}
+ui.set_default_theme(demo_state.theme ?? 'dark')
+
+ui.DEBUG      = demo_state.debug ?? true
+ui.TUI        = demo_state.tui   ?? false
+
+</script>
+<body>
+<script>
+
+ui.main = function() {
+
+	let code = document.documentElement.outerHTML
+
+	ui.code_edit('code_editor', {code: code}, 1, 's', 's')
+
+	ui.focus('code_editor')
+
+}
+
+</script>
+</body>
+</html>

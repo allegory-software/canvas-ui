@@ -1,3 +1,17 @@
+/*
+	Canvas IMGUI code editor widget.
+
+	* TODO: typing, deleting, cut/copy/paste, indent/outdent
+	* TODO: undo/redo
+	* TODO: search, replace
+	* TODO: syntax highlighting color map
+	* TODO: block selection
+	* TODO: remote cursors
+	* TODO: open: browse, load, tabs
+	* TODO: save
+	* TODO: sessions
+
+*/
 
 (function () {
 "use strict"
@@ -15,9 +29,40 @@ let node_colors = {
 
 ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
 
-function indent_n(s) {
-	let i = 0
-	while (s[i] === '\t') i++
+function indent(s, tab_width) {
+	let i = 0 // char index
+	let j = 0 // col index
+	while (1) {
+		let c = s.charCodeAt(i++)
+		if (c == 9) j += tab_width
+		else if (c == 32) j++
+		else return j
+	}
+}
+
+function char_to_col(on_i, s, tab_width) {
+	let i = 0 // char index
+	let j = 0 // col index
+	while (i < on_i) {
+		let c = s.charCodeAt(i++)
+		if (c == 9) j += tab_width
+		else j++
+	}
+	return j
+}
+
+function col_to_char(on_j, s, tab_width) {
+	on_j = max(0, on_j)
+	let i = 0 // char index
+	let j = 0 // col index
+	let n = s.length-1
+	for (; i < n; i++) {
+		let c = s.charCodeAt(i)
+		let j0 = j
+		j += c == 8 ? tab_width : 1
+		if (on_j >= j0 && on_j <= j)
+			return on_j - j0 < j - on_j ? j0 : j
+	}
 	return i
 }
 
@@ -58,9 +103,9 @@ ui.box_widget('code_edit_sidebar', {
 		let w   = a[i+2]
 		let h   = a[i+3]
 
-		let sy  = a[i+SIDEBAR_SY]
-		let vi1 = a[i+SIDEBAR_VI1]
-		let vi2 = a[i+SIDEBAR_VI2]
+		let sy     = a[i+SIDEBAR_SY]
+		let vline1 = a[i+SIDEBAR_VI1]
+		let vline2 = a[i+SIDEBAR_VI2]
 
 		let line_count   = a[i+BOX_ARGS+3]
 		let line_h       = a[i+BOX_ARGS+4]
@@ -80,7 +125,7 @@ ui.box_widget('code_edit_sidebar', {
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 
-		for (let i = vi1; i < vi2; i++)
+		for (let i = vline1; i < vline2; i++)
 			cx.fillText(i, x0, y0 + (i + 1) * line_h - font_descent - 2)
 
 		cx.restore()
@@ -103,12 +148,13 @@ ui.widget('code_edit_text', {
 		let font_size   = a[i+7]
 		let font_descent= a[i+8]
 		let char_w      = a[i+9]
-		let vi1         = a[i+10]
-		let vi2         = a[i+11]
-		let lines       = a[i+12]
-		let line_colors = a[i+13]
-		let hit_line    = a[i+14]
-		let cursors     = a[i+15]
+		let vline1      = a[i+10]
+		let vline2      = a[i+11]
+		let vlines      = a[i+12]
+		let tab_width   = a[i+13]
+		let line_colors = a[i+14]
+		let hit_line    = a[i+15]
+		let cursors     = a[i+16]
 
 		cx.save()
 
@@ -121,26 +167,27 @@ ui.widget('code_edit_text', {
 		// draw the text.
 		cx.textAlign = 'left'
 		cx.fillStyle = 'white'
-		for (let i = vi1; i < vi2; i++) {
-			let s = lines[(i-vi1)]
-			let indent_w = indent_n(s) * char_w * 3
-			cx.fillText(s, x0 + indent_w, y0 + (i + 1) * line_h - font_descent - 2)
+		for (let line = vline1; line < vline2; line++) {
+			let s = vlines[line - vline1]
+			// using tab_width-1 because tabs take one char with fillText().
+			let indent_w = indent(s, tab_width-1) * char_w
+			cx.fillText(s, x0 + indent_w, y0 + (line + 1) * line_h - font_descent - 2)
 		}
 
 		// this blending mode will draw only where alpha != 0, i.e. over the text.
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
-		for (let i = vi1; i < vi2; i++) {
-			let s = lines[(i-vi1)]
-			let indent_w = indent_n(s) * char_w * 3
-			let c = line_colors[(i-vi1)]
-			for (let j = 0, n = c.length; j < n; j += 3) {
-				let ci    = c[j+0]
-				let cw    = c[j+1]
-				let color = c[j+2]
+		for (let line = vline1; line < vline2; line++) {
+			let s = vlines[line - vline1]
+			let indent_w = indent(s, tab_width) * char_w
+			let c = line_colors[line - vline1]
+			for (let i = 0, n = c.length; i < n; i += 3) {
+				let ci    = c[i+0]
+				let cw    = c[i+1]
+				let color = c[i+2]
 				let x = x0 + indent_w + ci * char_w
-				let y = y0 + i * line_h
+				let y = y0 + line * line_h
 				let w = cw * char_w
 				let h = line_h
 				cx.fillStyle = color
@@ -148,21 +195,79 @@ ui.widget('code_edit_text', {
 			}
 		}
 
-		// this blending mode will draw only where alpha == 0, i.e. around the text.
+		// this blending mode will draw only where alpha == 0,
+		// i.e. around what's been drawn before i.e. drawing "behind".
 		cx.globalCompositeOperation = 'destination-over'
 
-		// draw selection
-		cx.fillStyle = ui.bg_color('bg1')
-		cx.fillRect(vx, y0 + hit_line * line_h, vw, line_h)
-
 		// draw cursors.
-		//cx.globalCompositeOperation = 'source-over'
 		cx.fillStyle = ui.fg_color('text')
-		for (let cursor of cursors)
+		for (let cursor of cursors) {
+			let line_s = vlines[cursor.line - vline1]
+			if (line_s == null) // outside visible range
+				continue
+			let col = char_to_col(cursor.char, line_s, tab_width)
 			cx.fillRect(
-				x0 + cursor.char * char_w,
+				x0 + col * char_w,
 				y0 + cursor.line * line_h,
 				3, line_h)
+		}
+
+		// draw multi-line selection.
+		for (let cursor of cursors) {
+			if (cursor.sel_line == cursor.line && cursor.sel_char == cursor.char)
+				continue
+			cx.fillStyle = ui.bg_color('item', 'focused item-focused item-selected')
+			let sline1 = min(cursor.sel_line, cursor.line)
+			let sline2 = max(cursor.sel_line, cursor.line)
+			let vsline1 = max(sline1, vline1)
+			let vsline2 = min(sline2, vline2)
+			if (sline1 < sline2) { // multi-line
+				let schar1 = sline1 == cursor.line ? cursor.char : cursor.sel_char
+				let schar2 = sline2 == cursor.line ? cursor.char : cursor.sel_char
+				let scol1 = vsline1 == sline1 ? char_to_col(schar1, vlines[sline1 - vline1], tab_width) : null
+				let scol2 = vsline2 == sline2 ? char_to_col(schar2, vlines[sline2 - vline1], tab_width) : null
+				if (scol1 != null) {
+					let line_s = vlines[sline1 - vline1]
+					let scol2 = char_to_col(line_s.length, line_s, tab_width)
+					cx.fillRect(
+						x0 + scol1 * char_w,
+						y0 + sline1 * line_h,
+						(scol2 - scol1) * char_w, line_h)
+				}
+				for (let sline = vsline1 + 1; sline < vsline2; sline++) {
+					let line_s = vlines[sline - vline1]
+					let scol1 = 0
+					let scol2 = char_to_col(line_s.length, line_s, tab_width)
+					cx.fillRect(
+						x0 + scol1 * char_w,
+						y0 + sline * line_h,
+						(scol2 - scol1) * char_w, line_h)
+				}
+				if (scol2 != null) {
+					let scol1 = 0
+					cx.fillRect(
+						x0 + scol1,
+						y0 + sline2 * line_h,
+						(scol2 - scol1) * char_w, line_h)
+				}
+			} else if (vsline1 == sline1) { // single-line
+				let line_s = vlines[sline1 - vline1]
+				if (line_s != null) { // not outside visible range
+					let col1 = char_to_col(min(cursor.sel_char, cursor.char), line_s, tab_width)
+					let col2 = char_to_col(max(cursor.sel_char, cursor.char), line_s, tab_width)
+					cx.fillRect(
+						x0 + col1 * char_w,
+						y0 + cursor.line * line_h,
+						(col2 - col1) * char_w, line_h)
+				}
+			}
+		}
+
+		// draw hit line.
+		if (0 && hit_line != null) {
+			cx.fillStyle = ui.bg_color('bg1')
+			cx.fillRect(vx, y0 + hit_line * line_h, vw, line_h)
+		}
 
 		// draw background.
 		cx.fillStyle = ui.bg_color('bg0')
@@ -178,6 +283,7 @@ function code_edit_view(id, opt) {
 
 	// context-sensitive thus set on each frame
 	let text, newline, lines, line_offsets, line_colors
+	let tab_width = 3
 	let font_size
 	let font_descent
 	let line_h
@@ -185,24 +291,29 @@ function code_edit_view(id, opt) {
 	let max_line_len
 	let text_w
 	let text_h
-	let last_vi1 = -1
-	let last_vi2 = -1 // visible line range
-	let visible_lines = [] // [line1, ...]
-	let visible_colors = [] // [line_i, i, w, color, ...]
+	let last_vline1 = -1
+	let last_vline2 = -1 // visible line range
+	let vlines = [] // visible line array: [line1, ...]
+	let vcolors = [] // [line_i, i, w, color, ...]
 
 	// mouse state
 	let drag_state, dx, dy, cs
 	let hit_zone //
 	let hit_line
 	let hit_char
-	// let drag_op  // col_move, col_group, row_move
-	// let hit_ri // row index
-	// let hit_fi // field index
-	// let hit_indent
-	// let row_move_state
 
 	// cursors state.
-	let cursors = [{line: 0, char: 0, want_char: 0}]
+	let cursors = [{line: 0, char: 0, want_char: 0, select_line: 0, select_char: 0}]
+
+	function cursor_rect(cursor) {
+		let line_s = lines[cursor.line]
+		let char_i = char_to_col(cursor.char, line_s, tab_width)
+		return [
+			char_i * char_w,
+			cursor.line * line_h,
+			3, line_h
+		]
+	}
 
 	lz_parser.html = lz_parser.html.configure({
 		wrap: lz_parseMixed(node => {
@@ -279,42 +390,44 @@ function code_edit_view(id, opt) {
 
 		// number of lines fully or partially in the viewport.
 		let vn = floor(vh / line_h) + 2 // 2 is right, think it!
-		let vi1 = floor(sy / line_h)
-		let vi2 = vi1 + vn
-		vi1 = max(0, min(vi1, lines.length - 1))
-		vi2 = max(0, min(vi2, lines.length))
+		let vline1 = floor(sy / line_h)
+		let vline2 = vline1 + vn
+		vline1 = max(0, min(vline1, lines.length - 1))
+		vline2 = max(0, min(vline2, lines.length))
 
 		// TODO: make the sidebar a popup anchored to this frame and remove this hack!
 		a[sidebar_i+SIDEBAR_SY ] = sy
-		a[sidebar_i+SIDEBAR_VI1] = vi1
-		a[sidebar_i+SIDEBAR_VI2] = vi2
+		a[sidebar_i+SIDEBAR_VI1] = vline1
+		a[sidebar_i+SIDEBAR_VI2] = vline2
 
-		if (last_vi1 != vi1 || last_vi2 != vi2) {
-			visible_lines.length = 0
-			visible_colors.length = 0
-			for (let i = vi1; i < vi2; i++) {
+		if (last_vline1 != vline1 || last_vline2 != vline2) {
+			vlines.length = 0
+			vcolors.length = 0
+			for (let i = vline1; i < vline2; i++) {
 				let s = lines[i]
 				let c = assert(line_colors[i])
-				visible_lines.push(s)
-				visible_colors.push(c)
+				vlines.push(s)
+				vcolors.push(c)
 			}
-			last_vi1 = vi1
-			last_vi2 = vi2
+			last_vline1 = vline1
+			last_vline2 = vline2
 		}
 
 		// set mouse state
+		hit_line = null
 		;[drag_state, dx, dy, cs] = ui.drag(id+'.text_contentbox')
 		if (drag_state == 'drag') {
 			ui.focus(id)
 		}
 		if (drag_state == 'hover' || drag_state == 'drag') {
 			hit_line = floor((ui.my - y) / line_h)
+			hit_char = floor((ui.mx - y) / char_w)
 		}
 
 		ui.stack(id+'.text_contentbox')
 			ui.code_edit_text(x, y, vx, vy, vw, vh,
 				line_h, font_size, font_descent, char_w,
-				vi1, vi2, visible_lines, visible_colors,
+				vline1, vline2, vlines, tab_width, vcolors,
 				hit_line, ui.focused(id) ? cursors : empty_array,
 		)
 
@@ -341,21 +454,23 @@ function code_edit_view(id, opt) {
 		let lines_n = 0
 		let chars_n = 0
 		let scroll_lines = 0
+		let shift = ui.key('shift')
+		let ctrl  = ui.key('control')
 		if (ui.focused(id)) {
-			let shift = ui.key('shift')
-			let ctrl  = ui.key('control')
-			if      (ui.keydown('arrowup'   )) lines_n = -1
-			else if (ui.keydown('arrowdown' )) lines_n =  1
-			else if (ui.keydown('pageup'    )) lines_n = -(last_vi2 - last_vi1)
-			else if (ui.keydown('pagedown'  )) lines_n =  (last_vi2 - last_vi1)
+			// NOTE: some key combos are captured by browser, namely:
+			// ctrl+pgup/dn, ctrl(+shift)+tab
+			if      (ui.keydown('arrowup'   ) && !ctrl) lines_n = -1
+			else if (ui.keydown('arrowdown' ) && !ctrl) lines_n =  1
+			else if (ui.keydown('pageup'    )) lines_n = -(last_vline2 - last_vline1)
+			else if (ui.keydown('pagedown'  )) lines_n =  (last_vline2 - last_vline1)
 			else if (ui.keydown('home'      ) && ctrl) lines_n = -1/0
 			else if (ui.keydown('end'       ) && ctrl) lines_n =  1/0
 			else if (ui.keydown('arrowleft' ) && !ctrl) chars_n = -1
 			else if (ui.keydown('arrowright') && !ctrl) chars_n =  1
-			else if (ui.keydown('arrowleft' ) && ctrl) scroll_lines = -1
-			else if (ui.keydown('arrowright') && ctrl) scroll_lines =  1
+			else if (ui.keydown('arrowup'   ) && ctrl) scroll_lines = -1
+			else if (ui.keydown('arrowdown' ) && ctrl) scroll_lines =  1
 		}
-		if (chars_n) {
+		if (chars_n || lines_n) {
 			if (chars_n < 0) {
 				if (cursor.char > 0) {
 					cursor.char--
@@ -365,7 +480,7 @@ function code_edit_view(id, opt) {
 					cursor.char = lines[cursor.line].length
 					cursor.want_char = cursor.char
 				}
-			} else {
+			} else if (chars_n > 0) {
 				if (cursor.char < lines[cursor.line].length) {
 					cursor.char++
 					cursor.want_char = cursor.char
@@ -374,16 +489,14 @@ function code_edit_view(id, opt) {
 					cursor.char = 0
 					cursor.want_char = cursor.char
 				}
-			}
-		} else if (lines_n) {
-			if (lines_n < 0) {
+			} else if (lines_n < 0) {
 				if (cursor.line) {
 					cursor.line = max(cursor.line + lines_n, 0)
 					cursor.char = min(cursor.want_char, lines[cursor.line].length)
 				} else {
 					cursor.char = 0
 				}
-			} else {
+			} else if (lines_n > 0) {
 				if (cursor.line < lines.length-1) {
 					cursor.line = min(cursor.line + lines_n, lines.length-1)
 					cursor.char = min(cursor.want_char, lines[cursor.line].length)
@@ -391,13 +504,29 @@ function code_edit_view(id, opt) {
 					cursor.char = lines[cursor.line].length
 				}
 			}
+			if (!shift) {
+				cursor.sel_line = cursor.line
+				cursor.sel_char = cursor.char
+			}
+			ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
 		} else if (scroll_lines) {
-			//
+			let ss = ui.state(id+'.text_scrollbox')
+			ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
 		}
 
 		// build editor
 
 		ui.v(fr, 0, align, valign, min_w, min_h)
+			let tabs = [
+				{id: 'tab1', label:'Tab 1'},
+				{id: 'tab2', label:'Tab 2'},
+			]
+			ui.stack('', 0)
+				let sel_tab = ui.tabs(id+'.tabs', tabs, 'tab1')
+			ui.end_stack()
+			ui.stack('', 0, 's', 's', 0, 1)
+				ui.bb('bg2')
+			ui.end_stack()
 			ui.h(1, ui.sp025())
 				ui.p(ui.sp1(), 0)
 				ui.stack('', 0)
