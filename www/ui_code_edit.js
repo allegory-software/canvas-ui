@@ -1,15 +1,45 @@
 /*
+
 	Canvas IMGUI code editor widget.
+	Written by Cosmin Apreutesei. Public Domain.
 
 	* TODO: typing, deleting, cut/copy/paste, indent/outdent
 	* TODO: undo/redo
 	* TODO: search, replace
 	* TODO: syntax highlighting color map
 	* TODO: block selection
+	* TODO: bookmarks
 	* TODO: remote cursors
 	* TODO: open: browse, load, tabs
 	* TODO: save
 	* TODO: sessions
+
+DESIGN TRADEOFFS
+
+	- monospace fonts, no ligatures, no combining marks.
+		=> codepoint == grapheme
+		=> constant grapheme width
+	- tabs are used only for indentation and are not valid inside the line.
+	it's the only way to have user-defined tab-width make sense.
+		=> tabs are not aligned to tabstops.
+		=> inner tabs (those after the first non-space char) take 1 space.
+		=> when typing or pasting, inner tabs are converted to 1 space.
+	- no line folding.
+
+IMPL. TERMINOLOGY
+
+	line      line number counting from 0.
+	char      char (so codepoint) index in line.
+	col       column (so visible char) index in line.
+	pos       char (so codepoint) index in whole text.
+
+IMPL. NOTES
+
+- tab-based indent requires char <-> col conversion everywhere.
+- cursor.char can go at line_s.length so 1 char beyond the last char in line.
+- selected text is between cursor{.line|.char} and cursor{.sel_line|.sel_char-1}
+  (note the -1) or viceversa, the caret being at cursor{.line|.char} always.
+- vline2 is the last visible line. sline2 is the last selected line.
 
 */
 
@@ -29,9 +59,11 @@ let node_colors = {
 
 ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
 
+// NOTE:
+
 function indent(s, tab_width) {
-	let i = 0 // char index
-	let j = 0 // col index
+	let i = 0 // char index (i.e. index in line string s)
+	let j = 0 // col index (i.e. visual char index, or column)
 	while (1) {
 		let c = s.charCodeAt(i++)
 		if (c == 9) j += tab_width
@@ -43,10 +75,12 @@ function indent(s, tab_width) {
 function char_to_col(on_i, s, tab_width) {
 	let i = 0 // char index
 	let j = 0 // col index
+	on_i = clamp(on_i, 0, s.length)
 	while (i < on_i) {
 		let c = s.charCodeAt(i++)
 		if (c == 9) j += tab_width
-		else j++
+		else if (c == 32) j++
+		else return j + (on_i - i) + 1 // after indent it's 1:1 (tabs are 1 space)
 	}
 	return j
 }
@@ -56,14 +90,18 @@ function col_to_char(on_j, s, tab_width) {
 	let i = 0 // char index
 	let j = 0 // col index
 	let n = s.length-1
-	for (; i < n; i++) {
-		let c = s.charCodeAt(i)
+	let in_indent = true
+	while (i < n) {
+		let c = s.charCodeAt(i++)
+		if (!(c == 9 || c == 32))
+			in_indent = false
 		let j0 = j
-		j += c == 8 ? tab_width : 1
-		if (on_j >= j0 && on_j <= j)
-			return on_j - j0 < j - on_j ? j0 : j
+		j += in_indent && c == 9 ? tab_width : 1
+		// i is now at next char, j is now at next col, j0 is at last col.
+		if (on_j >= j0 && on_j <= j) // on_j is somewhere between j0 and j
+			return i + (on_j - j0 < j - on_j ? -1 : 0)
 	}
-	return i
+	return n + 1
 }
 
 function detect_line_terminator(s) {
@@ -86,9 +124,9 @@ function detect_line_terminator(s) {
 	if (lf && !crlf && !cr) return '\n'
 }
 
-let SIDEBAR_SY  = BOX_ARGS+0
-let SIDEBAR_VI1 = BOX_ARGS+1
-let SIDEBAR_VI2 = BOX_ARGS+2
+let SIDEBAR_SY     = BOX_ARGS+0
+let SIDEBAR_VLINE1 = BOX_ARGS+1
+let SIDEBAR_VLINE2 = BOX_ARGS+2
 
 ui.box_widget('code_edit_sidebar', {
 	create: function(cmd, sidebar_w, line_count, line_h, font_size, font_descent) {
@@ -104,8 +142,8 @@ ui.box_widget('code_edit_sidebar', {
 		let h   = a[i+3]
 
 		let sy     = a[i+SIDEBAR_SY]
-		let vline1 = a[i+SIDEBAR_VI1]
-		let vline2 = a[i+SIDEBAR_VI2]
+		let vline1 = a[i+SIDEBAR_VLINE1]
+		let vline2 = a[i+SIDEBAR_VLINE2]
 
 		let line_count   = a[i+BOX_ARGS+3]
 		let line_h       = a[i+BOX_ARGS+4]
@@ -125,8 +163,8 @@ ui.box_widget('code_edit_sidebar', {
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 
-		for (let i = vline1; i < vline2; i++)
-			cx.fillText(i, x0, y0 + (i + 1) * line_h - font_descent - 2)
+		for (let line = vline1; i <= vline2; i++)
+			cx.fillText(line+1, x0, y0 + (line + 1) * line_h - font_descent - 2)
 
 		cx.restore()
 
@@ -167,7 +205,7 @@ ui.widget('code_edit_text', {
 		// draw the text.
 		cx.textAlign = 'left'
 		cx.fillStyle = 'white'
-		for (let line = vline1; line < vline2; line++) {
+		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			// using tab_width-1 because tabs take one char with fillText().
 			let indent_w = indent(s, tab_width-1) * char_w
@@ -178,7 +216,7 @@ ui.widget('code_edit_text', {
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
-		for (let line = vline1; line < vline2; line++) {
+		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			let indent_w = indent(s, tab_width) * char_w
 			let c = line_colors[line - vline1]
@@ -199,7 +237,7 @@ ui.widget('code_edit_text', {
 		// i.e. around what's been drawn before i.e. drawing "behind".
 		cx.globalCompositeOperation = 'destination-over'
 
-		// draw cursors.
+		// draw carets.
 		cx.fillStyle = ui.fg_color('text')
 		for (let cursor of cursors) {
 			let line_s = vlines[cursor.line - vline1]
@@ -213,14 +251,15 @@ ui.widget('code_edit_text', {
 		}
 
 		// draw multi-line selection.
+		let tail_width = ui.sp05()
 		for (let cursor of cursors) {
 			if (cursor.sel_line == cursor.line && cursor.sel_char == cursor.char)
 				continue
 			cx.fillStyle = ui.bg_color('item', 'focused item-focused item-selected')
 			let sline1 = min(cursor.sel_line, cursor.line)
 			let sline2 = max(cursor.sel_line, cursor.line)
-			let vsline1 = max(sline1, vline1)
-			let vsline2 = min(sline2, vline2)
+			let vsline1 = clamp(sline1, vline1, vline2)
+			let vsline2 = clamp(sline2, vline1, vline2)
 			if (sline1 < sline2) { // multi-line
 				let schar1 = sline1 == cursor.line ? cursor.char : cursor.sel_char
 				let schar2 = sline2 == cursor.line ? cursor.char : cursor.sel_char
@@ -232,23 +271,26 @@ ui.widget('code_edit_text', {
 					cx.fillRect(
 						x0 + scol1 * char_w,
 						y0 + sline1 * line_h,
-						(scol2 - scol1) * char_w, line_h)
+						max((scol2 - scol1) * char_w, tail_width), line_h)
+					vsline1++ // vsline1 is sline1 which we just drew.
 				}
-				for (let sline = vsline1 + 1; sline < vsline2; sline++) {
-					let line_s = vlines[sline - vline1]
+				if (scol2 != null)
+					vsline2-- // vsline2 is sline2 which is partial up to scol2.
+				for (let vsline = vsline1; vsline <= vsline2; vsline++) {
+					let line_s = vlines[vsline - vline1]
 					let scol1 = 0
 					let scol2 = char_to_col(line_s.length, line_s, tab_width)
 					cx.fillRect(
 						x0 + scol1 * char_w,
-						y0 + sline * line_h,
-						(scol2 - scol1) * char_w, line_h)
+						y0 + vsline * line_h,
+						max((scol2 - scol1) * char_w, tail_width), line_h)
 				}
 				if (scol2 != null) {
 					let scol1 = 0
 					cx.fillRect(
 						x0 + scol1,
 						y0 + sline2 * line_h,
-						(scol2 - scol1) * char_w, line_h)
+						max((scol2 - scol1) * char_w, tail_width), line_h)
 				}
 			} else if (vsline1 == sline1) { // single-line
 				let line_s = vlines[sline1 - vline1]
@@ -281,38 +323,126 @@ function code_edit_view(id, opt) {
 
 	let e = {}
 
-	// context-sensitive thus set on each frame
-	let text, newline, lines, line_offsets, line_colors
-	let tab_width = 3
+	// text and text-derived state.
+	let text
+	let newline // as detected from text or user override
+	let tab_width = 3 // user setting
+	let lines // [line1, ...]
+	let line_offsets // [line2_offset, ...]  <-- it starts with the second line!
+	let max_line_len
+
+	// parsing/highlighting state.
+	let syntax_tree // per Lezer parsing
+	let line_colors // token colors: [[char, width, color], ...], ...]  1:1 with lines
+
+	// UI state, set on each frame.
 	let font_size
 	let font_descent
 	let line_h
 	let char_w
-	let max_line_len
-	let text_w
-	let text_h
 	let last_vline1 = -1
 	let last_vline2 = -1 // visible line range
-	let vlines = [] // visible line array: [line1, ...]
-	let vcolors = [] // [line_i, i, w, color, ...]
+	let vlines = [] // visible lines array: [vline1_s, ...]
+	let vcolors = [] // token colors: [vline1_colors, ...]
 
 	// mouse state
-	let drag_state, dx, dy, cs
-	let hit_zone //
+	let drag_state
 	let hit_line
 	let hit_char
 
 	// cursors state.
-	let cursors = [{line: 0, char: 0, want_char: 0, select_line: 0, select_char: 0}]
+	let cursors = [{line: 0, char: 0, want_col: 0, select_line: 0, select_char: 0}]
+
+	function line_offset(line) {
+		return line ? line_offsets[line-1] : 0
+	}
+
+	function find_line(pos) {
+		// line_offsets[0] = offset of the 2nd line i.e. the line with index 1.
+		// binsearch'ing with '<=' gives us the correct line when pos is at the
+		// beginning of the line.
+		return binsearch(line_offsets, pos, '<=')
+	}
 
 	function cursor_rect(cursor) {
 		let line_s = lines[cursor.line]
-		let char_i = char_to_col(cursor.char, line_s, tab_width)
+		let col = char_to_col(cursor.char, line_s, tab_width)
 		return [
-			char_i * char_w,
+			col * char_w,
 			cursor.line * line_h,
 			3, line_h
 		]
+	}
+
+	function cursor_pos(cursor) {
+		return line_offset(cursor.line) + cursor.char
+	}
+
+	function cursor_set_want_col(cursor) {
+		let line_s = lines[cursor.line]
+		cursor.want_col = char_to_col(cursor.char, line_s, tab_width)
+	}
+
+	function cursor_move_to_want_col(cursor) {
+		let line_s = lines[cursor.line]
+		cursor.char = col_to_char(cursor.want_col, line_s, tab_width)
+	}
+
+	function cursor_move_to_prev_token(cursor) {
+		let pos = cursor_pos(cursor)
+		let c = syntax_tree.cursor()
+		if (!c.moveTo(pos, 1)) { pr('no move'); return; } // 1 = forward
+		if (c.from == pos) {
+			pr('prev', c.from)
+			c.prev()
+			pr('prev=', c.from)
+		} else {
+			pr(c.from, pos)
+		}
+		let line = find_line(c.from)
+		cursor.line = line
+		cursor.char = c.from - line_offset(line)
+		cursor_set_want_col(cursor)
+	}
+
+	function cursor_move_to_next_token(cursor) {
+		let pos = cursor_pos(cursor)
+		let c = syntax_tree.cursor()
+		if (!c.moveTo(pos, 1)) return // 1 = forward
+		if (c.from <= pos) c.next()
+		let line = find_line(c.from)
+		cursor.line = line
+		cursor.char = c.from - line_offset(line)
+		cursor_set_want_col(cursor)
+	}
+
+	function selected_text(cursor) {
+		if (cursor.line == cursor.sel_line) {
+			let char1 = min(cursor.char, cursor.sel_char)
+			let char2 = max(cursor.char, cursor.sel_char)
+			let s = lines[cursor.line]
+			return s.substring(char1, char2)
+		} else {
+			let sel_lines = []
+			let line1, char1
+			let line2, char2
+			if (cursor.line < cursor.sel_line) {
+				line1 = cursor.line
+				line2 = cursor.sel_line
+				char1 = cursor.char
+				char2 = cursor.sel_char
+			} else {
+				line2 = cursor.line
+				line1 = cursor.sel_line
+				char2 = cursor.char
+				char1 = cursor.sel_char
+			}
+			sel_lines.push(lines[line1].substring(char1))
+			for (let line = line1 + 1; line < line2; line++)
+				sel_lines.push(lines[line])
+			sel_lines.push(lines[line2].substring(0, char2))
+			return sel_lines.join(newline)
+		}
 	}
 
 	lz_parser.html = lz_parser.html.configure({
@@ -336,12 +466,12 @@ function code_edit_view(id, opt) {
 			// split by newline.
 			lines = text.split('\n')
 
-			// compute line offsets, starting with the second line.
+			// compute line offsets, starting with the 2nd line!
 			line_offsets = []
-			let p = lines[0].length + 1
+			let pos = lines[0].length + 1
 			for (let i = 1, n = lines.length; i < n; i++) {
-				line_offsets[i-1] = p
-				p += lines[i].length + 1
+				line_offsets[i-1] = pos
+				pos += lines[i].length + newline.length
 			}
 
 			// init line_colors arrays.
@@ -354,26 +484,25 @@ function code_edit_view(id, opt) {
 		{
 			for (let a of line_colors)
 				a.length = 0
-			let tree = lz_parser.html.parse(text)
-			let cursor = tree.cursor()
+			syntax_tree = lz_parser.html.parse(text)
+			let c = syntax_tree.cursor()
 			do {
-				let color = node_colors[cursor.name]
+				let color = node_colors[c.name]
 				if (!color)
 					continue
-				let line1_i = binsearch(line_offsets, cursor.from, '<=')
-				let line2_i = binsearch(line_offsets, cursor.to  , '<=')
-				let i = cursor.from
-				let w = cursor.to - i
-				i -= (line1_i > 0 ? line_offsets[line1_i-1] : 0)
-				if (line2_i > line1_i) {
-					line_colors[line1_i].push(i, lines[line1_i].length, color)
-					for (let line_i = line1_i + 1; line_i < line2_i; line_i++)
-						line_colors[line_i].push(0, lines[line_i].length, color)
-					line_colors[line2_i].push(0, w, color)
+				let line1 = find_line(c.from)
+				let line2 = find_line(c.to)
+				let i = c.from - line_offset(line1)
+				let w = c.to - c.from
+				if (line2 > line1) {
+					line_colors[line1].push(i, lines[line1].length, color)
+					for (let line = line1 + 1; line < line2; line++)
+						line_colors[line].push(0, lines[line].length, color)
+					line_colors[line2].push(0, w, color)
 				} else {
-					line_colors[line1_i].push(i, w, color)
+					line_colors[line1].push(i, w, color)
 				}
-			} while (cursor.next())
+			} while (c.next())
 		}
 
 		max_line_len = 0
@@ -389,23 +518,23 @@ function code_edit_view(id, opt) {
 		let sy = vy - y
 
 		// number of lines fully or partially in the viewport.
-		let vn = floor(vh / line_h) + 2 // 2 is right, think it!
+		let vline_n = floor(vh / line_h) + 2 // 2 is right, think it!
 		let vline1 = floor(sy / line_h)
-		let vline2 = vline1 + vn
+		let vline2 = vline1 + vline_n - 1
 		vline1 = max(0, min(vline1, lines.length - 1))
-		vline2 = max(0, min(vline2, lines.length))
+		vline2 = max(0, min(vline2, lines.length - 1))
 
 		// TODO: make the sidebar a popup anchored to this frame and remove this hack!
 		a[sidebar_i+SIDEBAR_SY ] = sy
-		a[sidebar_i+SIDEBAR_VI1] = vline1
-		a[sidebar_i+SIDEBAR_VI2] = vline2
+		a[sidebar_i+SIDEBAR_VLINE1] = vline1
+		a[sidebar_i+SIDEBAR_VLINE2] = vline2
 
 		if (last_vline1 != vline1 || last_vline2 != vline2) {
 			vlines.length = 0
 			vcolors.length = 0
-			for (let i = vline1; i < vline2; i++) {
-				let s = lines[i]
-				let c = assert(line_colors[i])
+			for (let line = vline1; line <= vline2; line++) {
+				let s = lines[line]
+				let c = assert(line_colors[line])
 				vlines.push(s)
 				vcolors.push(c)
 			}
@@ -413,15 +542,27 @@ function code_edit_view(id, opt) {
 			last_vline2 = vline2
 		}
 
-		// set mouse state
+		// move cursor and select text based on mouse clicking and dragging.
 		hit_line = null
-		;[drag_state, dx, dy, cs] = ui.drag(id+'.text_contentbox')
-		if (drag_state == 'drag') {
-			ui.focus(id)
-		}
-		if (drag_state == 'hover' || drag_state == 'drag') {
+		hit_char = null
+		if (drag_state) {
 			hit_line = floor((ui.my - y) / line_h)
-			hit_char = floor((ui.mx - y) / char_w)
+			hit_line = clamp(hit_line, 0, lines.length-1)
+			let line_s = lines[hit_line]
+			let hit_col = floor((ui.mx - x + char_w / 2) / char_w)
+			hit_char = col_to_char(hit_col, line_s, tab_width)
+			hit_char = clamp(hit_char, 0, line_s.length)
+			let cursor = cursors[0]
+			let shift = ui.key('shift') // TODO: use to change selection end
+			if (drag_state != 'hover') {
+				cursor.line = hit_line
+				cursor.char = hit_char
+				cursor.want_col = hit_col
+				if (drag_state == 'drag') {
+					cursor.sel_line = cursor.line
+					cursor.sel_char = cursor.char
+				}
+			}
 		}
 
 		ui.stack(id+'.text_contentbox')
@@ -444,10 +585,17 @@ function code_edit_view(id, opt) {
 		char_w = ceil(m.width)
 		font_descent = m.fontBoundingBoxDescent
 		let sidebar_w = (lines.length+'').length * char_w
-		text_w = ceil(max_line_len * char_w)
-		text_h = lines.length * line_h
+		let text_w = ceil(max_line_len * char_w)
+		let text_h = lines.length * line_h
 
 		let cursor = cursors[0]
+
+		// process mouse input (more processing is done in the frame callback
+		// when we know the view x,y.
+
+		;[drag_state] = ui.drag(id+'.text_contentbox')
+		if (drag_state == 'drag')
+			ui.focus(id)
 
 		// process keyboard input
 
@@ -456,7 +604,13 @@ function code_edit_view(id, opt) {
 		let scroll_lines = 0
 		let shift = ui.key('shift')
 		let ctrl  = ui.key('control')
-		if (ui.focused(id)) {
+		let focused = ui.focused(id)
+		if (focused) {
+
+			ui.capture_keydown(id, 'ctrl f') // browser: find -> editor: find
+			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
+			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
+
 			// NOTE: some key combos are captured by browser, namely:
 			// ctrl+pgup/dn, ctrl(+shift)+tab
 			if      (ui.keydown('arrowup'   ) && !ctrl) lines_n = -1
@@ -465,41 +619,46 @@ function code_edit_view(id, opt) {
 			else if (ui.keydown('pagedown'  )) lines_n =  (last_vline2 - last_vline1)
 			else if (ui.keydown('home'      ) && ctrl) lines_n = -1/0
 			else if (ui.keydown('end'       ) && ctrl) lines_n =  1/0
-			else if (ui.keydown('arrowleft' ) && !ctrl) chars_n = -1
-			else if (ui.keydown('arrowright') && !ctrl) chars_n =  1
-			else if (ui.keydown('arrowup'   ) && ctrl) scroll_lines = -1
-			else if (ui.keydown('arrowdown' ) && ctrl) scroll_lines =  1
+			else if (ui.keydown('arrowleft' )) chars_n = -1
+			else if (ui.keydown('arrowright')) chars_n =  1
+			else if (ui.keydown('ctrl arrowup'  )) scroll_lines = -1
+			else if (ui.keydown('ctrl arrowdown')) scroll_lines =  1
 		}
 		if (chars_n || lines_n) {
 			if (chars_n < 0) {
-				if (cursor.char > 0) {
+				if (ctrl) {
+					cursor_move_to_prev_token(cursor)
+				} else if (cursor.char > 0) {
 					cursor.char--
-					cursor.want_char = cursor.char
+					cursor_set_want_col(cursor)
 				} else if (cursor.line) {
 					cursor.line--
-					cursor.char = lines[cursor.line].length
-					cursor.want_char = cursor.char
+					let line_s = lines[cursor.line]
+					cursor.char = line_s.length
+					cursor_set_want_col(cursor)
 				}
 			} else if (chars_n > 0) {
-				if (cursor.char < lines[cursor.line].length) {
+				if (ctrl) {
+					cursor_move_to_next_token(cursor)
+				} else if (cursor.char < lines[cursor.line].length) {
 					cursor.char++
-					cursor.want_char = cursor.char
+					cursor_set_want_col(cursor)
 				} else if (cursor.line < lines.length) {
 					cursor.line++
 					cursor.char = 0
-					cursor.want_char = cursor.char
+					cursor_set_want_col(cursor)
 				}
 			} else if (lines_n < 0) {
 				if (cursor.line) {
 					cursor.line = max(cursor.line + lines_n, 0)
-					cursor.char = min(cursor.want_char, lines[cursor.line].length)
+					cursor_move_to_want_col(cursor)
 				} else {
 					cursor.char = 0
 				}
 			} else if (lines_n > 0) {
 				if (cursor.line < lines.length-1) {
 					cursor.line = min(cursor.line + lines_n, lines.length-1)
-					cursor.char = min(cursor.want_char, lines[cursor.line].length)
+					cursor_move_to_want_col(cursor)
 				} else {
 					cursor.char = lines[cursor.line].length
 				}
@@ -511,7 +670,29 @@ function code_edit_view(id, opt) {
 			ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
 		} else if (scroll_lines) {
 			let ss = ui.state(id+'.text_scrollbox')
+			// TODO: scroll_y is allowed to get out of range!
 			ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
+		} else if (focused && ui.keydown('ctrl a')) {
+			cursor.line = 0
+			cursor.char = 0
+			cursor.sel_line = lines.length-1
+			cursor.sel_char = lines[cursor.sel_line].length
+			cursor_set_want_col(cursor)
+		} else if (focused && ui.keydown('ctrl c')) {
+			let sel_text = selected_text(cursor)
+			navigator.clipboard.writeText(sel_text)
+		} else if (focused && ui.keydown('ctrl v')) {
+			// TODO: paste
+		} else if (focused && ui.keydown('ctrl x')) {
+			let sel_text = selected_text(cursor)
+			navigator.clipboard.writeText(sel_text)
+			// TODO: cut it
+		} else if (focused && ui.keydown('ctrl f')) {
+			// TODO: find
+			pr('FIND')
+		} else if (focused && ui.keydown('ctrl h')) {
+			// TODO: replace
+			pr('REPLACE')
 		}
 
 		// build editor
