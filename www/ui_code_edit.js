@@ -392,7 +392,7 @@ function code_edit_view(id, opt) {
 	let e = {}
 
 	// text and text-derived state.
-	let text
+	let text = opt.code
 	let newline // as detected from text or user override
 	let tab_width = 3 // user setting
 	let lines // [line1, ...]
@@ -482,6 +482,11 @@ function code_edit_view(id, opt) {
 		cursor_set_want_col(cursor)
 	}
 
+	function reset_selection(cursor) {
+		cursor.sel_line = cursor.line
+		cursor.sel_char = cursor.char
+	}
+
 	function selected_text(cursor) {
 		if (cursor.line == cursor.sel_line) {
 			let char1 = min(cursor.char, cursor.sel_char)
@@ -518,76 +523,80 @@ function code_edit_view(id, opt) {
 		})
 	})
 
-	function update_text_state() {
+	function text_changed() {
+		newline = detect_line_terminator(text) ?? '\n'
+		// remove whitespace at EOL and normalize line terminators.
+		text.replace(/[ \t]*(?:\r\n|\r|\n)/g, newline)
+		// collapse multiple empty lines at EOF to a single line.
+		text.replace(new RegExp(`(${newline})+\\z`), newline)
+		// split by newline.
+		lines = text.split('\n')
+		lines_changed()
+	}
 
-		if (!lines) {
+	function lines_changed() {
 
-			text = opt.code
-
-			newline = detect_line_terminator(text) ?? '\n'
-			// remove whitespace at EOL and normalize line terminators.
-			text.replace(/[ \t]*(?:\r\n|\r|\n)/g, newline)
-			// collapse multiple empty lines at EOF to a single line.
-			text.replace(new RegExp(`(${newline})+\\z`), newline)
-			// split by newline.
-			lines = text.split('\n')
-
-			// compute line offsets, starting with the 2nd line!
-			line_offsets = []
-			let pos = lines[0].length + 1
-			for (let i = 1, n = lines.length; i < n; i++) {
-				line_offsets[i-1] = pos
-				pos += lines[i].length + newline.length
-			}
-
-			// init line_colors arrays.
-			line_colors = []
-			for (let i = 0, n = lines.length; i < n; i++)
-				line_colors[i] = []
+		// compute line offsets, starting with the 2nd line!
+		line_offsets = []
+		let pos = lines[0].length + 1
+		for (let i = 1, n = lines.length; i < n; i++) {
+			line_offsets[i-1] = pos
+			pos += lines[i].length + newline.length
 		}
 
-		// parse syntax for highlighting.
-		{
-			for (let a of line_colors)
-				a.length = 0
-			syntax_tree = lz_parser.html.parse(text)
-			let c = syntax_tree.cursor()
-			do {
-				// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
-				if (c.name == 'VariableName')
-					{} // TODO: look up known variable names
-				let color = node_colors[c.name]
-				if (!color)
-					continue
-				let line1 = find_line(c.from)
-				let line2 = find_line(c.to)
-				let line1_s = lines[line1]
-				let char1 = c.from - line_offset(line1)
-				let col1 = char_to_col(char1, line1_s, tab_width)
-				if (line2 > line1) {
-					let w1 = char_to_col(line1_s.length, line1_s, tab_width)
-					line_colors[line1].push(col1, w1, color)
-					for (let line = line1 + 1; line < line2; line++) {
-						let line_s = lines[line]
-						let w = char_to_col(line_s.length, line_s, tab_width)
-						line_colors[line].push(0, w, color)
-					}
-					let line2_s = lines[line2]
-					let char2 = c.to - line_offset(line2)
-					let col2 = char_to_col(char2, line2_s, tab_width)
-					let w2 = char_to_col(line2_s.length, line2_s, tab_width)
-					line_colors[line2].push(0, w2, color)
-				} else {
-					let w = c.to - c.from
-					line_colors[line1].push(col1, w, color)
-				}
-			} while (c.next())
-		}
+		// init line_colors arrays.
+		line_colors = []
+		for (let i = 0, n = lines.length; i < n; i++)
+			line_colors[i] = []
 
 		max_line_len = 0
 		for (let s of lines)
 			max_line_len = max(max_line_len, s.length)
+
+		last_vline1 = -1
+		last_vline2 = -1
+
+		parse_text()
 	}
+
+	function parse_text() {
+		for (let a of line_colors)
+			a.length = 0
+		text = lines.join(newline)
+		syntax_tree = lz_parser.html.parse(text)
+		let c = syntax_tree.cursor()
+		do {
+			// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
+			if (c.name == 'VariableName')
+				{} // TODO: look up known variable names
+			let color = node_colors[c.name]
+			if (!color)
+				continue
+			let line1 = find_line(c.from)
+			let line2 = find_line(c.to)
+			let line1_s = lines[line1]
+			let char1 = c.from - line_offset(line1)
+			let col1 = char_to_col(char1, line1_s, tab_width)
+			if (line2 > line1) {
+				let w1 = char_to_col(line1_s.length, line1_s, tab_width)
+				line_colors[line1].push(col1, w1, color)
+				for (let line = line1 + 1; line < line2; line++) {
+					let line_s = lines[line]
+					let w = char_to_col(line_s.length, line_s, tab_width)
+					line_colors[line].push(0, w, color)
+				}
+				let line2_s = lines[line2]
+				let char2 = c.to - line_offset(line2)
+				let col2 = char_to_col(char2, line2_s, tab_width)
+				let w2 = char_to_col(line2_s.length, line2_s, tab_width)
+				line_colors[line2].push(0, w2, color)
+			} else {
+				let w = c.to - c.from
+				line_colors[line1].push(col1, w, color)
+			}
+		} while (c.next())
+	}
+
 
 	let sidebar_i
 
@@ -637,10 +646,8 @@ function code_edit_view(id, opt) {
 				cursor.line = hit_line
 				cursor.char = hit_char
 				cursor.want_col = hit_col
-				if (drag_state == 'drag') {
-					cursor.sel_line = cursor.line
-					cursor.sel_char = cursor.char
-				}
+				if (drag_state == 'drag')
+					reset_selection(cursor)
 			}
 		}
 
@@ -705,6 +712,7 @@ function code_edit_view(id, opt) {
 			else if (ui.keydown('arrowright')) chars_n =  1
 			else if (ui.keydown('ctrl arrowup'  )) scroll_lines = -1
 			else if (ui.keydown('ctrl arrowdown')) scroll_lines =  1
+
 		}
 		if (chars_n || lines_n) {
 			if (chars_n < 0) {
@@ -749,10 +757,8 @@ function code_edit_view(id, opt) {
 					cursor.char = lines[cursor.line].length
 				}
 			}
-			if (!shift) {
-				cursor.sel_line = cursor.line
-				cursor.sel_char = cursor.char
-			}
+			if (!shift)
+				reset_selection(cursor)
 			ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
 		} else if (scroll_lines) {
 			let ss = ui.state(id+'.text_scrollbox')
@@ -779,6 +785,33 @@ function code_edit_view(id, opt) {
 		} else if (focused && ui.keydown('ctrl h')) {
 			// TODO: replace
 			pr('REPLACE')
+		} else if (focused && ui.keydown('enter')) {
+			let line_s = lines[cursor.line]
+			let s1 = line_s.substring(0, cursor.char)
+			let s2 = line_s.substring(cursor.char)
+			lines[cursor.line] = s1
+			insert(lines, cursor.line + 1, s2)
+			lines_changed()
+			cursor.line++
+			cursor.char = 0
+			reset_selection(cursor)
+			cursor_set_want_col(cursor)
+		} else if (focused && ui.keydown('backspace')) {
+			if (cursor.char > 0) {
+				//
+			} else if (cursor.line > 0) {
+				let line1_s = lines[cursor.line-1]
+				let line2_s = lines[cursor.line]
+				lines[cursor.line-1] = line1_s + line2_s
+				remove(lines, cursor.line)
+				lines_changed()
+				cursor.line--
+				cursor.char = line1_s.length
+				reset_selection(cursor)
+				cursor_set_want_col(cursor)
+			}
+		} else if (focused && ui.keydown('del')) {
+			pr('DEL')
 		}
 
 		// build editor
@@ -811,7 +844,7 @@ function code_edit_view(id, opt) {
 
 	e.free = function() {}
 
-	update_text_state()
+	text_changed()
 
 	return e
 }
