@@ -52,101 +52,82 @@ const {
 	BOX_ARGS
 } = ui
 
-let node_color_categories = {
-// Common
-	Comment:                  'comment',
+//           theme    name        state       h     s     L    a
+// ---------------------------------------------------------------------------
+ui.fg_style('light', 'keyword'  , 'normal', 240, 1.00, 0.35)
+ui.fg_style('light', 'string'   , 'normal',   5, 0.85, 0.40)
+ui.fg_style('light', 'number'   , 'normal',   5, 0.80, 0.45)
+ui.fg_style('light', 'symbol'   , 'normal', 240, 1.00, 0.20)
+ui.fg_style('light', 'comment'  , 'normal', 100, 0.00, 0.45)
+ui.fg_style('light', 'error'    , 'normal',   0, 0.85, 0.45)
+
+ui.fg_style('dark' , 'keyword'  , 'normal',  60, 0.95, 0.60)
+ui.fg_style('dark' , 'string'   , 'normal',   5, 0.95, 0.60)
+ui.fg_style('dark' , 'number'   , 'normal',   5, 0.95, 0.70)
+ui.fg_style('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
+ui.fg_style('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
+ui.fg_style('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
+
+let node_colors = {
 // HTML
-	StartTag:                 'tag',
-	EndTag:                   'tag',
-	StartCloseTag:            'tag',
-	TagName:                  'tag',
-	AttributeName:            'attribute',
-	AttributeValue:           'string',
-	Comment:                  'comment',
-	Doctype:                  'tag',
+	StartTag:              'keyword',
+	EndTag:                'keyword',
+	StartCloseTag:         'keyword',
+	TagName:               'keyword', // shared with CSS tag selector
+	AttributeName:         'text',
+	AttributeValue:        'string',
+	UnquotedAttributeValue:'string',
+	Comment:               'comment',
+	DoctypeDecl:           'keyword',
+	Is:                    'symbol',
 // CSS
-	TypeSelector:             'selector',
-	ClassSelector:            'selector',
-	IdSelector:               'selector',
-	UniversalSelector:        'selector',
-	AttributeSelector:        'selector',
-	PseudoClassSelector:      'selector',
-	PseudoElementSelector:    'selector',
-	// At‑rules ( @media, @keyframes, … )
-	Atrule:                   'keyword',
-	AtruleName:               'keyword',
-	MediaFeature:             'keyword',
-	// Properties
-	PropertyName:             'keyword',
-	Important:                'keyword',
-	// Values
-	//ValueName:                'string',
-	NumberLiteral:            'number',
-	Unit:                     'string',
-	// Dimension:                'number',
-	// Color:                    'color',
-	// HexColor:                 'color',
-	// String:                   'string',
-	// Url:                      'string',
-	// Function:                 'function',
+	UniversalSelector:     'keyword',
+	'#':                   'symbol',
+	'::':                  'symbol',
+	':':                   'symbol', // shared with JS
+	TypeSelector:          'keyword',
+	AttributeSelector:     'keyword', // TODO: followed by TagSelector, TagName etc.
+	MatchOp:               'symbol', // = from [a=b] from AttributeSelector
+	PseudoClassName:       'string',
+	Atrule:                'keyword', // @media
+	AtruleName:            'keyword',
+	MediaFeature:          'keyword',
+	//PropertyName:          'symbol', // shared with JS
+	Important:             'keyword',
+	ValueName:             'symbol',
+	NumberLiteral:         'number',
+	Unit:                  'symbol',
 // JS
-	// Keywords (function, const, if, etc.)
-	Keyword:                  'keyword',
-	FunctionKeyword:          'keyword',
-	VariableKeyword:          'keyword',
-	LetKeyword:               'keyword',
-	IfKeyword:                'keyword',
-	ElseKeyword:              'keyword',
-	ReturnKeyword:            'keyword',
-	ClassKeyword:             'keyword',
-	ImportKeyword:            'keyword',
-	ExportKeyword:            'keyword',
-	AwaitKeyword:             'keyword',
-	AsyncKeyword:             'keyword',
-	// Identifiers
-	//Identifier:               'variable',
-	BindingIdentifier:        'definition',
-	// Literals
-	Number:                   'number',
-	String:                   'string',
-	TemplateString:           'string',
-	RegExp:                   'string',
-	Boolean:                  'keyword',
-	Null:                     'null',
-	// Operators & punctuation
-	Operator:                 'operator',
-	Plus:                     'operator',
-	Minus:                    'operator',
-	Multiply:                 'operator',
-	Divide:                   'operator',
-	Equals:                   'operator',
-	Arrow:                    'operator',
-	// Punctuation
-	Dot:                      'punctuation',
-	Comma:                    'punctuation',
-	Semicolon:                'punctuation',
-	Colon:                    'punctuation',
-	// Comments
-	LineComment:              'comment',
-	BlockComment:             'comment'
+	String:          'string',
+	Number:          'number',
+	BooleanLiteral:  'keyword',
+	ArithOp:         'symbol',
+	CompareOp:       'symbol',
+	LogicOp:         'symbol',
+	BitOp:           'symbol',
+	UpdateOp:        'symbol',
+	Arrow:           'symbol',
+	Equals:          'symbol',
+	LineComment:     'comment',
+	BlockComment:    'comment',
 }
 
-let editor_colors = {
-	tag       : 'yellow',
-	selector  : 'yellow',
-	keyword   : 'yellow',
-	error     : 'red',
-	comment   : 'green',
-	type      : 'orange',
-	operator  : 'white',
-	regexp    : 'red',
-	string    : 'red',
-	number    : 'purple',
+for (let keyword of [
+	'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
+	'default', 'delete', 'do', 'else', 'export', 'extends', 'finally',
+	'for', 'function', 'if', 'import', 'in', 'instanceof', 'let', 'new', 'null',
+	'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var',
+	'void', 'while', 'with', 'yield',
+]) {
+	node_colors[keyword] = 'keyword'
+}
+for (let symbol of [
+	'(', ')', '{', '}', '[', ']', '.', ';', ',', ':', '?', '?.',
+]) {
+	node_colors[symbol] = 'symbol'
 }
 
 ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
-
-// NOTE:
 
 function indent(s, tab_width) {
 	let i = 0 // char index (i.e. index in line string s)
@@ -276,7 +257,7 @@ ui.widget('code_edit_text', {
 		let vline2      = a[i+11]
 		let vlines      = a[i+12]
 		let tab_width   = a[i+13]
-		let line_colors = a[i+14]
+		let vcolors     = a[i+14]
 		let hit_line    = a[i+15]
 		let cursors     = a[i+16]
 
@@ -290,7 +271,7 @@ ui.widget('code_edit_text', {
 
 		// draw the text.
 		cx.textAlign = 'left'
-		cx.fillStyle = 'white'
+		cx.fillStyle = ui.fg_color('text')
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			// using tab_width-1 because tabs take one char with fillText().
@@ -302,18 +283,20 @@ ui.widget('code_edit_text', {
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
+		let normal_colors = ui.get_theme().fg[0]
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
-			let c = line_colors[line - vline1]
+			let c = vcolors[line - vline1]
 			for (let i = 0, n = c.length; i < n; i += 3) {
 				let ci    = c[i+0]
 				let cw    = c[i+1]
 				let color = c[i+2]
+				let color_hsl = (normal_colors[color] || normal_colors.text)[0]
 				let x = round(x0 + ci * char_w)
 				let y = y0 + line * line_h
 				let w = round(cw * char_w)
 				let h = line_h
-				cx.fillStyle = color
+				cx.fillStyle = color_hsl
 				cx.fillRect(x, y, w, h)
 			}
 		}
@@ -570,11 +553,10 @@ function code_edit_view(id, opt) {
 			syntax_tree = lz_parser.html.parse(text)
 			let c = syntax_tree.cursor()
 			do {
-				pr(c.name, text.substring(c.from, c.to).substring(0, 20))
-				let color_cat = node_color_categories[c.name]
-				if (!color_cat)
-					continue
-				let color = editor_colors[color_cat]
+				// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
+				if (c.name == 'VariableName')
+					{} // TODO: look up known variable names
+				let color = node_colors[c.name]
 				if (!color)
 					continue
 				let line1 = find_line(c.from)

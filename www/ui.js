@@ -47,7 +47,7 @@ THEME API
 	*_color_rgba    (name, [state], [theme]) -> 0xRRGGBBAA                get theme color for WebGL, with alpha
 	bg_is_dark      (bg_color) -> t|f                                     based on this, text is white or black
 	dark            () -> t|f
-	get_theme       () -> dark|light
+	get_theme       () -> theme
 	hsl             (h, s, L, a) -> css_color              make a CSS color from HSL components
 	hsl_adjust      (c, h, s, L, a) -> css_color           make a CSS color from a color_hsl() return value, with h, s, L adjusted
 	alpha_adjust    (c, a) -> css_color                    make a CSS color from a color_hsl() return value, with alpha adjusted
@@ -562,7 +562,7 @@ function def_color_func(k) {
 }
 
 let theme
-ui.get_theme = () => theme.name
+ui.get_theme = () => theme
 ui.dark = () => theme.is_dark
 
 function lookup_color_hsl_func(k) {
@@ -629,7 +629,7 @@ ui.fg_color = fg_color
 ui.fg_color_rgb  = lookup_color_rgb_int_func(fg_color_hsl)
 ui.fg_color_rgba = lookup_color_rgba_int_func(fg_color_hsl)
 
-//           theme    name     state       h     s     L    a
+//           theme    name       state       h     s     L    a
 // ---------------------------------------------------------------------------
 ui.fg_style('light', 'text'   , 'normal' ,   0, 0.00, 0.00)
 ui.fg_style('light', 'text'   , 'hover'  ,   0, 0.00, 0.30)
@@ -640,7 +640,7 @@ ui.fg_style('light', 'link'   , 'normal' , 222, 0.00, 0.50)
 ui.fg_style('light', 'link'   , 'hover'  , 222, 1.00, 0.70)
 ui.fg_style('light', 'link'   , 'active' , 222, 1.00, 0.80)
 
-ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.90)
+ui.fg_style('dark' , 'text'   , 'normal' ,   0, 0.00, 0.8)
 ui.fg_style('dark' , 'text'   , 'hover'  ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'text'   , 'active' ,   0, 0.00, 1.00)
 ui.fg_style('dark' , 'label'  , 'normal' ,   0, 0.00, 0.95, 0.7)

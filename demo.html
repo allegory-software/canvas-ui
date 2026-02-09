@@ -910,9 +910,48 @@ ui.ast_edit('ast_edit1', ast, 1, 's', 's')
 
 `
 
-demos.code_edit = `
+// document.documentElement.outerHTML
+window.code = `<!DOCTYPE html>
+<style attr=val>
+sel.sel #sel,sel[a=b] p:hover ::some :is(header) {
+	prop: val; /* css comment */
+	bla: 100%;
+}
+</style>
+<!--html comment -->
+<script>
+//syntax error 'not closed string
+let a = 1234.567e12 // number
+let b = "abc" // string
+a.b.c[12345] = cdef
+function f() {
+	if (a + 2 > 5)
+		return true /* comment */
+}
+let x = 1, y = 2, z = 3.2e6
+x += y * z / 2 % 4 ** 2 >>>= 5
+x++
+y--
+if ((x > y && y < z) || !false ?? true) {
+	let result = x === y ? x : z
+	const arr = [x, y, z]
+	class Foo {
+		#private = 42
+		getSecret() {
+			return this.#private
+		}
+	}
+	let func = (a, b) => a + b
+	let obj = {
+		key: func?.(x, y),
+		'@decorated': new Foo()
+	}
+	console.log(obj['@decorated'].getSecret())
+}
+<\/script>
+`
 
-let code = document.documentElement.outerHTML
+demos.code_edit = `
 
 ui.code_edit('code_edit1', {code: code}, 1, 's', 's')
 
