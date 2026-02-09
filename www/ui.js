@@ -2378,14 +2378,15 @@ let mx1, mx2, my1, my2
 ui.rem = rem => round((rem ?? 1) * ui.font_size_normal)
 ui. em =  em => round((em  ?? 1) * font_size)
 
+let em  = ui.em
 let rem = ui.rem
-ui.sp025 = () => rem( .125)
-ui.sp05  = () => rem( .25)
-ui.sp075 = () => rem( .375)
-ui.sp1   = () => rem( .5)
-ui.sp2   = () => rem( .75)
-ui.sp4   = () => rem(1)
-ui.sp8   = () => rem(2)
+ui.sp025 = () => em( .125)
+ui.sp05  = () => em( .25)
+ui.sp075 = () => em( .375)
+ui.sp1   = () => em( .5)
+ui.sp2   = () => em( .75)
+ui.sp4   = () => em(1)
+ui.sp8   = () => em(2)
 ui.sp    = ui.sp1
 
 ui.padding = function(_px1, _py1, _px2, _py2) {
