@@ -393,7 +393,7 @@ ui.load_font = function(name, url) {
 }
 
 ui.load_font('far'   , 'icons/fa-regular-400.woff2')
-//ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
+ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
 //ui.load_font('fab'   , 'icons/fa-brands-400.woff2')
 //ui.load_font('lar'   , 'icons/la-regular-400.woff2')
 //ui.load_font('las'   , 'icons/la-solid-900.woff2')

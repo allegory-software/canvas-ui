@@ -163,11 +163,10 @@ ui.box_widget('code_edit_sidebar', {
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 
-		for (let line = vline1; i <= vline2; i++)
-			cx.fillText(line+1, x0, y0 + (line + 1) * line_h - font_descent - 2)
+		for (let line = vline1; line <= vline2; line++)
+			cx.fillText(line+1, x0, y0 + (line + 1) * line_h - font_descent - 1)
 
 		cx.restore()
-
 	},
 })
 
@@ -209,7 +208,7 @@ ui.widget('code_edit_text', {
 			let s = vlines[line - vline1]
 			// using tab_width-1 because tabs take one char with fillText().
 			let indent_w = indent(s, tab_width-1) * char_w
-			cx.fillText(s, x0 + indent_w, y0 + (line + 1) * line_h - font_descent - 2)
+			cx.fillText(s, round(x0 + indent_w), y0 + (line + 1) * line_h - font_descent - 1)
 		}
 
 		// this blending mode will draw only where alpha != 0, i.e. over the text.
@@ -224,9 +223,9 @@ ui.widget('code_edit_text', {
 				let ci    = c[i+0]
 				let cw    = c[i+1]
 				let color = c[i+2]
-				let x = x0 + indent_w + ci * char_w
+				let x = round(x0 + indent_w + ci * char_w)
 				let y = y0 + line * line_h
-				let w = cw * char_w
+				let w = round(cw * char_w)
 				let h = line_h
 				cx.fillStyle = color
 				cx.fillRect(x, y, w, h)
@@ -245,9 +244,9 @@ ui.widget('code_edit_text', {
 				continue
 			let col = char_to_col(cursor.char, line_s, tab_width)
 			cx.fillRect(
-				x0 + col * char_w,
+				round(x0 + col * char_w),
 				y0 + cursor.line * line_h,
-				3, line_h)
+				2, line_h)
 		}
 
 		// draw multi-line selection.
@@ -388,31 +387,29 @@ function code_edit_view(id, opt) {
 		cursor.char = col_to_char(cursor.want_col, line_s, tab_width)
 	}
 
-	function cursor_move_to_prev_token(cursor) {
-		let pos = cursor_pos(cursor)
-		let c = syntax_tree.cursor()
-		if (!c.moveTo(pos, 1)) { pr('no move'); return; } // 1 = forward
-		if (c.from == pos) {
-			pr('prev', c.from)
-			c.prev()
-			pr('prev=', c.from)
-		} else {
-			pr(c.from, pos)
-		}
-		let line = find_line(c.from)
-		cursor.line = line
-		cursor.char = c.from - line_offset(line)
-		cursor_set_want_col(cursor)
+	function is_word_char(cp) {
+		if (cp >= 48 && cp <= 57) return true // 0–9
+		if (cp >= 65 && cp <= 90) return true // A–Z
+		if (cp >= 97 && cp <= 122) return true // a–z
+		return cp == 95 || cp == 36 // '_' or '$'
 	}
 
 	function cursor_move_to_next_token(cursor) {
-		let pos = cursor_pos(cursor)
-		let c = syntax_tree.cursor()
-		if (!c.moveTo(pos, 1)) return // 1 = forward
-		if (c.from <= pos) c.next()
-		let line = find_line(c.from)
-		cursor.line = line
-		cursor.char = c.from - line_offset(line)
+		let i = cursor.char
+		let s = lines[cursor.line]
+		let n = s.length
+		while (i < n &&  is_word_char(s.charCodeAt(i))) i++ // goto end of current word
+		while (i < n && !is_word_char(s.charCodeAt(i))) i++ // skip non-words
+		cursor.char = i
+		cursor_set_want_col(cursor)
+	}
+
+	function cursor_move_to_prev_token(cursor) {
+		let i = cursor.char
+		let s = lines[cursor.line]
+		while (i && !is_word_char(s.charCodeAt(i-1))) i-- // skip non-words
+		while (i &&  is_word_char(s.charCodeAt(i-1))) i-- // goto beginning of current word
+		cursor.char = i
 		cursor_set_want_col(cursor)
 	}
 
@@ -581,8 +578,11 @@ function code_edit_view(id, opt) {
 
 		font_size = ui.get_font_size()
 		line_h = round(font_size * 1.5)
-		let m = ui.measure_text(cx, '0')
-		char_w = ceil(m.width)
+		let font0 = cx.font
+		cx.font = font_size+'px mono'
+		let m = ui.measure_text(cx, 'm')
+		cx.font = font0
+		char_w = m.width
 		font_descent = m.fontBoundingBoxDescent
 		let sidebar_w = (lines.length+'').length * char_w
 		let text_w = ceil(max_line_len * char_w)
@@ -626,11 +626,13 @@ function code_edit_view(id, opt) {
 		}
 		if (chars_n || lines_n) {
 			if (chars_n < 0) {
-				if (ctrl) {
-					cursor_move_to_prev_token(cursor)
-				} else if (cursor.char > 0) {
-					cursor.char--
-					cursor_set_want_col(cursor)
+				if (cursor.char > 0) {
+					if (ctrl) {
+						cursor_move_to_prev_token(cursor)
+					} else {
+						cursor.char--
+						cursor_set_want_col(cursor)
+					}
 				} else if (cursor.line) {
 					cursor.line--
 					let line_s = lines[cursor.line]
@@ -638,11 +640,13 @@ function code_edit_view(id, opt) {
 					cursor_set_want_col(cursor)
 				}
 			} else if (chars_n > 0) {
-				if (ctrl) {
-					cursor_move_to_next_token(cursor)
-				} else if (cursor.char < lines[cursor.line].length) {
-					cursor.char++
-					cursor_set_want_col(cursor)
+				if (cursor.char < lines[cursor.line].length) {
+					if (ctrl) {
+						cursor_move_to_next_token(cursor)
+					} else {
+						cursor.char++
+						cursor_set_want_col(cursor)
+					}
 				} else if (cursor.line < lines.length) {
 					cursor.line++
 					cursor.char = 0
