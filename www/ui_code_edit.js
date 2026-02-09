@@ -52,9 +52,96 @@ const {
 	BOX_ARGS
 } = ui
 
-let node_colors = {
-	OpenTag: 'yellow',
-	CloseTag: 'yellow',
+let node_color_categories = {
+// Common
+	Comment:                  'comment',
+// HTML
+	StartTag:                 'tag',
+	EndTag:                   'tag',
+	StartCloseTag:            'tag',
+	TagName:                  'tag',
+	AttributeName:            'attribute',
+	AttributeValue:           'string',
+	Comment:                  'comment',
+	Doctype:                  'tag',
+// CSS
+	TypeSelector:             'selector',
+	ClassSelector:            'selector',
+	IdSelector:               'selector',
+	UniversalSelector:        'selector',
+	AttributeSelector:        'selector',
+	PseudoClassSelector:      'selector',
+	PseudoElementSelector:    'selector',
+	// At‑rules ( @media, @keyframes, … )
+	Atrule:                   'keyword',
+	AtruleName:               'keyword',
+	MediaFeature:             'keyword',
+	// Properties
+	PropertyName:             'keyword',
+	Important:                'keyword',
+	// Values
+	//ValueName:                'string',
+	NumberLiteral:            'number',
+	Unit:                     'string',
+	// Dimension:                'number',
+	// Color:                    'color',
+	// HexColor:                 'color',
+	// String:                   'string',
+	// Url:                      'string',
+	// Function:                 'function',
+// JS
+	// Keywords (function, const, if, etc.)
+	Keyword:                  'keyword',
+	FunctionKeyword:          'keyword',
+	VariableKeyword:          'keyword',
+	LetKeyword:               'keyword',
+	IfKeyword:                'keyword',
+	ElseKeyword:              'keyword',
+	ReturnKeyword:            'keyword',
+	ClassKeyword:             'keyword',
+	ImportKeyword:            'keyword',
+	ExportKeyword:            'keyword',
+	AwaitKeyword:             'keyword',
+	AsyncKeyword:             'keyword',
+	// Identifiers
+	//Identifier:               'variable',
+	BindingIdentifier:        'definition',
+	// Literals
+	Number:                   'number',
+	String:                   'string',
+	TemplateString:           'string',
+	RegExp:                   'string',
+	Boolean:                  'keyword',
+	Null:                     'null',
+	// Operators & punctuation
+	Operator:                 'operator',
+	Plus:                     'operator',
+	Minus:                    'operator',
+	Multiply:                 'operator',
+	Divide:                   'operator',
+	Equals:                   'operator',
+	Arrow:                    'operator',
+	// Punctuation
+	Dot:                      'punctuation',
+	Comma:                    'punctuation',
+	Semicolon:                'punctuation',
+	Colon:                    'punctuation',
+	// Comments
+	LineComment:              'comment',
+	BlockComment:             'comment'
+}
+
+let editor_colors = {
+	tag       : 'yellow',
+	selector  : 'yellow',
+	keyword   : 'yellow',
+	error     : 'red',
+	comment   : 'green',
+	type      : 'orange',
+	operator  : 'white',
+	regexp    : 'red',
+	string    : 'red',
+	number    : 'purple',
 }
 
 ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
@@ -217,13 +304,12 @@ ui.widget('code_edit_text', {
 		// draw highlighting rectangles.
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
-			let indent_w = indent(s, tab_width) * char_w
 			let c = line_colors[line - vline1]
 			for (let i = 0, n = c.length; i < n; i += 3) {
 				let ci    = c[i+0]
 				let cw    = c[i+1]
 				let color = c[i+2]
-				let x = round(x0 + indent_w + ci * char_w)
+				let x = round(x0 + ci * char_w)
 				let y = y0 + line * line_h
 				let w = round(cw * char_w)
 				let h = line_h
@@ -484,20 +570,34 @@ function code_edit_view(id, opt) {
 			syntax_tree = lz_parser.html.parse(text)
 			let c = syntax_tree.cursor()
 			do {
-				let color = node_colors[c.name]
+				pr(c.name, text.substring(c.from, c.to).substring(0, 20))
+				let color_cat = node_color_categories[c.name]
+				if (!color_cat)
+					continue
+				let color = editor_colors[color_cat]
 				if (!color)
 					continue
 				let line1 = find_line(c.from)
 				let line2 = find_line(c.to)
-				let i = c.from - line_offset(line1)
-				let w = c.to - c.from
+				let line1_s = lines[line1]
+				let char1 = c.from - line_offset(line1)
+				let col1 = char_to_col(char1, line1_s, tab_width)
 				if (line2 > line1) {
-					line_colors[line1].push(i, lines[line1].length, color)
-					for (let line = line1 + 1; line < line2; line++)
-						line_colors[line].push(0, lines[line].length, color)
-					line_colors[line2].push(0, w, color)
+					let w1 = char_to_col(line1_s.length, line1_s, tab_width)
+					line_colors[line1].push(col1, w1, color)
+					for (let line = line1 + 1; line < line2; line++) {
+						let line_s = lines[line]
+						let w = char_to_col(line_s.length, line_s, tab_width)
+						line_colors[line].push(0, w, color)
+					}
+					let line2_s = lines[line2]
+					let char2 = c.to - line_offset(line2)
+					let col2 = char_to_col(char2, line2_s, tab_width)
+					let w2 = char_to_col(line2_s.length, line2_s, tab_width)
+					line_colors[line2].push(0, w2, color)
 				} else {
-					line_colors[line1].push(i, w, color)
+					let w = c.to - c.from
+					line_colors[line1].push(col1, w, color)
 				}
 			} while (c.next())
 		}
