@@ -396,12 +396,12 @@ function code_edit_view(id, opt) {
 	let newline // as detected from text or user override
 	let tab_width = 3 // user setting
 	let lines // [line1, ...]
-	let line_offsets // [line2_offset, ...]  <-- it starts with the second line!
+	let line_offsets = [] // [line2_offset, ...]  <-- it starts with the second line!
 	let max_line_len
 
 	// parsing/highlighting state.
 	let syntax_tree // per Lezer parsing
-	let line_colors // token colors: [[char, width, color], ...], ...]  1:1 with lines
+	let line_colors = [] // token colors: [[char, width, color], ...], ...]  1:1 with lines
 
 	// UI state, set on each frame.
 	let font_size
@@ -425,11 +425,21 @@ function code_edit_view(id, opt) {
 		return line ? line_offsets[line-1] : 0
 	}
 
+	function text_length() {
+		assert(false)
+		return line_offsets.last + lines.last.length
+	}
+
 	function find_line(pos) {
 		// line_offsets[0] = offset of the 2nd line i.e. the line with index 1.
 		// binsearch'ing with '<=' gives us the correct line when pos is at the
 		// beginning of the line.
 		return binsearch(line_offsets, pos, '<=')
+	}
+
+	function find_char(line, pos) {
+		let line_pos = line_offset(line)
+		return pos - line_offset
 	}
 
 	function cursor_rect(cursor) {
@@ -523,22 +533,59 @@ function code_edit_view(id, opt) {
 		// collapse multiple empty lines at EOF to a single line.
 		text.replace(new RegExp(`(${newline})+\\z`), newline)
 		// split by newline.
-		lines = text.split('\n')
+		lines = text.split(newline)
 		lines_changed()
 	}
 
-	function lines_changed(changes) {
+	let LinesInput = class {
+		chunk(pos) {
+			let line = find_line(pos)
+			let line_pos = line_offset(line)
+			let s = lines[line].slice(pos - line_pos)
+			if (line < lines.length - 1)
+				s += newline
+			return s
+		}
+		read(from, to) {
+			assert(false)
+			let line1 = find_line(from)
+			let line2 = find_line(to)
+			let char1 = find_char(line1, from)
+			let char2 = find_char(line2, to)
+			let s = selected_text({
+				line: line1,
+				char: char1,
+				sel_line: line2,
+				sel_char: char2,
+			})
+			return Lezer.Text.fromString(s)
+		}
+		get lineChunks() {
+			return false
+		}
+		get length() {
+			assert(false)
+			return text_length()
+		}
+	}
+	let lines_input = new LinesInput()
 
-		// compute line offsets, starting with the 2nd line!
-		line_offsets = []
+	// compute line offsets, starting with the 2nd line!
+	function compute_line_offsets(lines, line_offsets) {
+		line_offsets.length = lines.length-1
 		let pos = lines[0].length + 1
 		for (let i = 1, n = lines.length; i < n; i++) {
 			line_offsets[i-1] = pos
 			pos += lines[i].length + newline.length
 		}
+	}
+
+	function lines_changed(changes) {
+
+		compute_line_offsets(lines, line_offsets)
 
 		// init line_colors arrays.
-		line_colors = []
+		line_colors.length = lines.length
 		for (let i = 0, n = lines.length; i < n; i++)
 			line_colors[i] = []
 
@@ -550,21 +597,21 @@ function code_edit_view(id, opt) {
 		last_vline2 = -1
 
 		if (changes) {
+			text = null
 			let changeset = Lezer.ChangeSet.of(changes)
 			let fragments = Lezer.TreeFragment.addTree(syntax_tree)
 			fragments = Lezer.TreeFragment.applyChanges(fragments, changeset)
-			let doc = Lezer.Text.of(lines)
-			syntax_tree = Lezer.parsers.html.parse(text, null, fragments)
+			syntax_tree = Lezer.parsers.html.parse(lines_input, null, fragments)
 		} else {
 			text = lines.join(newline)
-			parse_text()
+			syntax_tree = Lezer.parsers.html.parse(text)
 		}
+		build_colors()
 	}
 
-	function parse_text() {
+	function build_colors() {
 		for (let a of line_colors)
 			a.length = 0
-		syntax_tree = Lezer.parsers.html.parse(text)
 		let c = syntax_tree.cursor()
 		do {
 			// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
@@ -619,13 +666,13 @@ function code_edit_view(id, opt) {
 		a[sidebar_i+SIDEBAR_VLINE2] = vline2
 
 		if (last_vline1 != vline1 || last_vline2 != vline2) {
-			vlines.length = 0
-			vcolors.length = 0
+			vlines .length = vline2 - vline1 + 1
+			vcolors.length = vline2 - vline1 + 1
 			for (let line = vline1; line <= vline2; line++) {
 				let s = lines[line]
 				let c = assert(line_colors[line])
-				vlines.push(s)
-				vcolors.push(c)
+				vlines [line - vline1] = s
+				vcolors[line - vline1] = c
 			}
 			last_vline1 = vline1
 			last_vline2 = vline2
