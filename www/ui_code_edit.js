@@ -70,33 +70,33 @@ ui.fg_style('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
 
 let node_colors = {
 // HTML
-	StartTag:              'keyword',
-	EndTag:                'keyword',
-	StartCloseTag:         'keyword',
-	TagName:               'keyword', // shared with CSS tag selector
-	AttributeName:         'text',
-	AttributeValue:        'string',
-	UnquotedAttributeValue:'string',
-	Comment:               'comment',
-	DoctypeDecl:           'keyword',
-	Is:                    'symbol',
+	StartTag:        'keyword',
+	EndTag:          'keyword',
+	StartCloseTag:   'keyword',
+	TagName:         'keyword', // shared with CSS tag selector
+	AttributeName:   'text',
+	AttributeValue:  'string',
+	UnquotedAttributeValue: 'string',
+	Comment:         'comment',
+	DoctypeDecl:     'keyword',
+	Is:              'symbol',
 // CSS
-	UniversalSelector:     'keyword',
-	'#':                   'symbol',
-	'::':                  'symbol',
-	':':                   'symbol', // shared with JS
-	TypeSelector:          'keyword',
-	AttributeSelector:     'keyword', // TODO: followed by TagSelector, TagName etc.
-	MatchOp:               'symbol', // = from [a=b] from AttributeSelector
-	PseudoClassName:       'string',
-	Atrule:                'keyword', // @media
-	AtruleName:            'keyword',
-	MediaFeature:          'keyword',
-	//PropertyName:          'symbol', // shared with JS
-	Important:             'keyword',
-	ValueName:             'symbol',
-	NumberLiteral:         'number',
-	Unit:                  'symbol',
+	UniversalSelector: 'keyword',
+	'#':             'symbol',
+	'::':            'symbol',
+	':':             'symbol', // shared with JS
+	TypeSelector:    'keyword',
+	AttributeSelector: 'keyword', // TODO: followed by TagSelector, TagName etc.
+	MatchOp:         'symbol', // = from [a=b] from AttributeSelector
+	PseudoClassName: 'string',
+	Atrule:          'keyword', // @media
+	AtruleName:      'keyword',
+	MediaFeature:    'keyword',
+	//PropertyName:    'symbol', // shared with JS
+	Important:       'keyword',
+	ValueName:       'symbol',
+	NumberLiteral:   'number',
+	Unit:            'symbol',
 // JS
 	String:          'string',
 	Number:          'number',
@@ -516,13 +516,6 @@ function code_edit_view(id, opt) {
 		}
 	}
 
-	lz_parser.html = lz_parser.html.configure({
-		wrap: lz_parseMixed(node => {
-			if (node.name == 'ScriptText') return { parser: lz_parser.js }
-			if (node.name == 'StyleText') return { parser: lz_parser.css }
-		})
-	})
-
 	function text_changed() {
 		newline = detect_line_terminator(text) ?? '\n'
 		// remove whitespace at EOL and normalize line terminators.
@@ -534,7 +527,7 @@ function code_edit_view(id, opt) {
 		lines_changed()
 	}
 
-	function lines_changed() {
+	function lines_changed(changes) {
 
 		// compute line offsets, starting with the 2nd line!
 		line_offsets = []
@@ -556,14 +549,22 @@ function code_edit_view(id, opt) {
 		last_vline1 = -1
 		last_vline2 = -1
 
-		parse_text()
+		if (changes) {
+			let changeset = Lezer.ChangeSet.of(changes)
+			let fragments = Lezer.TreeFragment.addTree(syntax_tree)
+			fragments = Lezer.TreeFragment.applyChanges(fragments, changeset)
+			let doc = Lezer.Text.of(lines)
+			syntax_tree = Lezer.parsers.html.parse(text, null, fragments)
+		} else {
+			text = lines.join(newline)
+			parse_text()
+		}
 	}
 
 	function parse_text() {
 		for (let a of line_colors)
 			a.length = 0
-		text = lines.join(newline)
-		syntax_tree = lz_parser.html.parse(text)
+		syntax_tree = Lezer.parsers.html.parse(text)
 		let c = syntax_tree.cursor()
 		do {
 			// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
@@ -789,15 +790,20 @@ function code_edit_view(id, opt) {
 					pr('REPLACE')
 				} else if (key == 'enter') {
 					let line_s = lines[cursor.line]
+					let pos = cursor_pos(cursor)
 					let s1 = line_s.substring(0, cursor.char)
 					let s2 = line_s.substring(cursor.char)
 					lines[cursor.line] = s1
 					insert(lines, cursor.line + 1, s2)
-					lines_changed()
 					cursor.line++
 					cursor.char = 0
 					reset_selection(cursor)
 					cursor_set_want_col(cursor)
+					lines_changed([{
+						from: pos,
+						to: pos + newline.length,
+						insert: newline,
+					}])
 				} else if (key == 'backspace') {
 					if (cursor.char > 0) {
 						//
