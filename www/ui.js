@@ -1181,7 +1181,7 @@ function get_full_key(key) {
 }
 
 function control_keys(set) {
-	return [set.has('control'), set.has('alt'), set.has('shift')]
+	return [key_state.has('control'), key_state.has('alt'), key_state.has('shift')]
 }
 
 canvas.addEventListener('keydown', function(ev) {
@@ -1195,7 +1195,7 @@ canvas.addEventListener('keydown', function(ev) {
 		key_downs.add(full_key)
 	if (key == 'control')
 		key_downs.add('ctrl')
-	ui.key_events.push(['down', key, ...control_keys(key_downs)])
+	ui.key_events.push(['down', key, ...control_keys()])
 	key_state.add(key)
 	animate()
 })
@@ -1211,7 +1211,7 @@ canvas.addEventListener('keyup', function(ev) {
 		key_ups.add(full_key)
 	if (key == 'control')
 		key_ups.add('ctrl')
-	ui.key_events.push(['up', key, ...control_keys(key_ups)])
+	ui.key_events.push(['up', key, ...control_keys()])
 	key_state.delete(key)
 	animate()
 })
