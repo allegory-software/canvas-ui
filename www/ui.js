@@ -1156,7 +1156,7 @@ let key_downs = set()
 let key_ups   = set()
 let key_state = set()
 
-ui.key_events = []
+ui.key_events = [] // [['down'|'up', key], ...]
 
 let keydown_captured = map()
 let keyup_captured = map()
@@ -1180,8 +1180,13 @@ function get_full_key(key) {
 		: 'only ') + key
 }
 
+function control_keys(set) {
+	return [set.has('control'), set.has('alt'), set.has('shift')]
+}
+
 canvas.addEventListener('keydown', function(ev) {
 	let key = ev.key.toLowerCase()
+	if (key == 'Dead') key = '`'
 	let full_key = get_full_key(key)
 	if (key == 'tab' || (ui.focused_id && full_key && keydown_captured.get(full_key) == ui.focused_id))
 		ev.preventDefault()
@@ -1190,13 +1195,14 @@ canvas.addEventListener('keydown', function(ev) {
 		key_downs.add(full_key)
 	if (key == 'control')
 		key_downs.add('ctrl')
-	ui.key_events.push(['down', key])
+	ui.key_events.push(['down', key, ...control_keys(key_downs)])
 	key_state.add(key)
 	animate()
 })
 
 canvas.addEventListener('keyup', function(ev) {
 	let key = ev.key.toLowerCase()
+	if (key == 'Dead') key = '`'
 	let full_key = get_full_key(key)
 	if (key == 'tab' || (ui.focused_id && full_key && keyup_captured.get(full_key) == ui.focused_id))
 		ev.preventDefault()
@@ -1205,7 +1211,7 @@ canvas.addEventListener('keyup', function(ev) {
 		key_ups.add(full_key)
 	if (key == 'control')
 		key_ups.add('ctrl')
-	ui.key_events.push(['up', key])
+	ui.key_events.push(['up', key, ...control_keys(key_ups)])
 	key_state.delete(key)
 	animate()
 })
