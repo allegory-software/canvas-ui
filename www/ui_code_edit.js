@@ -667,12 +667,14 @@ function code_edit_view(id, opt) {
 
 		font_size = ui.get_font_size()
 		line_h = round(font_size * 1.5)
-		let font0 = cx.font
-		cx.font = font_size+'px mono'
-		let m = ui.measure_text(cx, 'm')
-		cx.font = font0
-		char_w = m.width
-		font_descent = m.fontBoundingBoxDescent
+		{
+			let font0 = cx.font
+			cx.font = font_size+'px mono'
+			let m = ui.measure_text(cx, 'm')
+			cx.font = font0
+			char_w = m.width
+			font_descent = m.fontBoundingBoxDescent
+		}
 		let sidebar_w = (lines.length+'').length * char_w
 		let text_w = ceil(max_line_len * char_w)
 		let text_h = lines.length * line_h
@@ -691,128 +693,138 @@ function code_edit_view(id, opt) {
 		let lines_n = 0
 		let chars_n = 0
 		let scroll_lines = 0
-		let shift = ui.key('shift')
-		let ctrl  = ui.key('control')
-		let focused = ui.focused(id)
-		if (focused) {
+		if (ui.focused(id)) {
 
 			ui.capture_keydown(id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
 
-			// NOTE: some key combos are captured by browser, namely:
-			// ctrl+pgup/dn, ctrl(+shift)+tab
-			if      (ui.keydown('arrowup'   ) && !ctrl) lines_n = -1
-			else if (ui.keydown('arrowdown' ) && !ctrl) lines_n =  1
-			else if (ui.keydown('pageup'    )) lines_n = -(last_vline2 - last_vline1)
-			else if (ui.keydown('pagedown'  )) lines_n =  (last_vline2 - last_vline1)
-			else if (ui.keydown('home'      ) && ctrl) lines_n = -1/0
-			else if (ui.keydown('end'       ) && ctrl) lines_n =  1/0
-			else if (ui.keydown('arrowleft' )) chars_n = -1
-			else if (ui.keydown('arrowright')) chars_n =  1
-			else if (ui.keydown('ctrl arrowup'  )) scroll_lines = -1
-			else if (ui.keydown('ctrl arrowdown')) scroll_lines =  1
+			for (let [event, key, ctrl, alt, shift] of ui.key_events) {
+				if (event != 'down')
+					continue
 
-		}
-		if (chars_n || lines_n) {
-			if (chars_n < 0) {
-				if (cursor.char > 0) {
-					if (ctrl) {
-						cursor_move_to_prev_token(cursor)
-					} else {
-						cursor.char--
-						cursor_set_want_col(cursor)
+				// NOTE: some key combos are captured by browser, namely:
+				// ctrl+pgup/dn, ctrl(+shift)+tab
+				if      (key == 'arrowup'    && !ctrl) lines_n = -1
+				else if (key == 'arrowdown'  && !ctrl) lines_n =  1
+				else if (key == 'pageup'             ) lines_n = -(last_vline2 - last_vline1)
+				else if (key == 'pagedown'           ) lines_n =  (last_vline2 - last_vline1)
+				else if (key == 'home'       &&  ctrl) lines_n = -1/0
+				else if (key == 'end'        &&  ctrl) lines_n =  1/0
+				else if (key == 'arrowleft'          ) chars_n = -1
+				else if (key == 'arrowright'         ) chars_n =  1
+				else if (key == 'arrowup'    &&  ctrl) scroll_lines = -1
+				else if (key == 'arrowdown'  &&  ctrl) scroll_lines =  1
+
+				if (chars_n || lines_n) {
+					if (chars_n < 0) {
+						if (cursor.char > 0) {
+							if (ctrl) {
+								cursor_move_to_prev_token(cursor)
+							} else {
+								cursor.char--
+								cursor_set_want_col(cursor)
+							}
+						} else if (cursor.line) {
+							cursor.line--
+							let line_s = lines[cursor.line]
+							cursor.char = line_s.length
+							cursor_set_want_col(cursor)
+						}
+					} else if (chars_n > 0) {
+						if (cursor.char < lines[cursor.line].length) {
+							if (ctrl) {
+								cursor_move_to_next_token(cursor)
+							} else {
+								cursor.char++
+								cursor_set_want_col(cursor)
+							}
+						} else if (cursor.line < lines.length) {
+							cursor.line++
+							cursor.char = 0
+							cursor_set_want_col(cursor)
+						}
+					} else if (lines_n < 0) {
+						if (cursor.line) {
+							cursor.line = max(cursor.line + lines_n, 0)
+							cursor_move_to_want_col(cursor)
+						} else {
+							cursor.char = 0
+						}
+					} else if (lines_n > 0) {
+						if (cursor.line < lines.length-1) {
+							cursor.line = min(cursor.line + lines_n, lines.length-1)
+							cursor_move_to_want_col(cursor)
+						} else {
+							cursor.char = lines[cursor.line].length
+						}
 					}
-				} else if (cursor.line) {
-					cursor.line--
-					let line_s = lines[cursor.line]
-					cursor.char = line_s.length
+					if (!shift)
+						reset_selection(cursor)
+					ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
+				} else if (scroll_lines) {
+					let ss = ui.state(id+'.text_scrollbox')
+					// TODO: scroll_y is allowed to get out of range!
+					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
+				} else if (ctrl && key == 'a') {
+					cursor.line = 0
+					cursor.char = 0
+					cursor.sel_line = lines.length-1
+					cursor.sel_char = lines[cursor.sel_line].length
 					cursor_set_want_col(cursor)
-				}
-			} else if (chars_n > 0) {
-				if (cursor.char < lines[cursor.line].length) {
-					if (ctrl) {
-						cursor_move_to_next_token(cursor)
-					} else {
-						cursor.char++
-						cursor_set_want_col(cursor)
-					}
-				} else if (cursor.line < lines.length) {
+				} else if (ctrl && key == 'c') {
+					let sel_text = selected_text(cursor)
+					navigator.clipboard.writeText(sel_text)
+				} else if (ctrl && key == 'v') {
+					// TODO: paste
+				} else if (ctrl && key == 'x') {
+					let sel_text = selected_text(cursor)
+					navigator.clipboard.writeText(sel_text)
+					// TODO: cut it
+				} else if (ctrl && key == 'f') {
+					// TODO: find
+					pr('FIND')
+				} else if (ctrl && key == 'h') {
+					// TODO: replace
+					pr('REPLACE')
+				} else if (key == 'enter') {
+					let line_s = lines[cursor.line]
+					let s1 = line_s.substring(0, cursor.char)
+					let s2 = line_s.substring(cursor.char)
+					lines[cursor.line] = s1
+					insert(lines, cursor.line + 1, s2)
+					lines_changed()
 					cursor.line++
 					cursor.char = 0
+					reset_selection(cursor)
+					cursor_set_want_col(cursor)
+				} else if (key == 'backspace') {
+					if (cursor.char > 0) {
+						//
+					} else if (cursor.line > 0) {
+						let line1_s = lines[cursor.line-1]
+						let line2_s = lines[cursor.line]
+						lines[cursor.line-1] = line1_s + line2_s
+						remove(lines, cursor.line)
+						lines_changed()
+						cursor.line--
+						cursor.char = line1_s.length
+						reset_selection(cursor)
+						cursor_set_want_col(cursor)
+					}
+				} else if (key == 'del') {
+					pr('DEL')
+				} else if (key.length == 1) { // typing
+					let s = lines[cursor.line]
+					s = s.slice(0, cursor.char) + key + s.slice(cursor.char)
+					pr(s)
+					lines[cursor.line] = s
+					cursor.char++
+					reset_selection(cursor)
 					cursor_set_want_col(cursor)
 				}
-			} else if (lines_n < 0) {
-				if (cursor.line) {
-					cursor.line = max(cursor.line + lines_n, 0)
-					cursor_move_to_want_col(cursor)
-				} else {
-					cursor.char = 0
-				}
-			} else if (lines_n > 0) {
-				if (cursor.line < lines.length-1) {
-					cursor.line = min(cursor.line + lines_n, lines.length-1)
-					cursor_move_to_want_col(cursor)
-				} else {
-					cursor.char = lines[cursor.line].length
-				}
 			}
-			if (!shift)
-				reset_selection(cursor)
-			ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
-		} else if (scroll_lines) {
-			let ss = ui.state(id+'.text_scrollbox')
-			// TODO: scroll_y is allowed to get out of range!
-			ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
-		} else if (focused && ui.keydown('ctrl a')) {
-			cursor.line = 0
-			cursor.char = 0
-			cursor.sel_line = lines.length-1
-			cursor.sel_char = lines[cursor.sel_line].length
-			cursor_set_want_col(cursor)
-		} else if (focused && ui.keydown('ctrl c')) {
-			let sel_text = selected_text(cursor)
-			navigator.clipboard.writeText(sel_text)
-		} else if (focused && ui.keydown('ctrl v')) {
-			// TODO: paste
-		} else if (focused && ui.keydown('ctrl x')) {
-			let sel_text = selected_text(cursor)
-			navigator.clipboard.writeText(sel_text)
-			// TODO: cut it
-		} else if (focused && ui.keydown('ctrl f')) {
-			// TODO: find
-			pr('FIND')
-		} else if (focused && ui.keydown('ctrl h')) {
-			// TODO: replace
-			pr('REPLACE')
-		} else if (focused && ui.keydown('enter')) {
-			let line_s = lines[cursor.line]
-			let s1 = line_s.substring(0, cursor.char)
-			let s2 = line_s.substring(cursor.char)
-			lines[cursor.line] = s1
-			insert(lines, cursor.line + 1, s2)
-			lines_changed()
-			cursor.line++
-			cursor.char = 0
-			reset_selection(cursor)
-			cursor_set_want_col(cursor)
-		} else if (focused && ui.keydown('backspace')) {
-			if (cursor.char > 0) {
-				//
-			} else if (cursor.line > 0) {
-				let line1_s = lines[cursor.line-1]
-				let line2_s = lines[cursor.line]
-				lines[cursor.line-1] = line1_s + line2_s
-				remove(lines, cursor.line)
-				lines_changed()
-				cursor.line--
-				cursor.char = line1_s.length
-				reset_selection(cursor)
-				cursor_set_want_col(cursor)
-			}
-		} else if (focused && ui.keydown('del')) {
-			pr('DEL')
-		}
+		} // for ui.key_events
 
 		// build editor
 
