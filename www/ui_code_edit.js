@@ -391,8 +391,7 @@ function code_edit_view(id, opt) {
 
 	let e = {}
 
-	// text and text-derived state.
-	let text = opt.code
+	// lines and text-derived state.
 	let newline // as detected from text or user override
 	let tab_width = 3 // user setting
 	let lines // [line1, ...]
@@ -419,15 +418,17 @@ function code_edit_view(id, opt) {
 	let hit_char
 
 	// cursors state.
-	let cursors = [{line: 0, char: 0, want_col: 0, select_line: 0, select_char: 0}]
+	let cursor = {line: 0, char: 0, want_col: 0, select_line: 0, select_char: 0}
+	let cursors = [cursor]
+
+	// cursor and selection ---------------------------------------------------
+
+	function text_length() {
+		return line_offsets.last + lines.last.length
+	}
 
 	function line_offset(line) {
 		return line ? line_offsets[line-1] : 0
-	}
-
-	function text_length() {
-		assert(false)
-		return line_offsets.last + lines.last.length
 	}
 
 	function find_line(pos) {
@@ -454,6 +455,20 @@ function code_edit_view(id, opt) {
 
 	function cursor_pos(cursor) {
 		return line_offset(cursor.line) + cursor.char
+	}
+
+	function cursor_in_indent(cursor) {
+		let s = lines[cursor.line]
+		for (let i = 0, n = cursor.char; i < n; i++) {
+			let c = s.charCodeAt(i)
+			if (c != 9 && c != 32)
+				return false
+		}
+		return true
+	}
+
+	function cursor_has_selection(cursor) {
+		return cursor.line != cursor.sel_line || cursor.char != cursor.sel_char
 	}
 
 	function cursor_set_want_col(cursor) {
@@ -526,7 +541,9 @@ function code_edit_view(id, opt) {
 		}
 	}
 
-	function text_changed() {
+	// update text ------------------------------------------------------------
+
+	function set_text(text) {
 		newline = detect_line_terminator(text) ?? '\n'
 		// remove whitespace at EOL and normalize line terminators.
 		text.replace(/[ \t]*(?:\r\n|\r|\n)/g, newline)
@@ -534,7 +551,85 @@ function code_edit_view(id, opt) {
 		text.replace(new RegExp(`(${newline})+\\z`), newline)
 		// split by newline.
 		lines = text.split(newline)
+		compute_line_offsets()
 		lines_changed()
+	}
+
+	// compute line offsets, starting with the 2nd line!
+	function compute_line_offsets() {
+		line_offsets.length = lines.length-1
+		let pos = lines[0].length + 1
+		for (let i = 1, n = lines.length; i < n; i++) {
+			line_offsets[i-1] = pos
+			pos += lines[i].length + newline.length
+		}
+	}
+
+	function insert_line(i, s) {
+		insert(lines, i, s)
+		insert(line_colors, i, [])
+		compute_line_offsets()
+	}
+
+	function remove_line(i) {
+		remove(lines, i)
+		remove(line_colors, i)
+		compute_line_offsets()
+	}
+
+	function remove_char_at(cursor) {
+		let s = lines[cursor.line]
+		let pos = cursor_pos(cursor)
+		if (cursor.char < s.length) {
+			lines[cursor.line] = s.slice(0, cursor.char) + s.slice(cursor.char + 1)
+		} else if (cursor.line < lines.length-1) {
+			s += lines[cursor.line + 1]
+			lines[cursor.line] = s
+			remove_line(cursor.line + 1)
+		}
+		reset_selection(cursor)
+		cursor_set_want_col(cursor)
+		lines_changed([{
+			from: pos,
+			to: pos + 1,
+		}])
+	}
+
+	function remove_selection(cursor) {
+		//
+	}
+
+	function insert_char_at(cursor, c) {
+		let pos = cursor_pos(cursor)
+		let s = lines[cursor.line]
+		s = s.slice(0, cursor.char) + c + s.slice(cursor.char)
+		lines[cursor.line] = s
+		cursor.char++
+		reset_selection(cursor)
+		cursor_set_want_col(cursor)
+		lines_changed([{
+			from: pos,
+			to: pos,
+			insert: c,
+		}])
+	}
+
+	function insert_line_at(cursor) {
+		let pos = cursor_pos(cursor)
+		let s = lines[cursor.line]
+		let s1 = s.substring(0, cursor.char)
+		let s2 = s.substring(cursor.char)
+		lines[cursor.line] = s1
+		insert_line(cursor.line + 1, s2)
+		cursor.line++
+		cursor.char = 0
+		reset_selection(cursor)
+		cursor_set_want_col(cursor)
+		lines_changed([{
+			from: pos,
+			to: pos,
+			insert: newline,
+		}])
 	}
 
 	let LinesInput = class {
@@ -547,7 +642,6 @@ function code_edit_view(id, opt) {
 			return s
 		}
 		read(from, to) {
-			assert(false)
 			let line1 = find_line(from)
 			let line2 = find_line(to)
 			let char1 = find_char(line1, from)
@@ -564,25 +658,12 @@ function code_edit_view(id, opt) {
 			return false
 		}
 		get length() {
-			assert(false)
 			return text_length()
 		}
 	}
 	let lines_input = new LinesInput()
 
-	// compute line offsets, starting with the 2nd line!
-	function compute_line_offsets(lines, line_offsets) {
-		line_offsets.length = lines.length-1
-		let pos = lines[0].length + 1
-		for (let i = 1, n = lines.length; i < n; i++) {
-			line_offsets[i-1] = pos
-			pos += lines[i].length + newline.length
-		}
-	}
-
 	function lines_changed(changes) {
-
-		compute_line_offsets(lines, line_offsets)
 
 		// init line_colors arrays.
 		line_colors.length = lines.length
@@ -597,14 +678,16 @@ function code_edit_view(id, opt) {
 		last_vline2 = -1
 
 		if (changes) {
-			text = null
 			let changeset = Lezer.ChangeSet.of(changes)
+			let change_ranges = []
+			changeset.iterChanges(function(fromA, toA, fromB, toB) {
+				change_ranges.push({fromA, toA, fromB, toB})
+			})
 			let fragments = Lezer.TreeFragment.addTree(syntax_tree)
-			fragments = Lezer.TreeFragment.applyChanges(fragments, changeset)
-			syntax_tree = Lezer.parsers.html.parse(lines_input, null, fragments)
+			fragments = Lezer.TreeFragment.applyChanges(fragments, change_ranges)
+			syntax_tree = Lezer.parsers.html.parse(lines_input, fragments)
 		} else {
-			text = lines.join(newline)
-			syntax_tree = Lezer.parsers.html.parse(text)
+			syntax_tree = Lezer.parsers.html.parse(lines_input)
 		}
 		build_colors()
 	}
@@ -688,7 +771,6 @@ function code_edit_view(id, opt) {
 			let hit_col = floor((ui.mx - x + char_w / 2) / char_w)
 			hit_char = col_to_char(hit_col, line_s, tab_width)
 			hit_char = clamp(hit_char, 0, line_s.length)
-			let cursor = cursors[0]
 			let shift = ui.key('shift') // TODO: use to change selection end
 			if (drag_state != 'hover') {
 				cursor.line = hit_line
@@ -726,8 +808,6 @@ function code_edit_view(id, opt) {
 		let sidebar_w = (lines.length+'').length * char_w
 		let text_w = ceil(max_line_len * char_w)
 		let text_h = lines.length * line_h
-
-		let cursor = cursors[0]
 
 		// process mouse input (more processing is done in the frame callback
 		// when we know the view x,y.
@@ -787,7 +867,7 @@ function code_edit_view(id, opt) {
 								cursor.char++
 								cursor_set_want_col(cursor)
 							}
-						} else if (cursor.line < lines.length) {
+						} else if (cursor.line < lines.length-1) {
 							cursor.line++
 							cursor.char = 0
 							cursor_set_want_col(cursor)
@@ -824,10 +904,12 @@ function code_edit_view(id, opt) {
 					let sel_text = selected_text(cursor)
 					navigator.clipboard.writeText(sel_text)
 				} else if (ctrl && key == 'v') {
+					remove_selection(cursor)
 					// TODO: paste
 				} else if (ctrl && key == 'x') {
 					let sel_text = selected_text(cursor)
 					navigator.clipboard.writeText(sel_text)
+					remove_selection(cursor)
 					// TODO: cut it
 				} else if (ctrl && key == 'f') {
 					// TODO: find
@@ -836,45 +918,27 @@ function code_edit_view(id, opt) {
 					// TODO: replace
 					pr('REPLACE')
 				} else if (key == 'enter') {
-					let line_s = lines[cursor.line]
-					let pos = cursor_pos(cursor)
-					let s1 = line_s.substring(0, cursor.char)
-					let s2 = line_s.substring(cursor.char)
-					lines[cursor.line] = s1
-					insert(lines, cursor.line + 1, s2)
-					cursor.line++
-					cursor.char = 0
-					reset_selection(cursor)
-					cursor_set_want_col(cursor)
-					lines_changed([{
-						from: pos,
-						to: pos + newline.length,
-						insert: newline,
-					}])
+					insert_line_at(cursor)
 				} else if (key == 'backspace') {
-					if (cursor.char > 0) {
-						//
-					} else if (cursor.line > 0) {
-						let line1_s = lines[cursor.line-1]
-						let line2_s = lines[cursor.line]
-						lines[cursor.line-1] = line1_s + line2_s
-						remove(lines, cursor.line)
-						lines_changed()
+					if (cursor_has_selection(cursor))
+						remove_selection(cursor)
+					else if (cursor.char) {
+						cursor.char--
+						remove_char_at(cursor)
+					} else if (cursor.line) {
 						cursor.line--
-						cursor.char = line1_s.length
-						reset_selection(cursor)
-						cursor_set_want_col(cursor)
+						cursor.char = lines[cursor.line].length
+						remove_char_at(cursor)
 					}
-				} else if (key == 'del') {
-					pr('DEL')
+				} else if (key == 'delete') {
+					if (cursor_has_selection(cursor))
+						remove_selection(cursor)
+					else
+						remove_char_at(cursor)
+				} else if (key == 'tab') {
+					insert_char_at(cursor, cursor_in_indent(cursor) ? '\t' : ' ')
 				} else if (key.length == 1) { // typing
-					let s = lines[cursor.line]
-					s = s.slice(0, cursor.char) + key + s.slice(cursor.char)
-					pr(s)
-					lines[cursor.line] = s
-					cursor.char++
-					reset_selection(cursor)
-					cursor_set_want_col(cursor)
+					insert_char_at(cursor, key)
 				}
 			}
 		} // for ui.key_events
@@ -909,7 +973,7 @@ function code_edit_view(id, opt) {
 
 	e.free = function() {}
 
-	text_changed()
+	set_text(opt.code)
 
 	return e
 }
