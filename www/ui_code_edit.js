@@ -551,6 +551,10 @@ function code_edit_view(id, opt) {
 		text.replace(new RegExp(`(${newline})+\\z`), newline)
 		// split by newline.
 		lines = text.split(newline)
+		// init line_colors arrays.
+		line_colors.length = lines.length
+		for (let i = 0, n = lines.length; i < n; i++)
+			line_colors[i] = []
 		compute_line_offsets()
 		lines_changed()
 	}
@@ -568,13 +572,11 @@ function code_edit_view(id, opt) {
 	function insert_line(i, s) {
 		insert(lines, i, s)
 		insert(line_colors, i, [])
-		compute_line_offsets()
 	}
 
 	function remove_line(i) {
 		remove(lines, i)
 		remove(line_colors, i)
-		compute_line_offsets()
 	}
 
 	function remove_char_at(cursor) {
@@ -589,10 +591,7 @@ function code_edit_view(id, opt) {
 		}
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
-		lines_changed([{
-			from: pos,
-			to: pos + 1,
-		}])
+		lines_changed(pos, pos + 1)
 	}
 
 	function remove_selection(cursor) {
@@ -607,11 +606,7 @@ function code_edit_view(id, opt) {
 		cursor.char++
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
-		lines_changed([{
-			from: pos,
-			to: pos,
-			insert: c,
-		}])
+		lines_changed(pos, pos, c)
 	}
 
 	function insert_line_at(cursor) {
@@ -625,11 +620,7 @@ function code_edit_view(id, opt) {
 		cursor.char = 0
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
-		lines_changed([{
-			from: pos,
-			to: pos,
-			insert: newline,
-		}])
+		lines_changed(pos, pos, newline)
 	}
 
 	let LinesInput = class {
@@ -663,22 +654,19 @@ function code_edit_view(id, opt) {
 	}
 	let lines_input = new LinesInput()
 
-	function lines_changed(changes) {
-
-		// init line_colors arrays.
-		line_colors.length = lines.length
-		for (let i = 0, n = lines.length; i < n; i++)
-			line_colors[i] = []
+	function lines_changed(from, to, insert_s) {
+		last_vline1 = -1
+		last_vline2 = -1
 
 		max_line_len = 0
 		for (let s of lines)
 			max_line_len = max(max_line_len, s.length)
 
-		last_vline1 = -1
-		last_vline2 = -1
+		compute_line_offsets()
 
-		if (changes) {
-			let changeset = Lezer.ChangeSet.of(changes)
+		// let lines_input = lines.join(newline)
+		if (from != null) {
+			let changeset = Lezer.ChangeSet.of([{from: from, to: to, insert: insert_s}])
 			let change_ranges = []
 			changeset.iterChanges(function(fromA, toA, fromB, toB) {
 				change_ranges.push({fromA, toA, fromB, toB})
@@ -696,6 +684,7 @@ function code_edit_view(id, opt) {
 		for (let a of line_colors)
 			a.length = 0
 		let c = syntax_tree.cursor()
+		let text = lines.join(newline)
 		do {
 			// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
 			if (c.name == 'VariableName')
