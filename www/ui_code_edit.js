@@ -3,14 +3,12 @@
 	Canvas IMGUI code editor widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	* TODO: typing, deleting, cut/copy/paste, indent/outdent
 	* TODO: undo/redo
+	* TODO: load, save, tabs
 	* TODO: search, replace
-	* TODO: syntax highlighting color map
 	* TODO: block selection
 	* TODO: bookmarks
 	* TODO: remote cursors
-	* TODO: open: browse, load, tabs
 	* TODO: save
 	* TODO: sessions
 
@@ -20,10 +18,12 @@ DESIGN TRADEOFFS
 		=> codepoint == grapheme
 		=> constant grapheme width
 	- tabs are used only for indentation and are not valid inside the line.
-	it's the only way to have user-defined tab-width make sense.
+		=> it's the only way to have user-defined tab-width that makes sense.
 		=> tabs are not aligned to tabstops.
 		=> inner tabs (those after the first non-space char) take 1 space.
 		=> when typing or pasting, inner tabs are converted to 1 space.
+	- no mixed line terminators in the same file.
+		=> line terminator is detected and text is normalized to that or '\n'.
 	- no line folding.
 
 IMPL. TERMINOLOGY
@@ -35,7 +35,8 @@ IMPL. TERMINOLOGY
 
 IMPL. NOTES
 
-- tab-based indent requires char <-> col conversion everywhere.
+- tab-based indent requires char <-> col conversion on rendering, hit-testing
+  and vertical navigation.
 - cursor.char can go at line_s.length so 1 char beyond the last char in line.
 - selected text is between cursor{.line|.char} and cursor{.sel_line|.sel_char-1}
   (note the -1) or viceversa, the caret being at cursor{.line|.char} always.
@@ -453,8 +454,8 @@ function code_edit_view(id, opt) {
 		]
 	}
 
-	function cursor_pos(cursor) {
-		return line_offset(cursor.line) + cursor.char
+	function cursor_pos(line, char) {
+		return line_offset(line) + char
 	}
 
 	function cursor_in_indent(cursor) {
@@ -543,19 +544,35 @@ function code_edit_view(id, opt) {
 
 	// update text ------------------------------------------------------------
 
-	function set_text(text) {
-		newline = detect_line_terminator(text) ?? '\n'
-		// remove whitespace at EOL and normalize line terminators.
-		text.replace(/[ \t]*(?:\r\n|\r|\n)/g, newline)
-		// collapse multiple empty lines at EOF to a single line.
-		text.replace(new RegExp(`(${newline})+\\z`), newline)
-		// split by newline.
-		lines = text.split(newline)
+	let newline_re = /(?:\r\n|\r|\n)/g
+	function normalize_newlines(s) {
+		return s.replace(newline_re, newline)
+	}
+
+	function text_lines(s) {
+		return s.split(newline)
+	}
+
+	function normalize_lines() {
+		// remove whitespace at EOL.
+		for (let i = 0, n = lines.length; i < n; i++)
+			lines[i] = lines[i].trimEnd()
+		// remove additional empty lines at EOF.
+		while (lines.length > 1 && !lines[lines.length-1].length && !lines[length-2].length)
+			lines.pop()
+		// insert a single empty line at EOF.
+		if (lines[lines.length-1].length)
+			lines.push('')
+	}
+
+	function set_text(s) {
+		newline = detect_line_terminator(s) ?? '\n'
+		s = normalize_newlines(s)
+		lines = text_lines(s)
 		// init line_colors arrays.
 		line_colors.length = lines.length
 		for (let i = 0, n = lines.length; i < n; i++)
 			line_colors[i] = []
-		compute_line_offsets()
 		lines_changed()
 	}
 
@@ -569,25 +586,32 @@ function code_edit_view(id, opt) {
 		}
 	}
 
-	function insert_line(i, s) {
-		insert(lines, i, s)
-		insert(line_colors, i, [])
+	function insert_line(line, s) {
+		insert(lines, line, s)
+		insert(line_colors, line, [])
 	}
 
-	function remove_line(i) {
-		remove(lines, i)
-		remove(line_colors, i)
+	function insert_lines(line1, n) {
+		insert_n(lines      , line1, n)
+		insert_n(line_colors, line1, n)
+		for (let i = 0; i < n; i++)
+			line_colors[line1 + i] = []
+	}
+
+	function remove_lines(line1, n) {
+		lines.splice(line1, n)
+		line_colors.splice(line1, n)
 	}
 
 	function remove_char_at(cursor) {
 		let s = lines[cursor.line]
-		let pos = cursor_pos(cursor)
+		let pos = cursor_pos(cursor.line, cursor.char)
 		if (cursor.char < s.length) {
 			lines[cursor.line] = s.slice(0, cursor.char) + s.slice(cursor.char + 1)
 		} else if (cursor.line < lines.length-1) {
 			s += lines[cursor.line + 1]
 			lines[cursor.line] = s
-			remove_line(cursor.line + 1)
+			remove_lines(cursor.line + 1, 1)
 		}
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
@@ -595,11 +619,32 @@ function code_edit_view(id, opt) {
 	}
 
 	function remove_selection(cursor) {
-		//
+		let sline1 = min(cursor.sel_line, cursor.line)
+		let sline2 = max(cursor.sel_line, cursor.line)
+		let schar1, schar2
+		let pos1, pos2
+		if (sline1 == sline2) {
+			schar1 = min(cursor.char, cursor.sel_char)
+			schar2 = max(cursor.char, cursor.sel_char)
+			pos1 = cursor_pos(sline1, schar1)
+			pos2 = cursor_pos(sline2, schar2)
+		} else {
+			schar1 = sline1 == cursor.line ? cursor.char : cursor.sel_char
+			schar2 = sline2 == cursor.line ? cursor.char : cursor.sel_char
+			pos1 = cursor_pos(sline1, schar1)
+			pos2 = cursor_pos(sline2, schar2)
+		}
+		lines[sline1] = lines[sline1].slice(0, schar1) + lines[sline2].slice(schar2)
+		remove_lines(sline1 + 1, sline2 - sline1)
+		cursor.line = sline1
+		cursor.char = schar1
+		reset_selection(cursor)
+		cursor_set_want_col(cursor)
+		lines_changed(pos1, pos2)
 	}
 
 	function insert_char_at(cursor, c) {
-		let pos = cursor_pos(cursor)
+		let pos = cursor_pos(cursor.line, cursor.char)
 		let s = lines[cursor.line]
 		s = s.slice(0, cursor.char) + c + s.slice(cursor.char)
 		lines[cursor.line] = s
@@ -610,7 +655,7 @@ function code_edit_view(id, opt) {
 	}
 
 	function insert_line_at(cursor) {
-		let pos = cursor_pos(cursor)
+		let pos = cursor_pos(cursor.line, cursor.char)
 		let s = lines[cursor.line]
 		let s1 = s.substring(0, cursor.char)
 		let s2 = s.substring(cursor.char)
@@ -621,6 +666,62 @@ function code_edit_view(id, opt) {
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
 		lines_changed(pos, pos, newline)
+	}
+
+	function insert_text_at(cursor, s) {
+		// split line at cursor
+		let line_s = lines[cursor.line]
+		let s1 = line_s.slice(0, cursor.char)
+		let s2 = line_s.slice(cursor.char)
+		// normalize line terminators before splitting so that text passed
+		// to lines_changes() below matches the text in the lines.
+		s = normalize_newlines(s)
+		// split insert text into lines
+		let ins_lines = text_lines(s)
+		// prepend s1 to the first insert line.
+		ins_lines[0] = s1 + ins_lines[0]
+		// append s2 to the last insert line.
+		let new_cursor_char = ins_lines.last.length
+		ins_lines[ins_lines.length-1] += s2
+		// make room for new lines (first line is fused at cursor).
+		insert_lines(cursor.line + 1, ins_lines.length - 1)
+		// set the new lines (first and last is overwritten).
+		for (let i = 0, n = ins_lines.length; i < n; i++)
+			lines[cursor.line + i] = ins_lines[i]
+		// update editor state.
+		let pos1 = cursor_pos(cursor.line, cursor.char)
+		cursor.line += ins_lines.length - 1
+		cursor.char = new_cursor_char
+		reset_selection(cursor)
+		cursor_set_want_col(cursor)
+		lines_changed(pos1, pos1, s)
+	}
+
+	function indent_selection(cursor) {
+		let line1 = min(cursor.line, cursor.sel_line)
+		let line2 = max(cursor.line, cursor.sel_line)
+		for (let i = line1; i <= line2; i++)
+			lines[i] = '\t' + lines[i]
+		cursor.char     ++
+		cursor.sel_char ++
+		cursor_set_want_col(cursor)
+		lines_changed()
+	}
+
+	function outdent_selection(cursor) {
+		let line1 = min(cursor.line, cursor.sel_line)
+		let line2 = max(cursor.line, cursor.sel_line)
+		for (let i = line1; i <= line2; i++) {
+			let s1 = lines[i]
+			let s2 = s1.replace(/^\t/, '')
+			lines[i] = s2
+			if (cursor.line == i)
+				cursor.char -= s1.length - s2.length
+			if (cursor.sel_line == i)
+				cursor.sel_char -= s1.length - s2.length
+		}
+		cursor_set_want_col(cursor)
+		lines_changed()
 	}
 
 	let LinesInput = class {
@@ -666,11 +767,12 @@ function code_edit_view(id, opt) {
 
 		// let lines_input = lines.join(newline)
 		if (from != null) {
-			let changeset = Lezer.ChangeSet.of([{from: from, to: to, insert: insert_s}])
-			let change_ranges = []
-			changeset.iterChanges(function(fromA, toA, fromB, toB) {
-				change_ranges.push({fromA, toA, fromB, toB})
-			})
+			let change_ranges = [{
+				fromA: from,
+				toA: to,
+				fromB: from,
+				toB: from + (insert_s?.length ?? 0),
+			}]
 			let fragments = Lezer.TreeFragment.addTree(syntax_tree)
 			fragments = Lezer.TreeFragment.applyChanges(fragments, change_ranges)
 			syntax_tree = Lezer.parsers.html.parse(lines_input, fragments)
@@ -892,15 +994,14 @@ function code_edit_view(id, opt) {
 				} else if (ctrl && key == 'c') {
 					let sel_text = selected_text(cursor)
 					navigator.clipboard.writeText(sel_text)
-				} else if (ctrl && key == 'v') {
-					remove_selection(cursor)
-					// TODO: paste
 				} else if (ctrl && key == 'x') {
 					let sel_text = selected_text(cursor)
 					navigator.clipboard.writeText(sel_text)
 					remove_selection(cursor)
-					// TODO: cut it
-				} else if (ctrl && key == 'f') {
+				} else if (key == 'paste') {
+					remove_selection(cursor)
+					insert_text_at(cursor, ui.clipboard_text)
+			} else if (ctrl && key == 'f') {
 					// TODO: find
 					pr('FIND')
 				} else if (ctrl && key == 'h') {
@@ -924,9 +1025,14 @@ function code_edit_view(id, opt) {
 						remove_selection(cursor)
 					else
 						remove_char_at(cursor)
-				} else if (key == 'tab') {
-					insert_char_at(cursor, cursor_in_indent(cursor) ? '\t' : ' ')
-				} else if (key.length == 1) { // typing
+				} else if (!ctrl && !alt && key == 'tab') {
+					if (shift)
+						outdent_selection(cursor)
+					else if (cursor_has_selection(cursor))
+						indent_selection(cursor)
+					else
+						insert_char_at(cursor, cursor_in_indent(cursor) ? '\t' : ' ')
+				} else if (!ctrl && !alt && key.length == 1) { // typing
 					insert_char_at(cursor, key)
 				}
 			}
@@ -953,7 +1059,7 @@ function code_edit_view(id, opt) {
 						lines.length, line_h, font_size, font_descent)
 				ui.end_stack()
 				ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll')
-					ui.frame(noop, on_text_frame, 0, 'l', 't', text_w, text_h)
+					ui.frame(noop, on_text_frame, 1, 's', 's', text_w, text_h)
 				ui.end_scrollbox()
 			ui.end_h()
 		ui.end_v()

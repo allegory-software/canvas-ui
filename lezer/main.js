@@ -1,5 +1,5 @@
 import {parseMixed, Tree, TreeFragment} from "@lezer/common";
-import {ChangeSet, Text} from "@codemirror/state";
+import {Text} from "@codemirror/state";
 import {parser as htmlParser} from "@lezer/html";
 import {parser as jsParser} from "@lezer/javascript";
 import {parser as cssParser} from "@lezer/css";
@@ -10,7 +10,6 @@ import {parser as luaParser} from "./lezer-lua/lua-parser.js";
 window.Lezer = {
 	Tree,
 	TreeFragment,
-	ChangeSet,
 	Text,
 	parsers: {
 		js:  jsParser,
