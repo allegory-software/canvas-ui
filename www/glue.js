@@ -122,6 +122,8 @@ ARRAYS
 	extend(a, a1) -> a
 	insert(a, i, v) -> a
 	remove(a, i) -> v
+	insert_n(a, i, n)
+	remove_n(a, i, n)
 	remove_value(a, v) -> i
 	replace_value(a, v0, v1) -> i
 	remove_values(a, cond) -> a; cond(v, i, a, j) -> remove_it
@@ -757,6 +759,23 @@ function remove(a, i) {
 	return a.splice(i, 1)[0]
 }
 
+function insert_n(a, i0, n) {
+	if (n <= 0) return
+	let len_before = a.length
+	a.length += n
+	for (let i = len_before - 1; i >= i0; i--)
+		a[i + n] = a[i]
+}
+
+function remove_n(a, i0, n) {
+	if (n <= 0) return
+	let len = a.length
+	n = min(n, len - i0)
+	for (let i = i0 + n; i < len; i++)
+		a[i - n] = a[i]
+	a.length = len - n
+}
+
 function remove_value(a, v) {
 	let i = a.indexOf(v)
 	if (i != -1)
@@ -789,6 +808,7 @@ function remove_values(a, cond) {
 // move the n elements at i1 to a new position which is an index in the
 // array as it stands after the removal of the elements to be moved,
 // or, if using `before` flag, before the removal of the elements to be moved.
+// TODO: splice is limited to 64K args!
 function array_move(a, i1, n, insert_i, before) {
 	if (before && insert_i > i1)
 		insert_i--
@@ -2440,7 +2460,7 @@ callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
 subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
 array, empty_array, range, extend, array_set,
-insert, remove, remove_value, replace_value, remove_values, array_move, array_equals,
+insert, insert_n, remove, remove_n, remove_value, replace_value, remove_values, array_move, array_equals,
 binsearch, uniq_sorted, group_sorted, remove_duplicates,
 map, map_first_key, gen_id, map_assign,
 set, set_addset, set_set, set_toarray, set_equals, empty_set,
@@ -2533,6 +2553,8 @@ method(Array.prototype, 'extend           ', m(extend                  ))
 method(Array.prototype, 'set              ', m(array_set               ))
 method(Array.prototype, 'insert           ', m(insert                  ))
 method(Array.prototype, 'remove           ', m(remove                  ))
+method(Array.prototype, 'insert_n         ', m(insert_n                ))
+method(Array.prototype, 'remove_n         ', m(remove_n                ))
 method(Array.prototype, 'remove_value     ', m(remove_value            ))
 method(Array.prototype, 'remove_values    ', m(remove_values           ))
 method(Array.prototype, 'move             ', m(array_move              ))
