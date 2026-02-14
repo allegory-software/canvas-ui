@@ -422,6 +422,10 @@ function code_edit_view(id, opt) {
 	let cursor = {line: 0, char: 0, want_col: 0, select_line: 0, select_char: 0}
 	let cursors = [cursor]
 
+	// undo state.
+	let undo_stack = []
+	let redo_stack = []
+
 	// cursor and selection ---------------------------------------------------
 
 	function text_length() {
@@ -458,6 +462,7 @@ function code_edit_view(id, opt) {
 		return line_offset(line) + char
 	}
 
+	// TODO: unused
 	function cursor_in_indent(cursor) {
 		let s = lines[cursor.line]
 		for (let i = 0, n = cursor.char; i < n; i++) {
@@ -542,7 +547,7 @@ function code_edit_view(id, opt) {
 		}
 	}
 
-	// update text ------------------------------------------------------------
+	// text updating ----------------------------------------------------------
 
 	let newline_re = /(?:\r\n|\r|\n)/g
 	function normalize_newlines(s) {
@@ -565,7 +570,7 @@ function code_edit_view(id, opt) {
 			lines.push('')
 	}
 
-	function set_text(s) {
+	function reset_text(s) {
 		newline = detect_line_terminator(s) ?? '\n'
 		s = normalize_newlines(s)
 		lines = text_lines(s)
@@ -574,6 +579,8 @@ function code_edit_view(id, opt) {
 		for (let i = 0, n = lines.length; i < n; i++)
 			line_colors[i] = []
 		lines_changed()
+		undo_stack.length = 0
+		redo_stack.length = 0
 	}
 
 	// compute line offsets, starting with the 2nd line!
@@ -584,11 +591,6 @@ function code_edit_view(id, opt) {
 			line_offsets[i-1] = pos
 			pos += lines[i].length + newline.length
 		}
-	}
-
-	function insert_line(line, s) {
-		insert(lines, line, s)
-		insert(line_colors, line, [])
 	}
 
 	function insert_lines(line1, n) {
@@ -603,6 +605,8 @@ function code_edit_view(id, opt) {
 		line_colors.splice(line1, n)
 	}
 
+	// text update ops --------------------------------------------------------
+
 	function remove_char_at(cursor) {
 		let s = lines[cursor.line]
 		let pos = cursor_pos(cursor.line, cursor.char)
@@ -613,9 +617,22 @@ function code_edit_view(id, opt) {
 			lines[cursor.line] = s
 			remove_lines(cursor.line + 1, 1)
 		}
+
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
 		lines_changed(pos, pos + 1)
+		undo_push('insert_char_at', cursor.char)
+	}
+
+	function remove_char_before(cursor) {
+		if (cursor.char) {
+			cursor.char--
+			remove_char_at(cursor)
+		} else if (cursor.line) {
+			cursor.line--
+			cursor.char = lines[cursor.line].length
+			remove_char_at(cursor)
+		}
 	}
 
 	function remove_selection(cursor) {
@@ -636,8 +653,10 @@ function code_edit_view(id, opt) {
 		}
 		lines[sline1] = lines[sline1].slice(0, schar1) + lines[sline2].slice(schar2)
 		remove_lines(sline1 + 1, sline2 - sline1)
+
 		cursor.line = sline1
 		cursor.char = schar1
+
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
 		lines_changed(pos1, pos2)
@@ -648,7 +667,9 @@ function code_edit_view(id, opt) {
 		let s = lines[cursor.line]
 		s = s.slice(0, cursor.char) + c + s.slice(cursor.char)
 		lines[cursor.line] = s
+
 		cursor.char++
+
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
 		lines_changed(pos, pos, c)
@@ -660,9 +681,12 @@ function code_edit_view(id, opt) {
 		let s1 = s.substring(0, cursor.char)
 		let s2 = s.substring(cursor.char)
 		lines[cursor.line] = s1
-		insert_line(cursor.line + 1, s2)
+		insert_lines(cursor.line + 1, 1)
+		lines[cursor.line + 1] = s2
+
 		cursor.line++
 		cursor.char = 0
+
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
 		lines_changed(pos, pos, newline)
@@ -692,6 +716,7 @@ function code_edit_view(id, opt) {
 		let pos1 = cursor_pos(cursor.line, cursor.char)
 		cursor.line += ins_lines.length - 1
 		cursor.char = new_cursor_char
+
 		reset_selection(cursor)
 		cursor_set_want_col(cursor)
 		lines_changed(pos1, pos1, s)
@@ -704,6 +729,7 @@ function code_edit_view(id, opt) {
 			lines[i] = '\t' + lines[i]
 		cursor.char     ++
 		cursor.sel_char ++
+
 		cursor_set_want_col(cursor)
 		lines_changed()
 	}
@@ -720,9 +746,24 @@ function code_edit_view(id, opt) {
 			if (cursor.sel_line == i)
 				cursor.sel_char -= s1.length - s2.length
 		}
+
 		cursor_set_want_col(cursor)
 		lines_changed()
 	}
+
+	function undo_start() {
+
+	}
+
+	function undo_end() {
+
+	}
+
+	function undo_push() {
+
+	}
+
+	// syntax highlighting updating -------------------------------------------
 
 	let LinesInput = class {
 		chunk(pos) {
@@ -819,6 +860,7 @@ function code_edit_view(id, opt) {
 		} while (c.next())
 	}
 
+	// UI ---------------------------------------------------------------------
 
 	let sidebar_i
 
@@ -918,9 +960,11 @@ function code_edit_view(id, opt) {
 			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
 
-			for (let [event, key, ctrl, alt, shift] of ui.key_events) {
+			for (let [event, key, full_key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
 					continue
+
+				undo_start()
 
 				// NOTE: some key combos are captured by browser, namely:
 				// ctrl+pgup/dn, ctrl(+shift)+tab
@@ -1001,7 +1045,7 @@ function code_edit_view(id, opt) {
 				} else if (key == 'paste') {
 					remove_selection(cursor)
 					insert_text_at(cursor, ui.clipboard_text)
-			} else if (ctrl && key == 'f') {
+				} else if (ctrl && key == 'f') {
 					// TODO: find
 					pr('FIND')
 				} else if (ctrl && key == 'h') {
@@ -1012,14 +1056,8 @@ function code_edit_view(id, opt) {
 				} else if (key == 'backspace') {
 					if (cursor_has_selection(cursor))
 						remove_selection(cursor)
-					else if (cursor.char) {
-						cursor.char--
-						remove_char_at(cursor)
-					} else if (cursor.line) {
-						cursor.line--
-						cursor.char = lines[cursor.line].length
-						remove_char_at(cursor)
-					}
+					else
+						remove_char_before(cursor)
 				} else if (key == 'delete') {
 					if (cursor_has_selection(cursor))
 						remove_selection(cursor)
@@ -1028,14 +1066,13 @@ function code_edit_view(id, opt) {
 				} else if (!ctrl && !alt && key == 'tab') {
 					if (shift)
 						outdent_selection(cursor)
-					else if (cursor_has_selection(cursor))
-						indent_selection(cursor)
 					else
-						insert_char_at(cursor, cursor_in_indent(cursor) ? '\t' : ' ')
-				} else if (!ctrl && !alt && key.length == 1) { // typing
-					insert_char_at(cursor, key)
+						indent_selection(cursor)
+				} else if (key_char) { // typing
+					insert_char_at(cursor, key_char)
 				}
 			}
+			undo_end()
 		} // for ui.key_events
 
 		// build editor
@@ -1068,7 +1105,7 @@ function code_edit_view(id, opt) {
 
 	e.free = function() {}
 
-	set_text(opt.code)
+	reset_text(opt.code)
 
 	return e
 }
