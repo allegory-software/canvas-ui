@@ -1169,50 +1169,46 @@ ui.capture_keyup = function(id, key) {
 	keyup_captured.set(key, id)
 }
 
-function get_full_key(key) {
-	let ctrl  = key_state.has('control')
-	let alt   = key_state.has('alt')
-	let shift = key_state.has('shift')
-	if (key == 'control' || key =='alt' || key == 'shift')
-		return
-	return (ctrl || alt || shift
+function process_key(ev, ev_name, key) {
+	let char = key
+	key = key.toLowerCase()
+	let ctrl  = key_state.has('control') && key != 'control'
+	let alt   = key_state.has('alt'    ) && key != 'alt'
+	let shift = key_state.has('shift'  ) && key != 'shift'
+	char = char.length == 1 && !ctrl && !alt ? char : null
+	let prefix = ctrl || alt || shift
 		? (ctrl?'ctrl ':'')+(alt?'alt ':'')+(shift?'shift ':'')
-		: 'only ') + key
-}
-
-function control_keys(set) {
-	return [key_state.has('control'), key_state.has('alt'), key_state.has('shift')]
-}
-
-canvas.addEventListener('keydown', function(ev) {
-	let key = ev.key.toLowerCase()
-	if (key == 'Dead') key = '`'
-	let full_key = get_full_key(key)
-	if (key == 'tab' || (ui.focused_id && full_key && keydown_captured.get(full_key) == ui.focused_id))
-		ev.preventDefault()
-	key_downs.add(key)
-	if (full_key)
-		key_downs.add(full_key)
+		: 'only '
+	let full_key = prefix + key
+	let key_set = ev_name == 'down' ? key_downs : key_ups
+	key_set.add(key)
+	key_set.add(full_key)
 	if (key == 'control')
-		key_downs.add('ctrl')
-	ui.key_events.push(['down', key, ...control_keys()])
-	key_state.add(key)
+		key_set.add('ctrl')
+	ui.key_events.push([ev_name, key, full_key, char, ctrl, alt, shift])
+	if (ev_name == 'down')
+		key_state.add(key)
+	else
+		key_state.delete(key)
+	if (key == 'tab' || (ui.focused_id && keyup_captured.get(full_key) == ui.focused_id)) {
+		// this allows us to supress some (but not all) browser key events.
+		if (ev)
+			ev.preventDefault()
+	}
 	animate()
+}
+canvas.addEventListener('keydown', function(ev) {
+	process_key(ev, 'down', ev.key)
+})
+canvas.addEventListener('keyup', function(ev) {
+	process_key(ev, 'up', ev.key)
 })
 
-canvas.addEventListener('keyup', function(ev) {
-	let key = ev.key.toLowerCase()
-	if (key == 'Dead') key = '`'
-	let full_key = get_full_key(key)
-	if (key == 'tab' || (ui.focused_id && full_key && keyup_captured.get(full_key) == ui.focused_id))
-		ev.preventDefault()
-	key_ups.add(key)
-	if (full_key)
-		key_ups.add(full_key)
-	if (key == 'control')
-		key_ups.add('ctrl')
-	ui.key_events.push(['up', key, ...control_keys()])
-	key_state.delete(key)
+document.addEventListener('paste', async function(e) {
+	// getting the clipboard contents and setting keydown of pseudo-key 'paste'.
+	ui.clipboard_text = await navigator.clipboard.readText()
+	process_key(null, 'down', 'paste')
+	key_state.delete('paste') // because nobody is there to depress this key.
 	animate()
 })
 
