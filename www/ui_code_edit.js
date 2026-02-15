@@ -3,6 +3,7 @@
 	Canvas IMGUI code editor widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
+	* TODO: lines_changed() must move cursors.
 	* TODO: undo/redo
 	* TODO: load, save, tabs
 	* TODO: search, replace
@@ -158,7 +159,7 @@ function col_to_char(on_j, s, tab_width) {
 	on_j = max(0, on_j)
 	let i = 0 // char index
 	let j = 0 // col index
-	let n = s.length-1
+	let n = s.length
 	let in_indent = true
 	while (i < n) {
 		let c = s.charCodeAt(i++)
@@ -170,7 +171,7 @@ function col_to_char(on_j, s, tab_width) {
 		if (on_j >= j0 && on_j <= j) // on_j is somewhere between j0 and j
 			return i + (on_j - j0 < j - on_j ? -1 : 0)
 	}
-	return n + 1
+	return n
 }
 
 function detect_line_terminator(s) {
@@ -419,14 +420,24 @@ function code_edit_view(id, opt) {
 	let hit_char
 
 	// cursors state.
-	let cursor = {line: 0, char: 0, want_col: 0, select_line: 0, select_char: 0}
-	let cursors = [cursor]
+	let cursors = [] // dragging cursor always at cursors[0].
 
 	// undo state.
 	let undo_stack = []
 	let redo_stack = []
+	let undoing
 
-	// cursor and selection ---------------------------------------------------
+	// pos -> line ------------------------------------------------------------
+
+	// compute line offsets, starting with the 2nd line!
+	function compute_line_offsets() {
+		line_offsets.length = lines.length-1
+		let pos = lines[0].length + 1
+		for (let i = 1, n = lines.length; i < n; i++) {
+			line_offsets[i-1] = pos
+			pos += lines[i].length + newline.length
+		}
+	}
 
 	function text_length() {
 		return line_offsets.last + lines.last.length
@@ -447,6 +458,8 @@ function code_edit_view(id, opt) {
 		let line_pos = line_offset(line)
 		return pos - line_offset
 	}
+
+	// char <-> col -----------------------------------------------------------
 
 	function cursor_rect(cursor) {
 		let line_s = lines[cursor.line]
@@ -473,19 +486,17 @@ function code_edit_view(id, opt) {
 		return true
 	}
 
-	function cursor_has_selection(cursor) {
-		return cursor.line != cursor.sel_line || cursor.char != cursor.sel_char
+	function cursor_want_col(cursor) {
+		let line_s = lines[cursor.line]
+		return char_to_col(cursor.char, line_s, tab_width)
 	}
 
-	function cursor_set_want_col(cursor) {
+	function cursor_want_col_char(cursor) {
 		let line_s = lines[cursor.line]
-		cursor.want_col = char_to_col(cursor.char, line_s, tab_width)
+		return col_to_char(cursor.want_col, line_s, tab_width)
 	}
 
-	function cursor_move_to_want_col(cursor) {
-		let line_s = lines[cursor.line]
-		cursor.char = col_to_char(cursor.want_col, line_s, tab_width)
-	}
+	// word jump --------------------------------------------------------------
 
 	function is_word_char(cp) {
 		if (cp >= 48 && cp <= 57) return true // 0–9
@@ -494,28 +505,30 @@ function code_edit_view(id, opt) {
 		return cp == 95 || cp == 36 // '_' or '$'
 	}
 
-	function cursor_move_to_next_token(cursor) {
+	function next_token(cursor) {
 		let i = cursor.char
 		let s = lines[cursor.line]
 		let n = s.length
 		while (i < n &&  is_word_char(s.charCodeAt(i))) i++ // goto end of current word
 		while (i < n && !is_word_char(s.charCodeAt(i))) i++ // skip non-words
-		cursor.char = i
-		cursor_set_want_col(cursor)
+		return i
 	}
 
-	function cursor_move_to_prev_token(cursor) {
+	function prev_token(cursor) {
 		let i = cursor.char
 		let s = lines[cursor.line]
 		while (i && !is_word_char(s.charCodeAt(i-1))) i-- // skip non-words
 		while (i &&  is_word_char(s.charCodeAt(i-1))) i-- // goto beginning of current word
-		cursor.char = i
-		cursor_set_want_col(cursor)
+		return i
 	}
 
-	function reset_selection(cursor) {
-		cursor.sel_line = cursor.line
-		cursor.sel_char = cursor.char
+	// selection --------------------------------------------------------------
+
+	function cursor_has_selection(cursor) {
+		return (
+			cursor.line != cursor.sel_line ||
+			cursor.char != cursor.sel_char
+		)
 	}
 
 	function selected_text(cursor) {
@@ -547,7 +560,7 @@ function code_edit_view(id, opt) {
 		}
 	}
 
-	// text updating ----------------------------------------------------------
+	// text & lines helpers ---------------------------------------------------
 
 	let newline_re = /(?:\r\n|\r|\n)/g
 	function normalize_newlines(s) {
@@ -566,31 +579,8 @@ function code_edit_view(id, opt) {
 		while (lines.length > 1 && !lines[lines.length-1].length && !lines[length-2].length)
 			lines.pop()
 		// insert a single empty line at EOF.
-		if (lines[lines.length-1].length)
+		if (lines.last.length)
 			lines.push('')
-	}
-
-	function reset_text(s) {
-		newline = detect_line_terminator(s) ?? '\n'
-		s = normalize_newlines(s)
-		lines = text_lines(s)
-		// init line_colors arrays.
-		line_colors.length = lines.length
-		for (let i = 0, n = lines.length; i < n; i++)
-			line_colors[i] = []
-		lines_changed()
-		undo_stack.length = 0
-		redo_stack.length = 0
-	}
-
-	// compute line offsets, starting with the 2nd line!
-	function compute_line_offsets() {
-		line_offsets.length = lines.length-1
-		let pos = lines[0].length + 1
-		for (let i = 1, n = lines.length; i < n; i++) {
-			line_offsets[i-1] = pos
-			pos += lines[i].length + newline.length
-		}
 	}
 
 	function insert_lines(line1, n) {
@@ -605,37 +595,95 @@ function code_edit_view(id, opt) {
 		line_colors.splice(line1, n)
 	}
 
-	// text update ops --------------------------------------------------------
+	function reset_editor(s) {
+		newline = detect_line_terminator(s) ?? '\n'
+		s = normalize_newlines(s)
+		lines = text_lines(s)
+		// init line_colors arrays.
+		line_colors.length = lines.length
+		for (let i = 0, n = lines.length; i < n; i++)
+			line_colors[i] = []
+		lines_changed()
+		cursors.length = 0
+		create_cursor(0, 0)
+		undo_stack.length = 0
+		redo_stack.length = 0
+	}
 
-	function remove_char_at(cursor) {
-		let s = lines[cursor.line]
-		let pos = cursor_pos(cursor.line, cursor.char)
-		if (cursor.char < s.length) {
-			lines[cursor.line] = s.slice(0, cursor.char) + s.slice(cursor.char + 1)
-		} else if (cursor.line < lines.length-1) {
-			s += lines[cursor.line + 1]
-			lines[cursor.line] = s
-			remove_lines(cursor.line + 1, 1)
-		}
+	// undo-able ops ----------------------------------------------------------
 
-		reset_selection(cursor)
+	function cursor_set_want_col(cursor) {
+		cursor.want_col = cursor_want_col(cursor)
+	}
+
+	function reset_cursors() {
+		cursors.length = 1
+	}
+
+	function reset_selection(cursor) {
+		cursor.sel_line = cursor.line
+		cursor.sel_char = cursor.char
+	}
+
+	function create_cursor(line, char) {
+		let cursor = {line: line, char: char, sel_line: line, sel_char: char}
+		cursors.push(cursors[0])
+		cursors[0] = cursor
 		cursor_set_want_col(cursor)
-		lines_changed(pos, pos + 1)
-		undo_push('insert_char_at', cursor.char)
 	}
 
-	function remove_char_before(cursor) {
-		if (cursor.char) {
-			cursor.char--
-			remove_char_at(cursor)
-		} else if (cursor.line) {
-			cursor.line--
-			cursor.char = lines[cursor.line].length
-			remove_char_at(cursor)
+	function reset_cursor(cursor_i, cursor) {
+		cursors[cursor_i] = cursor
+	}
+
+	function set_cursor(cursor_i, line, char, keep_selection, keep_want_col, keep_cursors) {
+		let c = cursors[cursor_i]
+		c.line = line
+		c.char = char
+		if (!keep_want_col)
+			cursor_set_want_col(c)
+		if (!keep_selection)
+			reset_selection(c)
+		if (!keep_cursors) {
+			assert(cursor_i == 0)
+			reset_cursors()
 		}
+		ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(c))
 	}
 
-	function remove_selection(cursor) {
+	function insert_char_at(line, char, c) {
+		let pos = cursor_pos(line, char)
+		let s = lines[line]
+		s = s.slice(0, char) + c + s.slice(char)
+		lines[line] = s
+
+		push_undo(remove_char_at, line, char)
+
+		lines_changed(pos, pos, c)
+	}
+
+	function remove_char_at(line, char) {
+		let pos = cursor_pos(line, char)
+		let s = lines[line]
+		if (char < s.length) {
+			lines[line] = s.slice(0, char) + s.slice(char + 1)
+			push_undo(insert_char_at, line, char, s.slice(char, char + 1))
+		} else if (line < lines.length-1) {
+			lines[line] = s + lines[line + 1]
+			remove_lines(line + 1, 1)
+			push_undo(insert_line_at, line, char)
+		} else {
+			return
+		}
+
+		lines_changed(pos, pos + 1)
+	}
+
+	function remove_selection(cursor_i) {
+		let cursor = cursors[cursor_i]
+		if (!cursor_has_selection(cursor))
+			return
+		let sel_text = selected_text(cursor)
 		let sline1 = min(cursor.sel_line, cursor.line)
 		let sline2 = max(cursor.sel_line, cursor.line)
 		let schar1, schar2
@@ -654,41 +702,21 @@ function code_edit_view(id, opt) {
 		lines[sline1] = lines[sline1].slice(0, schar1) + lines[sline2].slice(schar2)
 		remove_lines(sline1 + 1, sline2 - sline1)
 
-		cursor.line = sline1
-		cursor.char = schar1
+		push_undo(insert_text_at, sline1, schar1, sel_text)
+		set_cursor(cursor_i, sline1, schar1)
 
-		reset_selection(cursor)
-		cursor_set_want_col(cursor)
 		lines_changed(pos1, pos2)
 	}
 
-	function insert_char_at(cursor, c) {
-		let pos = cursor_pos(cursor.line, cursor.char)
-		let s = lines[cursor.line]
-		s = s.slice(0, cursor.char) + c + s.slice(cursor.char)
-		lines[cursor.line] = s
+	function insert_line_at(line, char) {
+		let pos = cursor_pos(line, char)
+		let s = lines[line]
+		let s1 = s.substring(0, char)
+		let s2 = s.substring(char)
+		lines[line] = s1
+		insert_lines(line + 1, 1)
+		lines[line + 1] = s2
 
-		cursor.char++
-
-		reset_selection(cursor)
-		cursor_set_want_col(cursor)
-		lines_changed(pos, pos, c)
-	}
-
-	function insert_line_at(cursor) {
-		let pos = cursor_pos(cursor.line, cursor.char)
-		let s = lines[cursor.line]
-		let s1 = s.substring(0, cursor.char)
-		let s2 = s.substring(cursor.char)
-		lines[cursor.line] = s1
-		insert_lines(cursor.line + 1, 1)
-		lines[cursor.line + 1] = s2
-
-		cursor.line++
-		cursor.char = 0
-
-		reset_selection(cursor)
-		cursor_set_want_col(cursor)
 		lines_changed(pos, pos, newline)
 	}
 
@@ -717,8 +745,6 @@ function code_edit_view(id, opt) {
 		cursor.line += ins_lines.length - 1
 		cursor.char = new_cursor_char
 
-		reset_selection(cursor)
-		cursor_set_want_col(cursor)
 		lines_changed(pos1, pos1, s)
 	}
 
@@ -730,7 +756,6 @@ function code_edit_view(id, opt) {
 		cursor.char     ++
 		cursor.sel_char ++
 
-		cursor_set_want_col(cursor)
 		lines_changed()
 	}
 
@@ -747,20 +772,36 @@ function code_edit_view(id, opt) {
 				cursor.sel_char -= s1.length - s2.length
 		}
 
-		cursor_set_want_col(cursor)
 		lines_changed()
 	}
 
-	function undo_start() {
+	// undo/redo --------------------------------------------------------------
 
+	function push_undo(fn, ...args) {
+		undo_stack.push([fn, ...args])
 	}
 
-	function undo_end() {
-
+	function undo() {
+		undoing = true
+		let stack = undo_stack
+		undo_stack = redo_stack
+		while (1) {
+			let fn_args = stack.pop()
+			if (!fn_args)
+				return
+			let fn = fn_args.shift()
+			if (fn(...fn_args))
+				if (fn != fn_args[0])
+					break
+		}
+		undo_stack = stack
+		undoing = false
 	}
 
-	function undo_push() {
-
+	function redo() {
+		;[redo_stack, undo_stack] = [undo_stack, redo_stack]
+		undo()
+		;[redo_stack, undo_stack] = [undo_stack, redo_stack]
 	}
 
 	// syntax highlighting updating -------------------------------------------
@@ -775,6 +816,7 @@ function code_edit_view(id, opt) {
 			return s
 		}
 		read(from, to) {
+			// TODO: this is stupid
 			let line1 = find_line(from)
 			let line2 = find_line(to)
 			let char1 = find_char(line1, from)
@@ -785,7 +827,7 @@ function code_edit_view(id, opt) {
 				sel_line: line2,
 				sel_char: char2,
 			})
-			return Lezer.Text.fromString(s)
+			return Lezer.Text.of(s.split(newline))
 		}
 		get lineChunks() {
 			return false
@@ -805,6 +847,10 @@ function code_edit_view(id, opt) {
 			max_line_len = max(max_line_len, s.length)
 
 		compute_line_offsets()
+
+		// TODO: save this and make it retreivable somehow.
+		if (!undoing)
+			redo_stack.length = 0
 
 		// let lines_input = lines.join(newline)
 		if (from != null) {
@@ -905,12 +951,27 @@ function code_edit_view(id, opt) {
 			hit_char = col_to_char(hit_col, line_s, tab_width)
 			hit_char = clamp(hit_char, 0, line_s.length)
 			let shift = ui.key('shift') // TODO: use to change selection end
-			if (drag_state != 'hover') {
-				cursor.line = hit_line
-				cursor.char = hit_char
-				cursor.want_col = hit_col
-				if (drag_state == 'drag')
-					reset_selection(cursor)
+			let ctrl  = ui.key('ctrl' )
+			let found
+			if (drag_state == 'drag') {
+				if (ctrl) { // add/remove cursor
+					for (let cursor of cursors) {
+						if (hit_line == cursor.line && hit_char == cursor.char) {
+							if (cursors.length > 1)
+								remove_value(cursors, cursor)
+							found = true
+							break
+						}
+					}
+					if (!found)
+						create_cursor(hit_line, hit_char)
+				} else {
+					reset_cursors()
+				}
+			}
+			if (drag_state != 'hover' && !found) {
+				let keep_selection = drag_state != 'drag'
+				set_cursor(0, hit_line, hit_char, keep_selection, true, true)
 			}
 		}
 
@@ -960,11 +1021,9 @@ function code_edit_view(id, opt) {
 			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
 
-			for (let [event, key, full_key, key_char, ctrl, alt, shift] of ui.key_events) {
+			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
 					continue
-
-				undo_start()
 
 				// NOTE: some key combos are captured by browser, namely:
 				// ctrl+pgup/dn, ctrl(+shift)+tab
@@ -979,100 +1038,119 @@ function code_edit_view(id, opt) {
 				else if (key == 'arrowup'    &&  ctrl) scroll_lines = -1
 				else if (key == 'arrowdown'  &&  ctrl) scroll_lines =  1
 
-				if (chars_n || lines_n) {
-					if (chars_n < 0) {
+				if (scroll_lines) { // scrolling without moving the cursor
+					let ss = ui.state(id+'.text_scrollbox')
+					// TODO: scroll_y is allowed to get out of range!
+					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
+				}
+
+				let cursor_i = -1
+				for (let cursor of cursors) {
+					cursor_i++
+					if (chars_n < 0) { // navigation & selection
 						if (cursor.char > 0) {
 							if (ctrl) {
-								cursor_move_to_prev_token(cursor)
+								let new_char = prev_token(cursor)
+								set_cursor(cursor_i, cursor.line, new_char, shift)
 							} else {
-								cursor.char--
-								cursor_set_want_col(cursor)
+								set_cursor(cursor_i, cursor.line, cursor.char-1, shift)
 							}
 						} else if (cursor.line) {
-							cursor.line--
 							let line_s = lines[cursor.line]
-							cursor.char = line_s.length
-							cursor_set_want_col(cursor)
+							set_cursor(cursor_i, cursor.line-1, line_s.length, shift)
 						}
 					} else if (chars_n > 0) {
 						if (cursor.char < lines[cursor.line].length) {
 							if (ctrl) {
-								cursor_move_to_next_token(cursor)
+								set_cursor(cursor_i, cursor.line, new_char, shift)
 							} else {
-								cursor.char++
-								cursor_set_want_col(cursor)
+								set_cursor(cursor_i, cursor.line, cursor.char+1, shift)
 							}
 						} else if (cursor.line < lines.length-1) {
-							cursor.line++
-							cursor.char = 0
-							cursor_set_want_col(cursor)
+							set_cursor(cursor_i, cursor.line+1, 0, shift)
 						}
 					} else if (lines_n < 0) {
-						if (cursor.line) {
-							cursor.line = max(cursor.line + lines_n, 0)
-							cursor_move_to_want_col(cursor)
-						} else {
-							cursor.char = 0
-						}
+						if (alt)
+							create_cursor(cursor.line, cursor.char)
+						let new_line = max(cursor.line + lines_n, 0)
+						let new_char = cursor.line ? cursor_want_col_char(cursor) : 0
+						set_cursor(cursor_i, new_line, new_char, shift && !alt, true, alt)
+						if (alt)
+							break
 					} else if (lines_n > 0) {
-						if (cursor.line < lines.length-1) {
-							cursor.line = min(cursor.line + lines_n, lines.length-1)
-							cursor_move_to_want_col(cursor)
-						} else {
-							cursor.char = lines[cursor.line].length
+						if (alt)
+							create_cursor(cursor.line, cursor.char)
+						let new_line = min(cursor.line + lines_n, lines.length-1)
+						let new_char = cursor.line < lines.length-1
+							? cursor_want_col_char(cursor)
+							: lines[cursor.line].length
+						set_cursor(cursor_i, new_line, new_char, shift && !alt, true, alt)
+						if (alt)
+							break
+					} else if (full_key == 'ctrl a') {
+						reset_cursors()
+						set_cursor(cursor_i, 0, 0)
+						set_cursor_sel(cursor_i, lines.length-1, lines[cursor.sel_line].length)
+					} else if (key_char) { // typing, deleting, indent
+						remove_selection(cursor_i)
+						insert_char_at(cursor.line, cursor.char, key_char)
+						set_cursor(cursor_i, cursor.line, cursor.char+1, false, false, true)
+					} else if (key == 'enter') {
+						remove_selection(cursor_i)
+						insert_line_at(cursor.line, cursor.char)
+						set_cursor(cursor_i, cursor.line+1, 0)
+					} else if (key == 'backspace') {
+						if (cursor_has_selection(cursor)) {
+							remove_selection(cursor_i)
+							set_cursor(cursor_i, cursor.char, cursor.line)
+						} else if (cursor.char) {
+							set_cursor(cursor_i, cursor.line, cursor.char-1)
+							remove_char_at(cursor.line, cursor.char)
+							cursor_changed(cursor)
+						} else if (cursor.line) {
+							set_cursor(cursor_i, cursor.line-1, lines[cursor.line].length)
+							remove_char_at(cursor.line, cursor.char)
+							cursor_changed(cursor)
 						}
-					}
-					if (!shift)
-						reset_selection(cursor)
-					ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
-				} else if (scroll_lines) {
-					let ss = ui.state(id+'.text_scrollbox')
-					// TODO: scroll_y is allowed to get out of range!
-					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
-				} else if (ctrl && key == 'a') {
-					cursor.line = 0
-					cursor.char = 0
-					cursor.sel_line = lines.length-1
-					cursor.sel_char = lines[cursor.sel_line].length
-					cursor_set_want_col(cursor)
-				} else if (ctrl && key == 'c') {
-					let sel_text = selected_text(cursor)
-					navigator.clipboard.writeText(sel_text)
-				} else if (ctrl && key == 'x') {
-					let sel_text = selected_text(cursor)
-					navigator.clipboard.writeText(sel_text)
-					remove_selection(cursor)
-				} else if (key == 'paste') {
-					remove_selection(cursor)
-					insert_text_at(cursor, ui.clipboard_text)
-				} else if (ctrl && key == 'f') {
-					// TODO: find
-					pr('FIND')
-				} else if (ctrl && key == 'h') {
-					// TODO: replace
-					pr('REPLACE')
-				} else if (key == 'enter') {
-					insert_line_at(cursor)
-				} else if (key == 'backspace') {
-					if (cursor_has_selection(cursor))
-						remove_selection(cursor)
-					else
-						remove_char_before(cursor)
-				} else if (key == 'delete') {
-					if (cursor_has_selection(cursor))
-						remove_selection(cursor)
-					else
-						remove_char_at(cursor)
-				} else if (!ctrl && !alt && key == 'tab') {
-					if (shift)
-						outdent_selection(cursor)
-					else
+					} else if (key == 'delete') {
+						if (cursor_has_selection(cursor)) {
+							remove_selection(cursor_i)
+							cursor_changed(cursor)
+						} else {
+							remove_char_at(cursor.line, cursor.char)
+						}
+					} else if (full_key == 'tab') {
 						indent_selection(cursor)
-				} else if (key_char) { // typing
-					insert_char_at(cursor, key_char)
+						cursor_changed(cursor, true)
+					} else if (full_key == 'shift tab') {
+						outdent_selection(cursor)
+						cursor_changed(cursor, true)
+					} else if (full_key == 'ctrl c') { // cut, copy, paste
+						let sel_text = selected_text(cursor)
+						navigator.clipboard.writeText(sel_text)
+					} else if (full_key == 'ctrl x') {
+						let sel_text = selected_text(cursor)
+						navigator.clipboard.writeText(sel_text)
+						remove_selection(cursor_i)
+						cursor_changed(cursor)
+					} else if (key == 'paste') {
+						remove_selection(cursor_i)
+						insert_text_at(cursor, ui.clipboard_text)
+						cursor_changed(cursor)
+					} else if (full_key == 'ctrl z') { // undo, redo
+						undo()
+					} else if (full_key == 'ctrl shift z' || full_key == 'ctrl y') {
+						redo()
+					} else if (full_key == 'ctrl f') { // search, replace
+						// TODO: find
+						pr('FIND')
+					} else if (full_key == 'ctrl h') {
+						// TODO: replace
+						pr('REPLACE')
+					}
 				}
 			}
-			undo_end()
+
 		} // for ui.key_events
 
 		// build editor
@@ -1105,7 +1183,7 @@ function code_edit_view(id, opt) {
 
 	e.free = function() {}
 
-	reset_text(opt.code)
+	reset_editor(opt.code)
 
 	return e
 }
