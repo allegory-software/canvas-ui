@@ -104,7 +104,7 @@ KEYBOARD STATE
 	keydown         (key) -> t|f     check if a key was just pressed
 	keyup           (key) -> t|f     check if a key was just depressed
 	key             (key) -> t|f     check if a key is pressed
-	key_events      -> [['down'|'up', key], ...]
+	key_events      -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
 	capture_keys    ()    remove current keydown() and keyup() events
 
 LAYERS
@@ -1156,7 +1156,7 @@ let key_downs = set()
 let key_ups   = set()
 let key_state = set()
 
-ui.key_events = [] // [['down'|'up', key], ...]
+ui.key_events = [] // [key_event1, ...]
 
 let keydown_captured = map()
 let keyup_captured = map()
@@ -1172,28 +1172,29 @@ ui.capture_keyup = function(id, key) {
 function process_key(ev, ev_name, key) {
 	let char = key
 	key = key.toLowerCase()
-	let ctrl  = key_state.has('control') && key != 'control'
-	let alt   = key_state.has('alt'    ) && key != 'alt'
-	let shift = key_state.has('shift'  ) && key != 'shift'
+	if (key == 'control')
+		key = 'ctrl'
+	let ctrl  = key_state.has('ctrl' ) && key != 'ctrl'
+	let alt   = key_state.has('alt'  ) && key != 'alt'
+	let shift = key_state.has('shift') && key != 'shift'
 	char = char.length == 1 && !ctrl && !alt ? char : null
 	let prefix = ctrl || alt || shift
 		? (ctrl?'ctrl ':'')+(alt?'alt ':'')+(shift?'shift ':'')
-		: 'only '
+		: ''
 	let full_key = prefix + key
 	let key_set = ev_name == 'down' ? key_downs : key_ups
 	key_set.add(key)
 	key_set.add(full_key)
-	if (key == 'control')
-		key_set.add('ctrl')
-	ui.key_events.push([ev_name, key, full_key, char, ctrl, alt, shift])
+	ui.key_events.push([ev_name, full_key, key, char, ctrl, alt, shift])
 	if (ev_name == 'down')
 		key_state.add(key)
 	else
 		key_state.delete(key)
-	if (key == 'tab' || (ui.focused_id && keyup_captured.get(full_key) == ui.focused_id)) {
+	let captured_set = ev_name == 'down' ? keydown_captured : keyup_captured
+	if (ev && (key == 'tab'
+		|| (ui.focused_id && captured_set.get(full_key) == ui.focused_id))) {
 		// this allows us to supress some (but not all) browser key events.
-		if (ev)
-			ev.preventDefault()
+		ev.preventDefault()
 	}
 	animate()
 }
