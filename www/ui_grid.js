@@ -410,7 +410,7 @@ function init(id, e) {
 
 		focused = ui.focused(id)
 		shift = ui.key('shift')
-		ctrl  = ui.key('control')
+		ctrl  = ui.key('ctrl')
 
 		// check mouse state ---------------------------------------------------
 
