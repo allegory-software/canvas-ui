@@ -434,6 +434,7 @@ function code_edit_view(id, opt) {
 	// undo state.
 	let undo_stack = []
 	let redo_stack = []
+	let undo_group
 	let undoing
 
 	// pos -> (line, char) ----------------------------------------------------
@@ -449,7 +450,7 @@ function code_edit_view(id, opt) {
 	}
 
 	function text_length() {
-		return line_offsets.last + lines.last.length
+		return line_offsets.at(-1) + lines.at(-1).length
 	}
 
 	function line_offset(line) {
@@ -581,7 +582,7 @@ function code_edit_view(id, opt) {
 		while (lines.length > 1 && !lines[lines.length-1].length && !lines[length-2].length)
 			lines.pop()
 		// insert a single empty line at EOF.
-		if (lines.last.length)
+		if (lines.at(-1).length)
 			lines.push('')
 	}
 
@@ -610,30 +611,44 @@ function code_edit_view(id, opt) {
 				line_colors[i] = []
 		lines_changed()
 		cursors.length = 0
-		create_cursor(0, 0)
+		add_first_cursor(0, 0)
 		undo_stack.length = 0
 		redo_stack.length = 0
 	}
 
 	// undo-able ops ----------------------------------------------------------
 
-	function reset_cursors() {
-		cursors.length = 1
+	function remove_first_cursor() {
+		let c = cursors.shift()
+		push_undo(add_first_cursor, c.line, c.char)
 	}
-
-	function create_cursor(line, char) {
+	function add_first_cursor(line, char) {
 		let cursor = {line: line, char: char, sel_line: line, sel_char: char}
 		cursors.push(cursors[0])
 		cursors[0] = cursor
 		cursor.want_col = cursor_want_col(cursor)
+		if (cursors.length > 1)
+			push_undo(remove_first_cursor)
 	}
 
-	function reset_cursor(cursor_i, cursor) {
+	function add_extra_cursors(cursors) {
+		cursors.push(...cursors)
+		push_undo(remove_extra_cursors)
+	}
+	function remove_extra_cursors() {
+		if (cursors.length < 2)
+			return
+		push_undo(add_extra_cursors, cursors.map(c => assign({}, c)))
+		cursors.length = 1
+	}
+
+	function replace_cursor(cursor_i, cursor) {
+		push_undo(replace_cursor, cursor_i, assign({}, cursors[cursor_i]))
 		cursors[cursor_i] = cursor
 	}
-
-	function set_cursor(cursor_i, line, char, keep_selection, keep_want_col, keep_cursors) {
+	function set_cursor(cursor_i, line, char, keep_selection, keep_want_col) {
 		let cursor = cursors[cursor_i]
+		push_undo(replace_cursor, cursor_i, assign({}, cursor))
 		cursor.line = line
 		cursor.char = char
 		if (!keep_want_col)
@@ -644,10 +659,6 @@ function code_edit_view(id, opt) {
 		} else if (keep_selection == 'select_all') {
 			cursor.sel_line = lines.length-1
 			cursor.sel_char = lines[cursor.sel_line].length
-		}
-		if (!keep_cursors) {
-			assert(cursor_i == 0)
-			reset_cursors()
 		}
 		ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
 	}
@@ -663,21 +674,33 @@ function code_edit_view(id, opt) {
 		lines_changed(pos, pos, c)
 	}
 
+	function insert_line_at(line, char) {
+		let pos = pos_at(line, char)
+		let s = lines[line]
+		let s1 = s.substring(0, char)
+		let s2 = s.substring(char)
+		lines[line] = s1
+		insert_lines(line + 1, 1)
+		lines[line + 1] = s2
+
+		push_undo(remove_char_at, line, char)
+
+		lines_changed(pos, pos, newline)
+	}
+
 	function remove_char_at(line, char) {
 		let pos = pos_at(line, char)
 		let s = lines[line]
 		if (char < s.length) {
-			lines[line] = s.slice(0, char) + s.slice(char + 1)
 			push_undo(insert_char_at, line, char, s.slice(char, char + 1))
+			lines[line] = s.slice(0, char) + s.slice(char + 1)
+			lines_changed(pos, pos + 1)
 		} else if (line < lines.length-1) {
+			push_undo(insert_line_at, line, char)
 			lines[line] = s + lines[line + 1]
 			remove_lines(line + 1, 1)
-			push_undo(insert_line_at, line, char)
-		} else {
-			return
+			lines_changed(pos, pos + newline.length)
 		}
-
-		lines_changed(pos, pos + 1)
 	}
 
 	function remove_selection(cursor_i) {
@@ -709,18 +732,6 @@ function code_edit_view(id, opt) {
 		lines_changed(pos1, pos2)
 	}
 
-	function insert_line_at(line, char) {
-		let pos = pos_at(line, char)
-		let s = lines[line]
-		let s1 = s.substring(0, char)
-		let s2 = s.substring(char)
-		lines[line] = s1
-		insert_lines(line + 1, 1)
-		lines[line + 1] = s2
-
-		lines_changed(pos, pos, newline)
-	}
-
 	function insert_text_at(cursor, s) {
 		// split line at cursor
 		let line_s = lines[cursor.line]
@@ -734,7 +745,7 @@ function code_edit_view(id, opt) {
 		// prepend s1 to the first insert line.
 		ins_lines[0] = s1 + ins_lines[0]
 		// append s2 to the last insert line.
-		let new_cursor_char = ins_lines.last.length
+		let new_cursor_char = ins_lines.at(-1).length
 		ins_lines[ins_lines.length-1] += s2
 		// make room for new lines (first line is fused at cursor).
 		insert_lines(cursor.line + 1, ins_lines.length - 1)
@@ -780,22 +791,34 @@ function code_edit_view(id, opt) {
 	// undo/redo --------------------------------------------------------------
 
 	function push_undo(fn, ...args) {
-		undo_stack.push([fn, ...args])
+		if (undo_group == 'ignore')
+			return
+		if (!undoing)
+			pr('>', undo_group, fn.name)
+		assert(undo_group) // undoable ops must be done inside an undo_group.
+		undo_stack.push([undo_group, fn, ...args])
 	}
 
 	function undo() {
 		undoing = true
 		let stack = undo_stack
 		undo_stack = redo_stack
+		pr('!', stack.map(rec => rec[0]+'='+rec[1].name).join(','))
 		while (1) {
-			let fn_args = stack.pop()
-			if (!fn_args)
-				return
-			let fn = fn_args.shift()
-			if (fn(...fn_args))
-				if (fn != fn_args[0])
-					break
+			let rec = stack.pop()
+			if (!rec)
+				break
+			undo_group = rec.shift()
+			let fn     = rec.shift()
+			fn(...rec)
+			pr('<', undo_group, fn.name, cursors.length)
+			if (!stack.length)
+				break
+			let next_undo_group = stack.at(-1)[0]
+			if (next_undo_group != undo_group)
+				break
 		}
+		undo_group = null
 		undo_stack = stack
 		undoing = false
 	}
@@ -954,27 +977,33 @@ function code_edit_view(id, opt) {
 			hit_char = clamp(hit_char, 0, line_s.length)
 			let shift = ui.key('shift') // TODO: use to change selection end
 			let ctrl  = ui.key('ctrl' )
-			let found
-			if (drag_state == 'drag') {
-				if (ctrl) { // add/remove cursor
-					for (let cursor of cursors) {
-						if (hit_line == cursor.line && hit_char == cursor.char) {
-							if (cursors.length > 1)
-								remove_value(cursors, cursor)
-							found = true
-							break
+			if (drag_state != 'hover') {
+				let found
+				undo_group = 'drag'
+				if (drag_state == 'drag') {
+					if (ctrl) { // add/remove cursor
+						for (let cursor of cursors) {
+							if (hit_line == cursor.line && hit_char == cursor.char) {
+								if (cursors.length > 1)
+									remove_value(cursors, cursor)
+								found = true
+								break
+							}
 						}
+						if (!found && cursor_has_selection(cursors[0]))
+							add_first_cursor(hit_line, hit_char)
+					} else {
+						remove_extra_cursors()
 					}
-					if (!found)
-						create_cursor(hit_line, hit_char)
-				} else {
-					reset_cursors()
+				}
+				if (!found) {
+					if (drag_state == 'dragging')
+						undo_group = 'ignore'
+					let keep_selection = drag_state != 'drag'
+					set_cursor(0, hit_line, hit_char, keep_selection)
 				}
 			}
-			if (drag_state != 'hover' && !found) {
-				let keep_selection = drag_state != 'drag'
-				set_cursor(0, hit_line, hit_char, keep_selection, true, true)
-			}
+			undo_group = null
 		}
 
 		ui.stack(id+'.text_contentbox')
@@ -1046,6 +1075,11 @@ function code_edit_view(id, opt) {
 					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
 				}
 
+				if (chars_n) {
+					undo_group = 'move'
+					remove_extra_cursors()
+				}
+
 				let cursor_i = -1
 				for (let cursor of cursors) {
 					cursor_i++
@@ -1058,8 +1092,8 @@ function code_edit_view(id, opt) {
 								set_cursor(cursor_i, cursor.line, cursor.char-1, shift)
 							}
 						} else if (cursor.line) {
-							let line_s = lines[cursor.line]
-							set_cursor(cursor_i, cursor.line-1, line_s.length, shift)
+							let prev_line_s = lines[cursor.line-1]
+							set_cursor(cursor_i, cursor.line-1, prev_line_s.length, shift)
 						}
 					} else if (chars_n > 0) {
 						if (cursor.char < lines[cursor.line].length) {
@@ -1071,49 +1105,52 @@ function code_edit_view(id, opt) {
 						} else if (cursor.line < lines.length-1) {
 							set_cursor(cursor_i, cursor.line+1, 0, shift)
 						}
-					} else if (lines_n < 0) {
+					} else if (lines_n) {
+						undo_group = 'move'
 						if (alt)
-							create_cursor(cursor.line, cursor.char)
-						let new_line = max(cursor.line + lines_n, 0)
-						let new_char = cursor.line ? cursor_want_col_char(cursor) : 0
-						set_cursor(cursor_i, new_line, new_char, shift && !alt, true, alt)
-						if (alt)
-							break
-					} else if (lines_n > 0) {
-						if (alt)
-							create_cursor(cursor.line, cursor.char)
-						let new_line = min(cursor.line + lines_n, lines.length-1)
-						let new_char = cursor.line < lines.length-1
-							? cursor_want_col_char(cursor)
-							: lines[cursor.line].length
-						set_cursor(cursor_i, new_line, new_char, shift && !alt, true, alt)
+							add_first_cursor(cursor.line, cursor.char)
+						else
+							remove_extra_cursors()
+						let new_line
+						let new_char
+						if (lines_n < 0) {
+							new_line = max(cursor.line + lines_n, 0)
+							new_char = cursor.line ? cursor_want_col_char(cursor) : 0
+						} else if (lines_n > 0) {
+							new_line = min(cursor.line + lines_n, lines.length-1)
+							new_char = cursor.line < lines.length-1
+								? cursor_want_col_char(cursor)
+								: lines[cursor.line].length
+						}
+						set_cursor(cursor_i, new_line, new_char, shift && !alt, true)
 						if (alt)
 							break
 					} else if (full_key == 'ctrl a') {
-						reset_cursors()
+						undo_group = 'select_all'
+						remove_extra_cursors()
 						set_cursor(cursor_i, 0, 0, 'select_all')
 					} else if (key_char) { // typing, deleting, indent
+						undo_group = 'insert'
 						remove_selection(cursor_i)
 						insert_char_at(cursor.line, cursor.char, key_char)
-						set_cursor(cursor_i, cursor.line, cursor.char+1, false, false, true)
+						set_cursor(cursor_i, cursor.line, cursor.char+1, false, false)
 					} else if (key == 'enter') {
+						undo_group = 'insert'
 						remove_selection(cursor_i)
 						insert_line_at(cursor.line, cursor.char)
 						set_cursor(cursor_i, cursor.line+1, 0)
-					} else if (key == 'backspace') {
-						if (cursor_has_selection(cursor)) {
-							remove_selection(cursor_i)
-						} else if (cursor.char) {
-							set_cursor(cursor_i, cursor.line, cursor.char-1)
-							remove_char_at(cursor.line, cursor.char)
-						} else if (cursor.line) {
-							set_cursor(cursor_i, cursor.line-1, lines[cursor.line].length)
-							remove_char_at(cursor.line, cursor.char)
-						}
-					} else if (key == 'delete') {
+					} else if (key == 'backspace' || key == 'delete') {
+						undo_group = 'delete'
 						if (cursor_has_selection(cursor)) {
 							remove_selection(cursor_i)
 						} else {
+							if (key == 'backspace') {
+								if (cursor.char) {
+									set_cursor(cursor_i, cursor.line, cursor.char-1)
+								} else if (cursor.line) {
+									set_cursor(cursor_i, cursor.line-1, lines[cursor.line].length)
+								}
+							}
 							remove_char_at(cursor.line, cursor.char)
 						}
 					} else if (full_key == 'tab') {
@@ -1124,15 +1161,19 @@ function code_edit_view(id, opt) {
 						let sel_text = selected_text(cursor)
 						navigator.clipboard.writeText(sel_text)
 					} else if (full_key == 'ctrl x') {
+						undo_group = 'cut'
 						let sel_text = selected_text(cursor)
 						navigator.clipboard.writeText(sel_text)
 						remove_selection(cursor_i)
 					} else if (key == 'paste') {
+						undo_group = 'paste'
 						remove_selection(cursor_i)
 						insert_text_at(cursor, ui.clipboard_text)
 					} else if (full_key == 'ctrl z') { // undo, redo
+						undo_group = 'undo'
 						undo()
 					} else if (full_key == 'ctrl shift z' || full_key == 'ctrl y') {
+						undo_group = 'undo'
 						redo()
 					} else if (full_key == 'ctrl f') { // search, replace
 						// TODO: find
@@ -1143,6 +1184,8 @@ function code_edit_view(id, opt) {
 					}
 				}
 			}
+
+			undo_group = null // every key stroke must specify undo_group
 
 		} // for ui.key_events
 
