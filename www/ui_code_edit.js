@@ -618,37 +618,48 @@ function code_edit_view(id, opt) {
 
 	// undo-able ops ----------------------------------------------------------
 
+	function insert_cursor(cursor_i, cursor) {
+		undo_push(remove_cursor, cursor_i)
+		insert(cursors, cursor_i, cursor)
+	}
+	function remove_cursor(cursor_i) {
+		undo_push(insert_cursor, cursor_i, assign({}, cursors[cursor_i]))
+		remove(cursors, cursor_i)
+	}
+
 	function remove_first_cursor() {
 		let c = cursors.shift()
-		push_undo(add_first_cursor, c.line, c.char)
+		undo_break()
+		undo_push(add_first_cursor, c.line, c.char)
 	}
 	function add_first_cursor(line, char) {
 		let cursor = {line: line, char: char, sel_line: line, sel_char: char}
-		cursors.push(cursors[0])
-		cursors[0] = cursor
+		cursors.unshift(cursor)
 		cursor.want_col = cursor_want_col(cursor)
-		if (cursors.length > 1)
-			push_undo(remove_first_cursor)
+		if (cursors.length > 1) {
+			undo_break()
+			undo_push(remove_first_cursor)
+		}
 	}
 
-	function add_extra_cursors(cursors) {
-		cursors.push(...cursors)
-		push_undo(remove_extra_cursors)
+	function add_extra_cursors(extra_cursors) {
+		cursors.push(...extra_cursors)
+		undo_push(remove_extra_cursors)
 	}
 	function remove_extra_cursors() {
 		if (cursors.length < 2)
 			return
-		push_undo(add_extra_cursors, cursors.map(c => assign({}, c)))
+		undo_push(add_extra_cursors, cursors.map(c => assign({}, c)).slice(1))
 		cursors.length = 1
 	}
 
 	function replace_cursor(cursor_i, cursor) {
-		push_undo(replace_cursor, cursor_i, assign({}, cursors[cursor_i]))
+		undo_push(replace_cursor, cursor_i, assign({}, cursors[cursor_i]))
 		cursors[cursor_i] = cursor
 	}
 	function set_cursor(cursor_i, line, char, keep_selection, keep_want_col) {
 		let cursor = cursors[cursor_i]
-		push_undo(replace_cursor, cursor_i, assign({}, cursor))
+		undo_push(replace_cursor, cursor_i, assign({}, cursor))
 		cursor.line = line
 		cursor.char = char
 		if (!keep_want_col)
@@ -669,7 +680,7 @@ function code_edit_view(id, opt) {
 		s = s.slice(0, char) + c + s.slice(char)
 		lines[line] = s
 
-		push_undo(remove_char_at, line, char)
+		undo_push(remove_char_at, line, char)
 
 		lines_changed(pos, pos, c)
 	}
@@ -683,7 +694,7 @@ function code_edit_view(id, opt) {
 		insert_lines(line + 1, 1)
 		lines[line + 1] = s2
 
-		push_undo(remove_char_at, line, char)
+		undo_push(remove_char_at, line, char)
 
 		lines_changed(pos, pos, newline)
 	}
@@ -692,11 +703,11 @@ function code_edit_view(id, opt) {
 		let pos = pos_at(line, char)
 		let s = lines[line]
 		if (char < s.length) {
-			push_undo(insert_char_at, line, char, s.slice(char, char + 1))
+			undo_push(insert_char_at, line, char, s.slice(char, char + 1))
 			lines[line] = s.slice(0, char) + s.slice(char + 1)
 			lines_changed(pos, pos + 1)
 		} else if (line < lines.length-1) {
-			push_undo(insert_line_at, line, char)
+			undo_push(insert_line_at, line, char)
 			lines[line] = s + lines[line + 1]
 			remove_lines(line + 1, 1)
 			lines_changed(pos, pos + newline.length)
@@ -726,7 +737,7 @@ function code_edit_view(id, opt) {
 		lines[sline1] = lines[sline1].slice(0, schar1) + lines[sline2].slice(schar2)
 		remove_lines(sline1 + 1, sline2 - sline1)
 
-		push_undo(insert_text_at, sline1, schar1, sel_text)
+		undo_push(insert_text_at, sline1, schar1, sel_text)
 		set_cursor(cursor_i, sline1, schar1)
 
 		lines_changed(pos1, pos2)
@@ -790,13 +801,17 @@ function code_edit_view(id, opt) {
 
 	// undo/redo --------------------------------------------------------------
 
-	function push_undo(fn, ...args) {
+	function undo_push(fn, ...args) {
 		if (undo_group == 'ignore')
 			return
 		if (!undoing)
-			pr('>', undo_group, fn.name)
+			pr('>', undo_group, fn.name, ...args)
 		assert(undo_group) // undoable ops must be done inside an undo_group.
 		undo_stack.push([undo_group, fn, ...args])
+	}
+
+	function undo_break() {
+		undo_stack.push(['break', noop])
 	}
 
 	function undo() {
@@ -810,13 +825,17 @@ function code_edit_view(id, opt) {
 				break
 			undo_group = rec.shift()
 			let fn     = rec.shift()
+			pr('<', undo_group, fn.name, ...rec, 'cursors='+cursors.length)
 			fn(...rec)
-			pr('<', undo_group, fn.name, cursors.length)
 			if (!stack.length)
 				break
 			let next_undo_group = stack.at(-1)[0]
-			if (next_undo_group != undo_group)
+			if (next_undo_group != undo_group) {
+				if (next_undo_group == 'break')
+					pr('<', 'break')
+					stack.pop()
 				break
+			}
 		}
 		undo_group = null
 		undo_stack = stack
@@ -978,25 +997,21 @@ function code_edit_view(id, opt) {
 			let shift = ui.key('shift') // TODO: use to change selection end
 			let ctrl  = ui.key('ctrl' )
 			if (drag_state != 'hover') {
-				let found
 				undo_group = 'drag'
+				let cursor_i = -1
 				if (drag_state == 'drag') {
 					if (ctrl) { // add/remove cursor
-						for (let cursor of cursors) {
-							if (hit_line == cursor.line && hit_char == cursor.char) {
-								if (cursors.length > 1)
-									remove_value(cursors, cursor)
-								found = true
-								break
-							}
-						}
-						if (!found && cursor_has_selection(cursors[0]))
+						cursor_i = cursors.findIndex(c => c.line == hit_line && c.char && hit_char)
+						if (cursor_i != -1) {
+							if (cursors.length > 1)
+								remove_cursor(cursor_i)
+						} else if (cursor_has_selection(cursors[0]))
 							add_first_cursor(hit_line, hit_char)
 					} else {
 						remove_extra_cursors()
 					}
 				}
-				if (!found) {
+				if (cursor_i == -1) {
 					if (drag_state == 'dragging')
 						undo_group = 'ignore'
 					let keep_selection = drag_state != 'drag'
@@ -1051,6 +1066,7 @@ function code_edit_view(id, opt) {
 			ui.capture_keydown(id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
+			ui.capture_keydown(id, 'ctrl s') // browser: save as html -> editor: save
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
@@ -1172,9 +1188,11 @@ function code_edit_view(id, opt) {
 					} else if (full_key == 'ctrl z') { // undo, redo
 						undo_group = 'undo'
 						undo()
+						break
 					} else if (full_key == 'ctrl shift z' || full_key == 'ctrl y') {
 						undo_group = 'undo'
 						redo()
+						break
 					} else if (full_key == 'ctrl f') { // search, replace
 						// TODO: find
 						pr('FIND')
