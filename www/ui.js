@@ -392,16 +392,6 @@ ui.load_font = function(name, url) {
 	fonts_to_load.push([name, url])
 }
 
-ui.load_font('far'   , 'icons/fa-regular-400.woff2')
-ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
-//ui.load_font('fab'   , 'icons/fa-brands-400.woff2')
-//ui.load_font('lar'   , 'icons/la-regular-400.woff2')
-//ui.load_font('las'   , 'icons/la-solid-900.woff2')
-//ui.load_font('lab'   , 'icons/la-brands-400.woff2')
-//ui.load_font('remix' , 'icons/remixicon.woff2')
-//ui.load_font('mio'   , 'icons/material-icons-outlined.woff2')
-ui.load_font('mono'  , 'fonts/jetbrains-mono-nl-regular.woff2')
-
 ui.css = function(s) {
 	let style = document.createElement('style')
 	style.innerHTML = s
@@ -867,11 +857,25 @@ function set_screen_bg() {
 	document.documentElement.style.background = bg_color('bg')
 }
 ui.set_default_theme = function(theme) {
+	if (!theme)
+		theme = system_in_dark_mode() ? 'dark' : 'light'
 	ui.default_theme = theme
 	set_screen_bg()
 }
 
+function system_in_dark_mode() {
+	let mql = window.matchMedia
+		&& window.matchMedia('(prefers-color-scheme: dark)')
+	return !!(mql && mql.matches)
+}
+
+window.matchMedia('(prefers-color-scheme: dark)')
+	.addEventListener('change', function(e) {
+		ui.set_default_theme()
+	})
+
 // prevent flicker on load by setting the screen's background color now.
+ui.set_default_theme()
 set_screen_bg()
 
 document.addEventListener('DOMContentLoaded', async function() {

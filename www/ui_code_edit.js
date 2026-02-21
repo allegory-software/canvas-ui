@@ -131,8 +131,6 @@ for (let symbol of [
 	node_colors[symbol] = 'symbol'
 }
 
-ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
-
 function indent(s, tab_width) {
 	let i = 0 // char index (i.e. index in line string s)
 	let j = 0 // col index (i.e. visual char index, or column)
@@ -1114,6 +1112,7 @@ function code_edit_view(id, opt) {
 					} else if (chars_n > 0) {
 						if (cursor.char < lines[cursor.line].length) {
 							if (ctrl) {
+								let new_char = next_token(cursor)
 								set_cursor(cursor_i, cursor.line, new_char, shift)
 							} else {
 								set_cursor(cursor_i, cursor.line, cursor.char+1, shift)
