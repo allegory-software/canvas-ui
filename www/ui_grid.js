@@ -213,7 +213,7 @@ function init(id, e) {
 				ui.end_scope()
 			}
 			ui.p(sp2 + indent_x, 0, sp2, 0)
-			e.draw_val(row, field, input_val, true, full_width)
+			e.draw_val(row, field, input_val, ui.cx, full_width)
 			ui.p(0)
 		ui.end_stack()
 
