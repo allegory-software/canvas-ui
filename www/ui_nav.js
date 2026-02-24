@@ -729,8 +729,8 @@ ui.nav = function(opt) {
 			rowset_name = !ev.free && !e.rowset && !e.rowset_url && e.rowset_name || null
 			rowset_url ??= rowset_name && '/rowset.json/' + rowset_name
 
-			if (!e.param_vals)
-				rowset_url = null
+			// if (!e.param_vals)
+			// 	rowset_url = null
 
 			// rebind named rowset if the name changed
 			if (rowset_name != old_rowset_name) {
@@ -2021,7 +2021,7 @@ ui.nav = function(opt) {
 
 			range_label = function(v, i, row) {
 				let f = range_label_funcs[cols_arr[i]]
-				return f ? f(v) : e.draw_cell(row, fld(cols_arr[i]))
+				return f ? f(v) : e.to_text(row, fld(cols_arr[i]))
 			}
 
 		} else {
@@ -4160,8 +4160,8 @@ ui.nav = function(opt) {
 			slow_timeout: e.slow_timeout,
 			dont_send: true,
 		}, opt))
-		req.on('success', load_success)
-		req.on('fail', load_fail)
+		req.addEventListener('success', load_success)
+		req.addEventListener('fail', load_fail)
 		add_request(req)
 		e.load_request = req
 		e.load_request_start_clock = clock()
@@ -4212,19 +4212,23 @@ ui.nav = function(opt) {
 		loading(false)
 	}
 
-	function load_fail(err, type, status, message, body) {
+	function load_fail(ev) {
+		let [err, type, status, message, body] = ev.args
 		e.do_update_load_fail(true, err, type, status, message, body)
 		return e.announce('nav_load_fail', err, type, status, message, body, this)
 	}
 
 	// e.prop('focus_state', {slot: 'user'})
 
-	function load_success(rs) {
+	function load_success(ev) {
+		let [rs] = ev.args
 		if (this.allow_diff_merge && e.diff_merge(rs))
 			return
 		rowset = rs
 		e._rowset = rs // for inspection
-		update_subs('reset')
+		//update_subs('reset')
+		update({reset: true})
+		ui.animate()
 	}
 
 	// saving changes ---------------------------------------------------------
@@ -4619,7 +4623,7 @@ ui.nav = function(opt) {
 	}
 
 	function loading(on) {
-		e.class('loading', on)
+		//e.class('loading', on)
 		e.do_update_loading(on)
 		e.announce('loading', on)
 		e.do_update_load_progress(0)
@@ -4645,6 +4649,7 @@ ui.nav = function(opt) {
 	{
 	let oe
 	e.load_overlay = function(on, cls, text, cancel_text, detail) {
+		return
 		if (oe) {
 			oe.del()
 			oe = null
@@ -5150,7 +5155,7 @@ filesize.to_text = function(s) {
 		return s
 	let mag = this.filesize_magnitude
 	let dec = this.filesize_decimals || 0
-	return x.kbytes(dec, mag)
+	return format_kbytes(x, dec, mag)
 }
 
 filesize.draw = function(x, cx) {

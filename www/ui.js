@@ -7745,4 +7745,137 @@ ui.live_move_mixin = function(e) {
 	return e
 }
 
+ui.debug_pane = function() {
+
+	if (0) {
+	ui.v(0, 0, 's', 's', 200)
+		ui.border('l', 'intense')
+
+		function fgr(graph_name, fr) {
+			ui.stack('', 0)
+				ui.bb('bg2')
+				ui.color('text')
+				ui.p(ui.sp())
+				ui.text('', graph_name, 0, 'l')
+			ui.end_stack()
+			ui.frame_graph(fr)
+		}
+		fgr('frame_time')
+		fgr('frame_make_time')
+		fgr('frame_layout_time')
+		fgr('frame_draw_time')
+		fgr('frame_hit_time')
+		if (0) {
+			fgr('frame_pack_time')
+			fgr('frame_compression')
+			fgr('frame_bandwidth')
+			fgr('frame_unpack_time')
+		}
+	ui.end_v()
+	}
+
+	if (1) {
+	ui.v(0, 0, 's', 's', 200)
+		ui.border('l', 'intense')
+
+		ui.stack('', 0)
+			ui.bb('bg2')
+			ui.color('text')
+			ui.p(ui.sp())
+			ui.text('', 'PROFILE', 0, 'l')
+		ui.end_stack()
+		ui.frame_graph_overlapped(.5)
+
+		ui.stack('', 0)
+			ui.bb('bg2')
+			ui.color('text')
+			ui.p(ui.sp())
+			ui.text('', 'ID STATES', 0, 'l')
+		ui.end_stack()
+		ui.scrollbox('demo_id_states_sb')
+			ui.v(0, 0, 's', '[')
+				for (let [id, m] of ui._id_state_maps) {
+					ui.p(ui.sp(), ui.sp05())
+					ui.color('link')
+					ui.text('', id, 0, 'l')
+					for (let [k, v] of m) {
+						if (v === undefined)
+							continue
+						ui.ml(ui.sp2())
+						ui.h(0, ui.sp())
+							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
+							ui.color('text')
+							ui.text('', k, 1, 'l', 'c', 1/0, 0)
+							if (isobject(v) || isfunc(v))
+								ui.color('label')
+							ui.text('', s, 1, 'l', 'c', 1/0, 0)
+						ui.end_h()
+					}
+				}
+			ui.end_v()
+		ui.end_scrollbox()
+
+		ui.border(1, 'light')
+		ui.stack('', 0)
+			ui.bb('bg2')
+			ui.color('text')
+			ui.p(ui.sp())
+			ui.text('', 'HIT STATES', 0, 'l')
+		ui.end_stack()
+		ui.scrollbox('demo_hit_states_sb', .5)
+			ui.v(0, 0, 's', '[')
+				for (let [id, m] of ui._hit_state_maps) {
+					ui.p(ui.sp(), ui.sp05())
+					ui.color('link')
+					ui.text('', isstr(id) ? id : typeof id, 0, 'l')
+					for (let [k, v] of m) {
+						ui.ml(ui.sp2())
+						ui.h(0, ui.sp())
+							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
+							ui.color('text')
+							ui.text('', k, 1, 'l', 'c', 1/0, 0)
+							if (isobject(v) || isfunc(v))
+								ui.color('label')
+							ui.text('', s, 1, 'l', 'c', 1/0, 0)
+						ui.end_h()
+					}
+				}
+			ui.end_v()
+		ui.end_scrollbox()
+
+		ui.stack('', 0)
+			ui.bb('bg2')
+			ui.color(ui.captured_id ? 'text' : 'label')
+			ui.p(ui.sp())
+			ui.text('', ui.captured_id ? 'CAP '+ui.captured_id : 'CAPTURED', 0, 'l', 'c', 1/0, 0)
+		ui.end_stack()
+		ui.scrollbox('demo_captured_state_sb', .5)
+			ui.v(0, 0, 's', '[')
+				if (ui.captured_id)
+					for (let [k, v] of ui.captured(ui.captured_id)) {
+						ui.ml(ui.sp2())
+						ui.h(1, ui.sp())
+							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
+							ui.color('text')
+							ui.text('', k, 1, 'l', 'c', 1/0, 0)
+							if (isobject(v) || isfunc(v))
+								ui.color('label')
+							ui.text('', s, 1, 'l', 'c', 1/0, 0)
+						ui.end_h()
+					}
+			ui.end_v()
+		ui.end_scrollbox()
+
+		ui.stack('', 0)
+			ui.bb('bg2')
+			ui.color(ui.captured_id ? 'text' : 'label')
+			ui.p(ui.sp())
+			ui.text('', ui.focused_id ? 'FOCUSED '+ui.focused_id : 'FOCUSED', 0, 'l', 'c', 1/0, 0)
+		ui.end_stack()
+
+	ui.end_v()
+	}
+}
+
+
 }()) // module function

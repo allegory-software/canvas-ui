@@ -1029,7 +1029,7 @@ function code_edit_view(id, opt) {
 		ui.end_stack()
 	}
 
-	e.render = function(fr, align, valign, min_w, min_h) {
+	e.render = function(min_w, min_h) {
 
 		// set layout vars
 
@@ -1208,7 +1208,7 @@ function code_edit_view(id, opt) {
 
 		// build editor
 
-		ui.v(fr, 0, align, valign, min_w, min_h)
+		ui.v(1, 0, 's', 's', min_w, min_h)
 			let tabs = [
 				{id: 'tab1', label:'Tab 1'},
 				{id: 'tab2', label:'Tab 2'},
@@ -1241,7 +1241,7 @@ function code_edit_view(id, opt) {
 	return e
 }
 
-ui.code_edit = function(id, opt, fr, align, valign, min_w, min_h) {
+ui.code_edit = function(id, opt, min_w, min_h) {
 	ui.keepalive(id)
 	let s = ui.state(id)
 	let view = s.get('view')
@@ -1250,7 +1250,7 @@ ui.code_edit = function(id, opt, fr, align, valign, min_w, min_h) {
 		ui.on_free(id, () => view.free())
 		s.set('view', view)
 	}
-	view.render(fr, align, valign, min_w, min_h)
+	view.render(min_w, min_h)
 }
 
 }()) // module function
