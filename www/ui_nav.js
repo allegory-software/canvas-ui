@@ -2021,7 +2021,7 @@ ui.nav = function(opt) {
 
 			range_label = function(v, i, row) {
 				let f = range_label_funcs[cols_arr[i]]
-				return f ? f(v) : e.to_text(row, fld(cols_arr[i]))
+				return f ? f(v) : e.to_text ? e.to_text(row, fld(cols_arr[i])) : ''
 			}
 
 		} else {
@@ -5555,4 +5555,3 @@ let init_rowset_events = memoize(function() {
 
 
 }()) // module function
-

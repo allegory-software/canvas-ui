@@ -263,10 +263,10 @@ TEXT
 
 	get_font_size   () -> font_size
 
-	text            (id, s, fr, align, valign, max_min_w, min_w, min_h, 'line'|'word'|0, editable, input_type)
-	text_editable   (id, s, fr, align, valign, max_min_w, min_w, min_h, input_type)
-	text_lines      (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
-	text_wrapped    (id, s, fr, align, valign, max_min_w, min_w, min_h, editable)
+	text            (id, s, fr, align, valign, max_w, w, h, 'line'|'word'|0, editable, input_type)
+	text_editable   (id, s, fr, align, valign, max_w, w, h, input_type)
+	text_lines      (id, s, fr, align, valign, max_w, w, h, editable)
+	text_wrapped    (id, s, fr, align, valign, max_w, w, h, editable)
 
 	measure_text    (cx, s) -> {w:, asc:, dsc:, {actual|font}BoundingBox{Ascent|Descent|Left|Right}:, }
 
@@ -276,7 +276,7 @@ INPUT
 	input           (id, s, fr, min_w, min_h)
 	label           (for_id, s, fr, align, valign)
 	radio_label     (for_id, for_group_id, s, fr, align, valign)
-	dropdown        (id, items, fr, max_min_w, min_w, min_h)
+	dropdown        (id, items, fr, max_w, min_w, min_h)
 	toggle          (id, fr, align, valign, min_w, min_h)
 	checkbox        (cmd, id, fr, align, valign, min_w, min_h)
 
@@ -292,7 +292,7 @@ UI TEMPLATE EDITOR
 
 LIST
 
-	[h|v|hv]list    (id, items, fr, align, valign, item_align, item_valign, item_fr, max_min_w, min_w)
+	[h|v|hv]list    (id, items, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w)
 
 OTHER
 
@@ -388,8 +388,8 @@ ui.set_cursor = function(cursor) {
 // styles --------------------------------------------------------------------
 
 let fonts_to_load = []
-ui.load_font = function(name, url) {
-	fonts_to_load.push([name, url])
+ui.load_font = function(name, url, desc) {
+	fonts_to_load.push([name, url, desc])
 }
 
 ui.css = function(s) {
@@ -559,7 +559,7 @@ function lookup_color_hsl_func(k) {
 	return function(name, state, theme1) {
 		let state_i = parse_state(state)
 		theme1 = theme1 ? themes[theme1] : theme
-		let c = theme1[k][state_i][name] ?? theme[k][0][name]
+		let c = theme1[k][state_i][name] ?? theme1[k][0][name]
 		if (!c)
 			assert(false, 'no ', k, ' for (', name, ', ',
 				repl(state, 0, 'normal'), ', ', theme1.name, ')')
@@ -658,7 +658,6 @@ ui.fg_style('dark' , 'faint' , 'normal' ,  0, 0.00, 0.30)
 ui.border_style = def_color_func('border')
 let border_color_hsl = lookup_color_hsl_func('border')
 let border_color = lookup_color_func(border_color_hsl)
-let border_color_int = lookup_color_rgb_int_func(fg_color_hsl)
 let ui_border_color = border_color
 ui.border_color_hsl = border_color_hsl
 ui.border_color = border_color
@@ -880,8 +879,9 @@ set_screen_bg()
 
 document.addEventListener('DOMContentLoaded', async function() {
 	let promises = []
-	for (let [name, url] of fonts_to_load) {
-		let font = new FontFace(name, `url(${url})`, {})
+	for (let [name, url, desc] of fonts_to_load) {
+		desc ??= url.includes('.var.') ? {weight: '1 1000'} : {}
+		let font = new FontFace(name, `url(${url})`, desc)
 		promises.push(font.load().then(loaded => document.fonts.add(loaded)))
 	}
 	await Promise.all(promises)
@@ -989,11 +989,6 @@ function reset_pointer_state(p) {
 	p.mouseenter = false
 	p.mouseleave = false
 	p.changed = false
-}
-
-function diff_pointer_state(d, s) {
-	let o = {}
-
 }
 
 function update_mouse(ev) {
@@ -1501,6 +1496,7 @@ ui.ct_stack = ct_stack
 
 ui.ct_i = () => assert(ct_stack.at(-1), 'no container')
 ui.rel_ct_i = () => ui.ct_i() - (a.length+2)
+ui.last_i = () => cmd_last_i(a)
 
 function ct_stack_check() {
 	if (ct_stack.length) {
@@ -2143,7 +2139,8 @@ function redraw_all() {
 		if (ui.keydown('tab')) {
 			let i = ui.focusables.indexOf(ui.focused_id)
 			if (i != -1) {
-				let next_i = (i + (ui.key('shift') ? -1 : 1)) % ui.focusables.length
+				let n = ui.focusables.length
+				let next_i = (i + (ui.key('shift') ? -1 : 1) + n) % n
 				let id = ui.focusables[next_i]
 				ui.focus(id, true)
 			}
@@ -2215,7 +2212,7 @@ function redraw_all() {
 
 		key_downs.clear()
 		key_ups.clear()
-		ui.key_events.length = null
+		ui.key_events.length = 0
 
 		event_state.clear()
 
@@ -2253,11 +2250,10 @@ ui.widget = function(cmd_name, t, is_ct) {
 		}
 		ui[cmd_name] = wrapper
 		let setstate = t.setstate
-		if (t.setstate) {
-			function wrapper(...args) {
-				return create(_cmd, ...args)
+		if (setstate) {
+			ui[cmd_name+'_state'] = function(...args) {
+				return setstate(_cmd, ...args)
 			}
-			ui[cmd_name+'_state'] = wrapper
 		}
 		return wrapper
 	} else {
@@ -3091,7 +3087,6 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 			// wheel scrolling
 			if (axis && ui.wheel_dy && hit(id)) {
-				let sy0 = ui.state(id, 'scroll_y')
 				sy = sy + ui.wheel_dy
 				if (!infinite_y)
 					sy = clamp(sy, 0, max(0, ch - h))
@@ -3218,7 +3213,7 @@ scrollbar_rect = function(a, i, axis, state) {
 	let thickness_active = state ? ui.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
 	let h_visible = overflow_x == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO && pw < 1
-	let v_visible = overflow_y == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO && ph < 1
+	let v_visible = overflow_y == SB_OVERFLOW_SCROLL || overflow_y == SB_OVERFLOW_AUTO && ph < 1
 	let both_visible = h_visible && v_visible && 1 || 0
 	let bar_min_len = round(2 * ui.font_size_normal)
 	if (!axis) {
@@ -3423,6 +3418,8 @@ measure_end[CMD_POPUP] = function(a, i, axis) {
 	// popups don't affect their target's layout so no add_ct_min_wh() call.
 }
 
+let screen_margin = 10
+
 // NOTE: popup positioning is done later in the translation phase.
 // NOTE: sw is always 0 because popups have fr=0, so we don't use it.
 position[CMD_POPUP] = function(a, i, axis, sx, sw) {
@@ -3449,7 +3446,6 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 
 {
 let tx1, ty1, tx2, ty2
-let screen_margin = 10
 
 // a popup's target rect is the target's border rect.
 function get_popup_target_rect(a, i) {
@@ -4113,7 +4109,7 @@ function end_font_size(ended_scope) {
 	font_size = s
 }
 ui.font_size = function(x) {
-	if (font_size == x) return
+	if (ui.font_size_normal * font_size == x) return
 	force_font_size(ui.font_size_normal * x)
 }
 ui.fs = ui.font_size
@@ -4148,14 +4144,14 @@ function force_line_gap(s) {
 function end_line_gap(ended_scope) {
 	let s = scope_prev_diff_var(ended_scope, 'line_gap')
 	if (s === undefined) return
-	ui_cmd(CMD_LINE_GAP, s)
+	ui_cmd(CMD_LINE_GAP, round(s * 1024))
 	line_gap = s
 }
 ui.line_gap = function(s) {
 	if (line_gap == s) return
 	force_line_gap(s)
 }
-ui.lg = line_gap
+ui.lg = ui.line_gap
 
 function set_font(a, i) {
 	font = a[i]
@@ -4218,8 +4214,8 @@ const TEXT_FOCUSED   = 8 // bit 4
 
 const CMD_TEXT = cmd('text')
 
-ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, editable, input_type) {
-	// NOTE: min_w and min_h are by default measured, not given.
+ui.text = function(id, s, fr, align, valign, max_w, w, h, wrap, editable, input_type) {
+	// NOTE: w and h default to measured text size.
 	s = s ?? ''
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
 	if (wrap == TEXT_WRAP_LINE) {
@@ -4234,12 +4230,12 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 		s = ui.state(id, 'text') ?? s
 	}
 	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
-		min_w ?? -1, // -1=auto
-		min_h ?? -1, // -1=auto
+		w ?? -1, // -1=auto
+		h ?? -1, // -1=auto
 		0, // ascent
 		0, // descent
 		0, // text_x
-		max_min_w ?? -1, // -1=inf
+		max_w ?? -1, // -1=inf
 		0, // text_h
 		id,
 		s,
@@ -4250,20 +4246,20 @@ ui.text = function(id, s, fr, align, valign, max_min_w, min_w, min_h, wrap, edit
 
 	return s
 }
-ui.text_editable = function(id, s, fr, align, valign, max_min_w, min_w, min_h, input_type) {
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, null, true, input_type)
+ui.text_editable = function(id, s, fr, align, valign, max_w, w, h, input_type) {
+	return ui.text(id, s, fr, align, valign, max_w, w, h, null, true, input_type)
 }
-ui.text_lines = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'line', editable)
+ui.text_lines = function(id, s, fr, align, valign, max_w, w, h, editable) {
+	return ui.text(id, s, fr, align, valign, max_w, w, h, 'line', editable)
 }
-ui.text_wrapped = function(id, s, fr, align, valign, max_min_w, min_w, min_h, editable) {
-	return ui.text(id, s, fr, align, valign, max_min_w, min_w, min_h, 'word', editable)
+ui.text_wrapped = function(id, s, fr, align, valign, max_w, w, h, editable) {
+	return ui.text(id, s, fr, align, valign, max_w, w, h, 'word', editable)
 }
 
 function see(m) {
 	let t = {}
 	for (let k in m)
-		if (typeof(k) != 'function')
+		if (typeof(m[k]) != 'function')
 			t[k] = m[k]
 	return t
 }
@@ -4461,20 +4457,20 @@ measure[CMD_TEXT] = function(a, i, axis) {
 		let ww = a[i+TEXT_S]
 		if (!axis) {
 			ww.measure()
-			let min_w = a[i+0]
-			let max_min_w = a[i+TEXT_W]
-			if (min_w == -1)
-				min_w = ww.min_w
-			if (max_min_w != -1)
-				min_w = min(max_min_w, min_w)
-			a[i+2] = min_w
+			let w = a[i+0]
+			let max_w = a[i+TEXT_W]
+			if (w == -1)
+				w = ww.min_w
+			if (max_w != -1)
+				w = min(max_w, w)
+			a[i+2] = w // min_w = w
 			a[i+TEXT_ASC] = round(ww.asc)
 			a[i+TEXT_DSC] = round(ww.dsc)
 		} else {
-			let min_h = a[i+1]
-			if (min_h == -1)
-				min_h = ww.h
-			a[i+3] = min_h
+			let h = a[i+1]
+			if (h == -1)
+				h = ww.h
+			a[i+3] = h // min_h = h
 			a[i+TEXT_H] = ww.h
 		}
 	} else if (!axis) {
@@ -4502,23 +4498,23 @@ measure[CMD_TEXT] = function(a, i, axis) {
 			}
 			text_h += (s.length-1) * round(line_gap * font_size)
 		}
-		let min_w = a[i+0]
-		let min_h = a[i+1]
-		let max_min_w = a[i+TEXT_W]
-		if (min_h == -1) min_h = text_h
-		if (min_w == -1) min_w = text_w
-		if (max_min_w != -1)
-			min_w = min(max_min_w, min_w)
-		a[i+2] = min_w
-		a[i+3] = min_h
+		let w = a[i+0]
+		let h = a[i+1]
+		let max_w = a[i+TEXT_W]
+		if (h == -1) h = text_h
+		if (w == -1) w = text_w
+		if (max_w != -1)
+			w = min(max_w, w)
+		a[i+2] = w // min_w = w
+		a[i+3] = h // min_h = h
 		a[i+TEXT_ASC] = round(asc)
 		a[i+TEXT_DSC] = round(dsc)
 		a[i+TEXT_W] = text_w + spacings(a, i, 0)
 		a[i+TEXT_H] = text_h + spacings(a, i, 1)
 	}
 	a[i+2+axis] += spacings(a, i, axis)
-	let min_w = a[i+2+axis]
-	add_ct_min_wh(a, axis, min_w)
+	let w = a[i+2+axis]
+	add_ct_min_wh(a, axis, w)
 }
 
 position[CMD_TEXT] = function(a, i, axis, sx, sw) {
@@ -4529,13 +4525,13 @@ position[CMD_TEXT] = function(a, i, axis, sx, sw) {
 			ww.wrap(sw)
 			a[i+2] = ww.w
 		} else {
-			a[i+2] = a[i+TEXT_W] // we're positioning text_w, not min_w!
+			a[i+2] = a[i+TEXT_W] // we're positioning text_w, not w!
 		}
 		// store the segment we might have to clip the text to.
 		a[i+TEXT_X] = sx + a[i+MX1] + a[i+PX1]
 		a[i+TEXT_W] = sw - spacings(a, i, 0)
 	} else {
-		a[i+3] = a[i+TEXT_H] // we're positioning text_h, not min_h!
+		a[i+3] = a[i+TEXT_H] // we're positioning text_h, not h!
 	}
 	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
@@ -4760,6 +4756,8 @@ frame.measure = function(a, i, axis) {
 }
 
 frame.translate = function(a, i, dx, dy) {
+
+	assert(!a[i+FRAME_REC_I], 'frame re-entered')
 
 	a[i+0] += dx
 	a[i+1] += dy
@@ -5228,9 +5226,8 @@ ui.widget('drag_point', {
 // over the button, and only if it was pressed while over the button, even
 // though the mouse _is_ captured.
 
-ui.button_stack = function(id, fr, align, valign, min_w, min_h, style) {
-	ui.p(ui.sp2(), ui.sp())
-	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h)
+ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
+	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h ?? ui.em(1.5))
 }
 
 ui.button_state = function(id) {
@@ -5249,20 +5246,23 @@ ui.button_bb = function(style, state) {
 	ui.bb(style, state, 1, 'intense', state, radius)
 }
 
-ui.button_text = function(s, state, min_w, min_h) {
+ui.button_text = function(s, state, w, h) {
 	state = repl(state, 'click', 'hover')
-	min_h ??= ui.em(1)
+	h ??= ui.em(2.2) // force h
 	ui.bold()
 	ui.color('text', state)
-	ui.text('', s, 0, 'c', 'c', null, min_w, min_h)
+	ui.p(ui.sp2(), 0)
+	ui.text('', s, 0, 'c', 'c', null, w, h)
 }
 
-ui.button_icon = function(font, icon, state, min_w, min_h) {
+ui.button_icon = function(font, icon, state, w, h) {
 	state = repl(state, 'click', 'hover')
-	min_h ??= ui.em(1)
+	w ??= ui.em(2.2)
+	h ??= ui.em(2.2) // force h
 	ui.font(font)
+	ui.font_size(1.3)
 	ui.color('text', state)
-	ui.text('', icon, 0, 'c', 'c', min_w, min_w, min_h)
+	ui.text('', icon, 0, 'c', 'c', w, w, h)
 }
 
 ui.end_button_stack = function(state) {
@@ -5271,23 +5271,18 @@ ui.end_button_stack = function(state) {
 }
 
 ui.icon_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
+	min_w ??= ui.em(1.5) // force h
+	min_h ??= ui.em(1.5) // force h
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
 	let state = ui.button_state(id)
 	ui.button_bb(style, state)
 	ui.button_icon(font, icon, state)
-	return ui.end_button_stack(state)
+	let clicked = ui.end_button_stack(state)
+	return clicked
 }
 
 ui.bare_icon_button = function(id, font, icon, fr, align, valign, min_w, min_h) {
 	return ui.icon_button(id, font, icon, fr, align, valign, min_w, min_h, '')
-}
-
-ui.tool_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
-	ui.button_stack(id, fr, align, valign, min_w, min_h)
-	let state = ui.button_state(id)
-	ui.button_bb(style, state)
-	ui.button_icon(font, icon, state)
-	return ui.end_button_stack(state)
 }
 
 ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
@@ -5435,11 +5430,11 @@ ui.end_vsplit = function() { end_split('v') }
 
 // text-input ----------------------------------------------------------------
 
-ui.input = function(id, s, fr, min_w, min_h) {
+ui.input = function(id, s, fr, w, h) {
 	ui.stack('', fr, 's', 's')
 		ui.bb('input', null, 1, 'intense', ui.focused(id) ? 'hover' : null)
 		ui.p(ui.sp())
-		s = ui.text(id, s, 1, 'l', 'c', null, min_w ?? ui.em(12), min_h, null, true)
+		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em(12), h, null, true)
 	ui.end_stack()
 	return s
 }
@@ -5487,7 +5482,7 @@ function list_update(id, m) {
 	m.set('focused_item_changed', before_fi != fi ? fi_changed : false)
 	m.set('item_picked', fi_changed == 'click' || (fi != null && ui.focused(id) && ui.key('enter')))
 }
-function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_fr, max_min_w, min_w) {
+function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) {
 	let s = ui.state(id)
 	s.set('items', items)
 	keepalive(id, list_update)
@@ -5513,9 +5508,9 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 			)
 			ui.color('text', hit(item_id) ? 'hover' : null)
 			ui.text('', item, item_fr,
-				item_align  ?? hv == 'v' ? 'l' : 'c',
-				item_valign ?? hv == 'v' ? 'c' : 'c',
-				max_min_w)
+				item_align  ?? (hv == 'v' ? 'l' : 'c'),
+				item_valign ?? 'c',
+				max_w)
 			if (list_focused && item_focused)
 				ui.focus_ring()
 		ui.end_stack()
@@ -5842,7 +5837,7 @@ ui.widget('polyline', {
 		let pi1 = i+POLYLINE_POINTS
 		let pi2 = cmd_arg_end_i(a, i)
 		set_points(cx, x0, y0, a, pi1, pi2, closed)
-		if (cx.isPointInPath(mx, my)) {
+		if (cx.isPointInPath(ui.mx, ui.my)) {
 			hover(id)
 			return true
 		}
@@ -5851,7 +5846,7 @@ ui.widget('polyline', {
 
 // dropdown ------------------------------------------------------------------
 
-ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
+ui.dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 	keepalive(id)
 	ui.focusable(id)
@@ -5913,7 +5908,7 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 				ui.stack(id)
 					ui.p(ui.sp())
 					ui.h(0, ui.sp())
-						ui.text('', s, 1, 'l', 'c', max_min_w ?? ui.em(8))
+						ui.text('', s, 1, 'l', 'c', max_w ?? ui.em(8))
 						ui.stack('', 0)
 							ui.polyline('', '0 4  7 11  14 4', false, null, null, 'label')
 						ui.end_stack()
@@ -5923,7 +5918,7 @@ ui.dropdown = function(id, items, fr, max_min_w, min_w, min_h) {
 				if (open) {
 					ui.stack()
 						ui.state_init(id+'.list', 'focused_item_i', sel_i)
-						ui.list(id+'.list', items, 0, 's', 's', 'l', 'c', 0, max_min_w)
+						ui.list(id+'.list', items, 0, 's', 's', 'l', 'c', 0, max_w)
 					ui.end_stack()
 				}
 
@@ -6833,12 +6828,12 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 		if (ctrl && (ui.keydown('arrowup') || ui.keydown('arrowdown'))) {
 			e.scroll_by_pages((key == 'arrowup' ? 1 : -1) * 0.5)
-			e.capture_keys()
+			ui.capture_keys()
 		}
 
 		if (ui.keydown('pageup') || ui.keydown('pagedown')) {
 			e.scroll_by_pages((ui.keydown('pageup') ? 1 : -1))
-			e.capture_keys()
+			ui.capture_keys()
 		}
 
 		if (!ctrl && focused_range && (
@@ -6878,7 +6873,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 		if (0 && ui.keydown('tab')) {
 			if (e.focus_next_range(shift)) {
-				e.capture_keys()
+				ui.capture_keys()
 				return false // prevent tabbing out on internal focusing
 			}
 			e.focus_range(null)
@@ -7575,7 +7570,7 @@ ui.box_widget('frame_graph_overlapped', {
 		let y0 = a[i+1]
 		let w  = a[i+2]
 		let h  = a[i+3]
-		for (name in ui.frame_graphs) {
+		for (let name in ui.frame_graphs) {
 			let g = ui.frame_graphs[name]
 			if (g.color)
 				draw_graph(x0, y0, w, h, g, false)

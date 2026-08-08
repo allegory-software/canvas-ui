@@ -446,6 +446,7 @@ function do_after(inherited, func) {
 // logging and errors --------------------------------------------------------
 
 let pr    = console.error
+let _     = console.error
 let warn  = console.warn
 let debug = console.debug
 let trace = console.trace
@@ -2454,7 +2455,7 @@ random,
 PI, sin, cos, tan, rad, deg, asin, acos, atan, atan2,
 format_base, dec,
 noop, return_true, return_false, return_arg, wrap, do_before, do_after,
-pr, warn, debug, trace, trace_if, assert,
+pr, _, warn, debug, trace, trace_if, assert,
 push_log, push_log_if, pop_log, log, log_if, check,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
