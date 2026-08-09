@@ -1524,15 +1524,20 @@ function free_rec(a) {
 
 let rec_stack = []
 
+// NOTE: ui.ct_i() and ui.rel_ct_i() are only valid if the container is
+// inside the same rec, so open a container first in a recording!
 ui.start_recording = function() {
 	let a1 = rec()
-	rec_stack.push(a)
+	rec_stack.push(a, ct_stack.length)
 	a = a1
 }
 
 ui.end_recording = function() {
+	let ct_stack_len = rec_stack.pop()
 	let a1 = a
 	a = rec_stack.pop()
+	assert(ct_stack.length == ct_stack_len,
+		'recording must open and close its own containers')
 	return a1
 }
 
