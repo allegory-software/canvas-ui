@@ -6514,7 +6514,7 @@ ui.box_widget('slider', {
 			)
 
 			let thumb_i = ui.stack('', 0, 'l', 't'); ui.end_stack()
-			a[i+SLIDER_THUMB_I] = thumb_i
+			a[i+SLIDER_THUMB_I] = thumb_i - i // make relative
 
 		ui.end_stack()
 
@@ -6566,7 +6566,7 @@ ui.box_widget('slider', {
 		let thumb_cx = x + margin_x + p * (w - 2 * margin_x)
 		let thumb_cy = y + h - 2*thumb_r
 
-		let thumb_i = a[i+SLIDER_THUMB_I]
+		let thumb_i = i + a[i+SLIDER_THUMB_I]
 
 		// HACK: set position of thumb_i manually.
 		a[thumb_i+0] = thumb_cx
