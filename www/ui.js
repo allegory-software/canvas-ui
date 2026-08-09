@@ -5313,9 +5313,12 @@ function split(hv, id, size, unit, fixed_side,
 	keepalive(id)
 	let s = ui.state(id)
 	let cs = captured(id)
-	let max_size = (cs?.get(W) ?? s.get(W) ?? 1/0) - splitter_w
+	let measured_wh = cs?.get(W) ?? s.get(W)
+	let max_size = (measured_wh ?? 1/0) - splitter_w
 	assert(!unit || unit == 'px' || unit == '%')
 	let fixed = unit == 'px'
+	if (fixed && measured_wh == null)
+		ui.relayout() // needed or `collapsed` may start out wrong and stay wrong.
 	size = s.get('size') ?? size
 	let fr = fixed ? 0 : (size ?? 0.5)
 	let min_size = fixed ? size ?? 0 : 0
@@ -5339,13 +5342,10 @@ function split(hv, id, size, unit, fixed_side,
 
 	ui[hv](split_fr, gap, align, valign, min_w, min_h)
 
-	if (state) {
+	if (state)
 		ui.set_cursor(horiz ? 'ew-resize' : 'ns-resize')
-		ui.measure(id)
-	}
+	ui.measure(id)
 
-	// TODO: because max_size is not available on the first frame,
-	// the `collapsed` state can be wrong on the first frame! find a way...
 	let collapsed = fixed
 		? min_size == 0 || (max_size != null && min_size == max_size)
 		: fr == 0 || fr == 1
