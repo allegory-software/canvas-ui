@@ -2067,25 +2067,20 @@ async function unpack_frame(cb) {
 
 // measuring requests --------------------------------------------------------
 
-let measure_req = []
+const CMD_MEASURE = cmd('measure')
 
-ui.measure = function(dest) {
-	let i = ui.ct_i()
-	measure_req.push(dest, a, i)
+ui.measure = function(id) {
+	let i = ui_cmd(CMD_MEASURE, id, ui.ct_i())
+	a[i+1] -= i // make ct_i relative
 }
 
-function measure_req_all() {
-	for (let k = 0, n = measure_req.length; k < n; k += 3) {
-		let dest = measure_req[k+0]
-		let a    = measure_req[k+1]
-		let i    = measure_req[k+2]
-		let s = isstr(dest) ? ui.state(dest) : dest
-		s.set('x', a[i+0])
-		s.set('y', a[i+1])
-		s.set('w', a[i+2])
-		s.set('h', a[i+3])
-	}
-	measure_req.length = 0
+register[CMD_MEASURE] = function(a, i) {
+	let ct_i = i+a[i+1]
+	let s = ui.state(a[i+0])
+	s.set('x', a[ct_i+0])
+	s.set('y', a[ct_i+1])
+	s.set('w', a[ct_i+2])
+	s.set('h', a[ct_i+3])
 }
 
 // animation frame -----------------------------------------------------------
@@ -2154,8 +2149,6 @@ function redraw_all() {
 
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
-
-		measure_req_all()
 
 		clear_layers()
 		free_recs()
