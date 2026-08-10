@@ -3063,25 +3063,26 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 	let id = a[i+SB_ID]
 	if (id) {
+
+		// scroll to view an inner box
+		let box = ui.state(id, 'scroll_to_view')
+		if (box) {
+			let [bx, by, bw, bh] = box
+			;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
+			a[i+SB_SX+0] = sx
+			a[i+SB_SX+1] = sy
+			let s = ui.state(id)
+			s.set('scroll_x', sx)
+			s.set('scroll_y', sy)
+			s.delete('scroll_to_view')
+		}
+
 		let hit_state = 0
 		for (let axis = 0; axis < 2; axis++) {
 
 			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
 			if (!visible)
 				continue
-
-			// scroll to view an inner box
-			let box = ui.state(id, 'scroll_to_view')
-			if (box) {
-				let [bx, by, bw, bh] = box
-				;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
-				a[i+SB_SX+0] = sx
-				a[i+SB_SX+1] = sy
-				let s = ui.state(id)
-				s.set('scroll_x', sx)
-				s.set('scroll_y', sy)
-				s.delete('scroll_to_view')
-			}
 
 			// wheel scrolling
 			if (axis && ui.wheel_dy && hit(id)) {
