@@ -7,16 +7,17 @@ i.e. widgets depending on the state of other widgets that appear later in the
 frame. IMGUI makes it worse, but the problem itself is not IMGUI-specific.
 
 * solution #1: cmd record buffers:
-	* allows widgets to be built and have their state updated before being
-	  added to the layout, so that other widgets that should appear first in
-	  the layout can depend on their state.
+	* decouples build/state-update order from document order, so that widgets
+	  can depend on each other's state regardless of document order.
 	* CON: inter-record index references are not supported.
 		* FIX: use ct stack instead of storing ct_i.
+	* CON: you can't reference a widget that you don't own.
 
 * solution #2: keepalive update callbacks:
 	* split state update and command generation into separate stages.
 	* CON: must use widget state to pass information between the two stages
-	  instead of local variables. the split itself negates IMGUI's point.
+	  instead of local variables.
+	* CON: the later widget must have already been there the last frame.
 	* PRO: could solve the sync'ed scrollboxes problem (which is now translate
 	  phase) by moving offset calculation to build stage (but can't clamp it!).
 
@@ -33,6 +34,7 @@ THE I-CHANGED-A-WIDGET-ALREADY-BUILT PROBLEM
 	* CON: doubles the layout time so we can't do it on mouse move or animations.
 	* CON: must only be called inside a condition that is guaranteed to be false
 	  on the second pass.
+	* PRO: makes keepalive update callbacks work on the first frame.
 
 
 THE MEASURE-WHILE-BUILDING PROBLEM
