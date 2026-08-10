@@ -2620,7 +2620,12 @@ function ui_cmd_box_ct(cmd, fr, align, valign, min_w, min_h, ...args) {
 }
 
 ui.box_ct_widget = function(cmd_name, t) {
-	let ret = ui.box_widget(cmd_name, t, true)
+	let ret = ui.box_widget(cmd_name, {
+		measure   : ct_stack_push    ,
+		position  : position_stacked ,
+		translate : translate_ct     ,
+		...t,
+	}, true)
 	let cmd = cmd_name_map.get(cmd_name)
 	ui['end_'+cmd_name] = function() { ui.end(cmd) }
 	return ret
@@ -2904,13 +2909,14 @@ ui.stack = function(id, fr, align, valign, min_w, min_h) {
 
 measure[CMD_STACK] = ct_stack_push
 
-position[CMD_STACK] = function(a, i, axis, sx, sw) {
+function position_stacked(a, i, axis, sx, sw) {
 	let x = inner_x(a, i, axis, align_x(a, i, axis, sx, sw))
 	let w = inner_w(a, i, axis, align_w(a, i, axis, sw))
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 	position_children_stacked(a, i, axis, x, w)
 }
+position[CMD_STACK] = position_stacked
 is_flex_child[CMD_STACK] = true
 
 ui.end_stack = function() { ui.end(CMD_STACK) }
