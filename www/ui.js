@@ -1489,7 +1489,7 @@ window.addEventListener('focus', function(ev) {
 
 // container stack -----------------------------------------------------------
 
-// used in both frame creation and measuring stages.
+// used in both frame creation and measuring phases.
 
 let ct_stack = [] // [ct_i1,...]
 ui.ct_stack = ct_stack
@@ -1616,6 +1616,7 @@ function unsparse_all(i) {
 	unsparse(measure_end   , i)
 	unsparse(position      , i)
 	unsparse(translate     , i)
+	unsparse(register      , i)
 	unsparse(draw          , i)
 	unsparse(draw_end      , i)
 	unsparse(hittest       , i)
@@ -1753,12 +1754,11 @@ let measure       = []
 let measure_end   = []
 let position      = []
 let translate     = []
+let register      = []
 let draw          = []
 let draw_end      = []
 let hittest       = []
 let is_flex_child = []
-let pack          = []
-let unpack        = []
 
 ui.is_flex_child = is_flex_child
 
@@ -1798,6 +1798,14 @@ function position_rec(a, axis, ct_wh) {
 
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
+// NOTE: translate is not re-runnable by design, which enables:
+// - updating offsets by delta (popups do that),
+// - reading edge inputs (scrollbox reads wheel_dy),
+// - running on_frame callbacks which can read any edge inputs.
+// ... but it also means you can't re-translate something if you need to,
+// so you can't implement a simple force_scroll() that would work inside the
+// translate phase to re-scroll a scrollbox to sync it with a later one.
+
 function translate_rec(a, x, y) {
 	for (let i = 2, n = a.length; i < n; i = cmd_next_ext_i(a, i)) {
 		let cmd = a[i-1]
@@ -1808,8 +1816,19 @@ function translate_rec(a, x, y) {
 	}
 }
 
-ui.translate = function(a, i) {
-	// TODO
+// registration phase --------------------------------------------------------
+
+// walk the element tree in build order and call the register function for
+// each element that has it (linear scan).
+
+function register_rec(a, rec_i) {
+	for (let i = 2, n = a.length; i < n; i = cmd_next_i(a, i)) {
+		let cmd = a[i-1]
+		let register_f = register[cmd]
+		if (!register_f)
+			continue
+		register_f(a, i, rec_i)
+	}
 }
 
 // drawing phase -------------------------------------------------------------
@@ -1970,9 +1989,9 @@ ui.focusable = function(id) {
 	ui_cmd(FOCUSABLE, id)
 }
 
-// must happen on translate because that's when secondary recordings appear
-// in the layout in the right order.
-translate[FOCUSABLE] = function(a, i) {
+// must happen on register phase because that's when secondary recordings
+// are already in the layout in the right order.
+register[FOCUSABLE] = function(a, i) {
 	let id = a[i]
 	ui.focusables.push(id)
 }
@@ -1986,7 +2005,7 @@ ui.nohit = function(ct_i) {
 	a[i] -= i // make it relative
 }
 
-// doesn't have to happen on translate, any stage before hit-testing will do.
+// doesn't have to happen on translate, any phase before hit-testing will do.
 translate[NOHIT] = function(a, i) {
 	let ct_i = i+a[i]
 	if (!a.nohit_set)
@@ -2069,8 +2088,9 @@ async function unpack_frame(cb) {
 
 const CMD_MEASURE = cmd('measure')
 
-ui.measure = function(id) {
-	let i = ui_cmd(CMD_MEASURE, id, ui.ct_i())
+// measure current container after layouting and put it in ui.state(into_id).
+ui.measure = function(into_id) {
+	let i = ui_cmd(CMD_MEASURE, into_id, ui.ct_i())
 	a[i+1] -= i // make ct_i relative
 }
 
@@ -2087,6 +2107,9 @@ register[CMD_MEASURE] = function(a, i) {
 
 let want_relayout
 
+// NOTE: this must only be called conditionally on a condition that is
+// guaranteed to be false after relayout, or you risk a relayout loop, which
+// itself is guarded against with a warning and refusal to relayout again.
 ui.relayout = function() {
 	want_relayout = true
 }
@@ -2174,6 +2197,7 @@ function redraw_all() {
 
 		let a = end_rec()
 		layout_rec(a, 0, 0, screen_w, screen_h)
+		register_rec(a, 0)
 
 		t1 = clock_ms()
 		frame_graph_push('frame_layout_time', t1 - t0)
@@ -2237,6 +2261,7 @@ ui.widget = function(cmd_name, t, is_ct) {
 	measure_end   [_cmd] = t.measure_end
 	position      [_cmd] = t.position
 	translate     [_cmd] = t.translate
+	register      [_cmd] = t.register
 	draw          [_cmd] = t.draw
 	draw_end      [_cmd] = t.draw_end
 	hittest       [_cmd] = t.hit
@@ -2276,8 +2301,8 @@ function set_layer(layer, ct_i, z_index) {
 // array of (rec_i, i, z_index) tuples.
 let cmp_z_index = (a, i, v) => a[i*3+2] <= v
 
-// doesn't have to happen on translate, any stage before drawing will do.
-translate[CMD_SET_LAYER] = function(a, i) {
+// doesn't have to happen on register, any phase before drawing will do.
+register[CMD_SET_LAYER] = function(a, i, rec_i) {
 	let layer_i = a[i+0]
 	let ct_i  = i+a[i+1]
 	let z_index = a[i+2]
@@ -4739,7 +4764,7 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		on_measure, on_frame,
 		rel_ct_i,
-		0, // rec_i
+		-1, // rec_i, unset (0 is the main record)
 		current_layer.i,
 		...args
 	)
@@ -4756,7 +4781,7 @@ frame.measure = function(a, i, axis) {
 
 frame.translate = function(a, i, dx, dy) {
 
-	assert(!a[i+FRAME_REC_I], 'frame re-entered')
+	assert(a[i+FRAME_REC_I] == -1, 'frame re-entered')
 
 	a[i+0] += dx
 	a[i+1] += dy
@@ -4790,6 +4815,11 @@ frame.translate = function(a, i, dx, dy) {
 
 	layout_rec(a1, x, y, w, h)
 
+}
+
+frame.register = function(a, i) {
+	let rec_i = a[i+FRAME_REC_I]
+	register_rec(recs[rec_i], rec_i)
 }
 
 frame.draw = function(a, i, recs) {
