@@ -210,8 +210,6 @@ BOX WIDGET DEFINITIONS
 	inner_x         (a, i, axis, ct_x)    use in position callback
 	inner_w         (a, i, axis, ct_x)    use in position callback
 
-	force_scroll    (a, i, sx, sy)  use in translate callback to force-scroll another widget
-
 	ct_i            () -> ct_i    get container index in a; use in widget creation and in measure callback
 	last_i          () -> last_i  get the index of the last cmd in a
 
@@ -230,7 +228,7 @@ CONTAINERS
 	hv              ('h'|'v', fr, gap, align, valign, min_w, min_h)
 	h | v           (fr, gap, align, valign, min_w, min_h)
 	stack           (id, fr, align, valign, min_w, min_h)
-	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy)
+	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy, x_id, y_id)
 	popup           (id, layer, target_i, side, align, min_w, min_h, flags)
 	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
 	splitter        ()
@@ -1799,9 +1797,8 @@ function position_rec(a, axis, ct_wh) {
 // do scrolling and popup positioning and offset all boxes (top-down, recursive).
 
 // NOTE: translate is not re-runnable by design, which enables:
-// - updating offsets by delta (popups do that),
-// - reading edge inputs (scrollbox reads wheel_dy),
 // - running on_frame callbacks which can read any edge inputs.
+// - updating offsets by delta (popups do that),
 // ... but it also means you can't re-translate something if you need to,
 // so you can't implement a simple force_scroll() that would work inside the
 // translate phase to re-scroll a scrollbox to sync it with a later one.
@@ -2964,11 +2961,12 @@ draw[CMD_END_CLIP] = function() {
 
 // scrollbox -----------------------------------------------------------------
 
-const SB_OVERFLOW = BOX_CT_ARGS+0 // overflow x,y
-const SB_CW       = BOX_CT_ARGS+2 // content w,h
-const SB_ID       = BOX_CT_ARGS+4
-const SB_SX       = BOX_CT_ARGS+5 // scroll x,y
-const SB_STATE    = BOX_CT_ARGS+7
+const SB_OVERFLOW  = BOX_CT_ARGS+0 // overflow x,y
+const SB_CW        = BOX_CT_ARGS+2 // content w,h
+const SB_ID        = BOX_CT_ARGS+4
+const SB_SX        = BOX_CT_ARGS+5 // scroll x,y
+const SB_STATE     = BOX_CT_ARGS+7
+const SB_SCROLL_ID = BOX_CT_ARGS+8 // x_id,y_id: state ids sync'ed scrollboxes
 
 const SB_OVERFLOW_AUTO     = 0
 const SB_OVERFLOW_HIDE     = 1
@@ -2987,7 +2985,10 @@ function parse_sb_overflow(s) {
 
 const CMD_SCROLLBOX = cmd_ct('scrollbox')
 
-ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy) {
+ui.scrollbox = function(
+	id, fr, overflow_x, overflow_y, align, valign,
+	min_w, min_h, sx, sy, x_id, y_id
+) {
 
 	overflow_x = parse_sb_overflow(overflow_x)
 	overflow_y = parse_sb_overflow(overflow_y)
@@ -2995,29 +2996,27 @@ ui.scrollbox = function(id, fr, overflow_x, overflow_y, align, valign, min_w, mi
 	assert(id, 'id required for scrollbox')
 
 	keepalive(id)
-	let ss = ui.state(id)
-	sx ??= ss.get('scroll_x') ?? 0
-	sy ??= ss.get('scroll_y') ?? 0
+	if (x_id) keepalive(x_id)
+	if (y_id) keepalive(y_id)
+	let xstate = ui.state(x_id ?? id)
+	let ystate = ui.state(y_id ?? id)
+	if (sx != null) xstate.set('scroll_x', sx)
+	if (sy != null) ystate.set('scroll_y', sy)
 
 	let i = ui_cmd_box_ct(CMD_SCROLLBOX, fr, align, valign, min_w, min_h,
 		overflow_x,
 		overflow_y,
 		0, 0, // content w, h
 		id,
-		sx, // scroll x
-		sy, // scroll y
+		0, 0, // computed scroll x, y
 		0, // state
+		x_id,
+		y_id,
 	)
-	if (sx) ss.set('scroll_x', sx)
-	if (sy) ss.set('scroll_y', sy)
 
 	return i
 }
 ui.sb = ui.scrollbox
-
-ui.scroll_xy = function(a, i, axis) {
-	return a[i+SB_SX+axis]
-}
 
 ui.end_scrollbox = function() { ui.end(CMD_SCROLLBOX) }
 ui.end_sb = ui.end_scrollbox
@@ -3043,8 +3042,12 @@ position[CMD_SCROLLBOX] = function(a, i, axis, sx, sw) {
 	a[i+0+axis] = x
 	a[i+2+axis] = w
 	let content_w = a[i+SB_CW+axis]
-	let overflow = a[i+SB_OVERFLOW+axis]
 	position_children_stacked(a, i, axis, x, max(content_w, w))
+	// compute scrollbox offsets in position phase, not in translate phase
+	// because shared scrollbox offsets in x_id/y_id can be updated by later
+	// scrollboxes, and we can't do that translate (can't re-translate).
+	if (axis)
+		settle_scrollbox(a, i)
 }
 is_flex_child[CMD_SCROLLBOX] = true
 
@@ -3060,16 +3063,19 @@ function scroll_to_view_rect(x, y, w, h, pw, ph, sx, sy) {
 	]
 }
 
-translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
+function settle_scrollbox(a, i) {
 
-	let x  = a[i+0] + dx
-	let y  = a[i+1] + dy
 	let w  = a[i+2]
 	let h  = a[i+3]
 	let cw = a[i+SB_CW+0]
 	let ch = a[i+SB_CW+1]
-	let sx = a[i+SB_SX+0]
-	let sy = a[i+SB_SX+1]
+	let id = a[i+SB_ID]
+	let x_id = a[i+SB_SCROLL_ID+0]
+	let y_id = a[i+SB_SCROLL_ID+1]
+	let xstate = ui.state(x_id ?? id)
+	let ystate = ui.state(y_id ?? id)
+	let sx = xstate.get('scroll_x') ?? 0
+	let sy = ystate.get('scroll_y') ?? 0
 
 	let infinite_x = a[i+SB_OVERFLOW+0] == SB_OVERFLOW_INFINITE
 	let infinite_y = a[i+SB_OVERFLOW+1] == SB_OVERFLOW_INFINITE
@@ -3083,119 +3089,107 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 		a[i+SB_CW+1] = ch
 	}
 
-	a[i+0] = x
-	a[i+1] = y
-
 	if (!infinite_x) sx = max(0, min(sx, cw - w))
 	if (!infinite_y) sy = max(0, min(sy, ch - h))
 
 	let psx = sx / (cw - w)
 	let psy = sy / (ch - h)
 
-	let id = a[i+SB_ID]
-	if (id) {
-
-		// scroll to view an inner box
-		let box = ui.state(id, 'scroll_to_view')
-		if (box) {
-			let [bx, by, bw, bh] = box
-			;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
-			a[i+SB_SX+0] = sx
-			a[i+SB_SX+1] = sy
-			let s = ui.state(id)
-			s.set('scroll_x', sx)
-			s.set('scroll_y', sy)
-			s.delete('scroll_to_view')
-		}
-
-		let hit_state = 0
-		for (let axis = 0; axis < 2; axis++) {
-
-			let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
-			if (!visible)
-				continue
-
-			// wheel scrolling
-			if (axis && ui.wheel_dy && hit(id)) {
-				sy = sy + ui.wheel_dy
-				if (!infinite_y)
-					sy = clamp(sy, 0, max(0, ch - h))
-				ui.state(id).set('scroll_y', sy)
-				a[i+SB_SX+1] = sy
-			}
-
-			// drag-scrolling
-			let sbar_id = id+'.scrollbar'+axis
-			let cs = captured(sbar_id)
-			let hs
-			if (cs) {
-				if (!axis) {
-					let psx0 = cs.get('psx0')
-					let dpsx = (ui.mx - ui.mx0) / (w - tw)
-					sx = round((psx0 + dpsx) * (cw - w))
-					if (!infinite_x)
-						sx = clamp(sx, 0, cw - w)
-					ui.state(id).set('scroll_x', sx)
-					a[i+SB_SX+0] = sx
-				} else {
-					let psy0 = cs.get('psy0')
-					let dpsy = (ui.my - ui.my0) / (h - th)
-					sy = round((psy0 + dpsy) * (ch - h))
-					if (!infinite_y)
-						sy = clamp(sy, 0, max(0, ch - h))
-					ui.state(id).set('scroll_y', sy)
-					a[i+SB_SX+1] = sy
-				}
-			} else {
-				hs = hit(sbar_id)
-				if (!hs)
-					continue
-				let cs = ui.capture(sbar_id)
-				if (cs)
-					if (!axis)
-						cs.set('psx0', psx)
-					else
-						cs.set('psy0', psy)
-			}
-
-			// bits 0..1 = horiz state; bits 2..3 = vert. state.
-			hit_state |= (cs ? 2 : hs ? 1 : 0) << (2 * axis)
-		}
-		a[i+SB_STATE] = hit_state
+	// scroll to view an inner box
+	let box = ui.state(id, 'scroll_to_view')
+	if (box) {
+		let [bx, by, bw, bh] = box
+		;[sx, sy] = scroll_to_view_rect(bx, by, bw, bh, w, h, sx, sy)
+		xstate.set('scroll_x', sx)
+		ystate.set('scroll_y', sy)
+		ui.state(id).delete('scroll_to_view')
 	}
 
-	translate_children(a, i, dx - sx, dy - sy)
-
-}
-
-// can be used inside the translate phase of a widget to re-scroll a scrollbox
-// that might have already been scrolled.
-ui.force_scroll = function(a, i, sx, sy) {
-
-	assert(a[i-1] == CMD_SCROLLBOX)
-
-	let w   = a[i+2]
-	let h   = a[i+3]
-	let cw  = a[i+SB_CW+0]
-	let ch  = a[i+SB_CW+1]
-	let sx0 = a[i+SB_SX+0]
-	let sy0 = a[i+SB_SX+1]
-
-	sx = max(0, min(sx, cw - w))
-	sy = max(0, min(sy, ch - h))
-
+	// only setting these for scrollbar_rect().
 	a[i+SB_SX+0] = sx
 	a[i+SB_SX+1] = sy
 
-	// make it persistent
-	let id = a[i+SB_ID]
-	if (id) {
-		let s = ui.state(id)
-		s.set('scroll_x', sx)
-		s.set('scroll_y', sy)
-	}
+	let hit_state = 0
+	for (let axis = 0; axis < 2; axis++) {
 
-	translate_children(a, i, sx0-sx, sy0-sy)
+		let [visible, tx, ty, tw, th] = scrollbar_rect(a, i, axis)
+
+		// wheel scrolling
+		if (axis && ui.wheel_dy && hit(id) && (visible || y_id)) {
+			sy = sy + ui.wheel_dy
+			if (!infinite_y)
+				sy = max(0, min(sy, ch - h))
+			ystate.set('scroll_y', sy)
+		}
+		if (!visible)
+			continue
+
+		// drag-scrolling
+		let sbar_id = id+'.scrollbar'+axis
+		let cs = captured(sbar_id)
+		let hs
+		if (cs) {
+			if (!axis) {
+				let psx0 = cs.get('psx0')
+				let dpsx = (ui.mx - ui.mx0) / (w - tw)
+				sx = round((psx0 + dpsx) * (cw - w))
+				if (!infinite_x)
+					sx = max(0, min(sx, cw - w))
+				xstate.set('scroll_x', sx)
+			} else {
+				let psy0 = cs.get('psy0')
+				let dpsy = (ui.my - ui.my0) / (h - th)
+				sy = round((psy0 + dpsy) * (ch - h))
+				if (!infinite_y)
+					sy = max(0, min(sy, ch - h))
+				ystate.set('scroll_y', sy)
+			}
+		} else {
+			hs = hit(sbar_id)
+			if (!hs)
+				continue
+			let cs = ui.capture(sbar_id)
+			if (cs)
+				if (!axis)
+					cs.set('psx0', psx)
+				else
+					cs.set('psy0', psy)
+		}
+
+		// bits 0..1 = horiz state; bits 2..3 = vert. state.
+		hit_state |= (cs ? 2 : hs ? 1 : 0) << (2 * axis)
+	}
+	a[i+SB_STATE] = hit_state
+
+}
+
+translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
+
+	let x  = a[i+0] + dx
+	let y  = a[i+1] + dy
+	let w  = a[i+2]
+	let h  = a[i+3]
+	let cw = a[i+SB_CW+0]
+	let ch = a[i+SB_CW+1]
+	let id = a[i+SB_ID]
+	let x_id = a[i+SB_SCROLL_ID+0] ?? id
+	let y_id = a[i+SB_SCROLL_ID+1] ?? id
+	let sx = ui.state(x_id, 'scroll_x') ?? 0
+	let sy = ui.state(y_id, 'scroll_y') ?? 0
+
+	let infinite_x = a[i+SB_OVERFLOW+0] == SB_OVERFLOW_INFINITE
+	let infinite_y = a[i+SB_OVERFLOW+1] == SB_OVERFLOW_INFINITE
+
+	if (!infinite_x) sx = max(0, min(sx, cw - w))
+	if (!infinite_y) sy = max(0, min(sy, ch - h))
+
+	a[i+0] = x
+	a[i+1] = y
+	a[i+SB_SX+0] = sx
+	a[i+SB_SX+1] = sy
+
+	translate_children(a, i, dx - sx, dy - sy)
+
 }
 
 ui.scroll_to_view = function(id, x, y, w, h) {
@@ -3242,8 +3236,10 @@ scrollbar_rect = function(a, i, axis, state) {
 	let thickness = ui.scrollbar_thickness
 	let thickness_active = state ? ui.scrollbar_thickness_active : thickness
 	let visible, tx, ty, tw, th
-	let h_visible = overflow_x == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO && pw < 1
-	let v_visible = overflow_y == SB_OVERFLOW_SCROLL || overflow_y == SB_OVERFLOW_AUTO && ph < 1
+	let h_visible = pw < 1
+		&& (overflow_x == SB_OVERFLOW_SCROLL || overflow_x == SB_OVERFLOW_AUTO)
+	let v_visible = ph < 1
+		&& (overflow_y == SB_OVERFLOW_SCROLL || overflow_y == SB_OVERFLOW_AUTO)
 	let both_visible = h_visible && v_visible && 1 || 0
 	let bar_min_len = round(2 * ui.font_size_normal)
 	if (!axis) {
@@ -3402,7 +3398,9 @@ const POPUP_SIDE_REAL = BOX_CT_ARGS+3
 
 const CMD_POPUP = cmd_ct('popup')
 
-ui.popup = function(id, layer, target, side, align, min_w, min_h, flags, z_index) {
+ui.popup = function(
+	id, layer, target, side, align, min_w, min_h, flags, z_index
+) {
 	layer = ui_layer(layer)
 	let target_i = target == 'screen' ? 0
 		: !target || target == 'container' ? ui.ct_i()
@@ -3706,7 +3704,9 @@ const BB_TOOLTIP_CT_I = 0
 
 const CMD_BB_TOOLTIP = cmd('bb_tooltip')
 
-ui.bb_tooltip = function(bg_color, bg_color_state, border_color, border_color_state, border_radius) {
+ui.bb_tooltip = function(
+	bg_color, bg_color_state, border_color, border_color_state, border_radius
+) {
 	let ct_i = ui.ct_i()
 	let rel_ct_i = ui.rel_ct_i()
 	assert(a[ct_i-1] == CMD_POPUP, 'bb_tooltip container must be a popup')
@@ -3949,7 +3949,9 @@ ui.bb = function(
 	)
 }
 
-ui.border = function(border_sides, border_color, border_color_state, border_radius, border_dash) {
+ui.border = function(
+	border_sides, border_color, border_color_state, border_radius, border_dash
+) {
 	return ui.bb(null, null, border_sides ?? true, border_color,
 		border_color_state, border_radius, border_dash)
 }
@@ -4244,7 +4246,9 @@ const TEXT_FOCUSED   = 8 // bit 4
 
 const CMD_TEXT = cmd('text')
 
-ui.text = function(id, s, fr, align, valign, max_w, w, h, wrap, editable, input_type) {
+ui.text = function(
+	id, s, fr, align, valign, max_w, w, h, wrap, editable, input_type
+) {
 	// NOTE: w and h default to measured text size.
 	s = s ?? ''
 	wrap = wrap == 'line' ? TEXT_WRAP_LINE : wrap == 'word' ? TEXT_WRAP_WORD : 0
@@ -4761,7 +4765,9 @@ ui.FRAME_ARGS_I = FRAME_ARGS_I
 
 let frame = {}
 
-frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args) {
+frame.create = function(
+	cmd, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args
+) {
 
 	let ct_i = ui.ct_i()
 	let rel_ct_i = ui.rel_ct_i()
@@ -5305,7 +5311,9 @@ ui.end_button_stack = function(state) {
 	return state == 'click'
 }
 
-ui.icon_button = function(id, font, icon, fr, align, valign, min_w, min_h, style) {
+ui.icon_button = function(
+	id, font, icon, fr, align, valign, min_w, min_h, style
+) {
 	min_w ??= ui.em(1.5) // force h
 	min_h ??= ui.em(1.5) // force h
 	ui.button_stack(id, fr, align, valign, min_w, min_h)

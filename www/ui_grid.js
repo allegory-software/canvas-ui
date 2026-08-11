@@ -311,18 +311,12 @@ function init(id, e) {
 
 	}
 
-	let h_sb_i // cmd record index of header scrollbox
-
 	function on_cellview_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
 		page_row_count = floor(vh / cell_h)
 
 		let sx = vx - x
 		let sy = vy - y
-
-		// scroll the header scrollbox to match the scroll offset of the cell view.
-		// TODO: make this work!
-		ui.force_scroll(a, h_sb_i, sx, 0)
 
 		// find the visible row range
 
@@ -1243,7 +1237,9 @@ function init(id, e) {
 				ui.end_h()
 			}
 
-			h_sb_i = ui.scrollbox(id+'.header', 0, e.auto_expand ? 'contain' : 'hide', 'contain')
+			ui.scrollbox(id+'.header', 0,
+				e.auto_expand ? 'contain' : 'hide', 'contain',
+				null, null, null, null, null, null, id+'.cells_scrollbox')
 
 				ui.stack(id+'.header')
 				ui.measure(id+'.header')
