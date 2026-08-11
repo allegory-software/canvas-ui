@@ -715,36 +715,24 @@ function code_edit_view(id, opt) {
 		let cursor = cursors[cursor_i]
 		if (!cursor_has_selection(cursor))
 			return
-		let sel_text = selected_text(cursor)
-		let sline1 = min(cursor.sel_line, cursor.line)
-		let sline2 = max(cursor.sel_line, cursor.line)
-		let schar1, schar2
-		let pos1, pos2
-		if (sline1 == sline2) {
-			schar1 = min(cursor.char, cursor.sel_char)
-			schar2 = max(cursor.char, cursor.sel_char)
-			pos1 = pos_at(sline1, schar1)
-			pos2 = pos_at(sline2, schar2)
+		let line1 = min(cursor.sel_line, cursor.line)
+		let line2 = max(cursor.sel_line, cursor.line)
+		let char1, char2
+		if (line1 == line2) {
+			char1 = min(cursor.char, cursor.sel_char)
+			char2 = max(cursor.char, cursor.sel_char)
 		} else {
-			schar1 = sline1 == cursor.line ? cursor.char : cursor.sel_char
-			schar2 = sline2 == cursor.line ? cursor.char : cursor.sel_char
-			pos1 = pos_at(sline1, schar1)
-			pos2 = pos_at(sline2, schar2)
+			char1 = line1 == cursor.line ? cursor.char : cursor.sel_char
+			char2 = line2 == cursor.line ? cursor.char : cursor.sel_char
 		}
-		lines[sline1] = lines[sline1].slice(0, schar1) + lines[sline2].slice(schar2)
-		remove_lines(sline1 + 1, sline2 - sline1)
-
-		undo_push(insert_text_at, sline1, schar1, sel_text)
-		set_cursor(cursor_i, sline1, schar1)
-
-		lines_changed(pos1, pos2)
+		remove_text_at(line1, char1, line2, char2)
+		set_cursor(cursor_i, line1, char1)
 	}
 
-	function insert_text_at(cursor, s) {
-		// split line at cursor
-		let line_s = lines[cursor.line]
-		let s1 = line_s.slice(0, cursor.char)
-		let s2 = line_s.slice(cursor.char)
+	function insert_text_at(line, char, s) {
+		let line_s = lines[line]
+		let s1 = line_s.slice(0, char)
+		let s2 = line_s.slice(char)
 		// normalize line terminators before splitting so that text passed
 		// to lines_changes() below matches the text in the lines.
 		s = normalize_newlines(s)
@@ -753,20 +741,39 @@ function code_edit_view(id, opt) {
 		// prepend s1 to the first insert line.
 		ins_lines[0] = s1 + ins_lines[0]
 		// append s2 to the last insert line.
-		let new_cursor_char = ins_lines.at(-1).length
+		let end_line = line + ins_lines.length - 1
+		let end_char = ins_lines.at(-1).length
 		ins_lines[ins_lines.length-1] += s2
 		// make room for new lines (first line is fused at cursor).
-		insert_lines(cursor.line + 1, ins_lines.length - 1)
+		insert_lines(line + 1, ins_lines.length - 1)
 		// set the new lines (first and last is overwritten).
 		for (let i = 0, n = ins_lines.length; i < n; i++)
-			lines[cursor.line + i] = ins_lines[i]
-		// update editor state.
-		let pos1 = pos_at(cursor.line, cursor.char)
+			lines[line + i] = ins_lines[i]
+		let pos1 = pos_at(line, char)
 
-		cursor.line += ins_lines.length - 1
-		cursor.char = new_cursor_char
-
+		undo_push(remove_text_at, line, char, end_line, end_char)
 		lines_changed(pos1, pos1, s)
+		return [end_line, end_char]
+	}
+
+	function remove_text_at(line1, char1, line2, char2) {
+		let removed_s
+		if (line1 == line2) {
+			removed_s = lines[line1].slice(char1, char2)
+		} else {
+			let removed_lines = [lines[line1].slice(char1)]
+			for (let line = line1 + 1; line < line2; line++)
+				removed_lines.push(lines[line])
+			removed_lines.push(lines[line2].slice(0, char2))
+			removed_s = removed_lines.join(newline)
+		}
+		let pos1 = pos_at(line1, char1)
+		let pos2 = pos_at(line2, char2)
+		lines[line1] = lines[line1].slice(0, char1) + lines[line2].slice(char2)
+		remove_lines(line1 + 1, line2 - line1)
+
+		undo_push(insert_text_at, line1, char1, removed_s)
+		lines_changed(pos1, pos2)
 	}
 
 	function indent_selection(cursor) {
@@ -1188,7 +1195,9 @@ function code_edit_view(id, opt) {
 					} else if (key == 'paste') {
 						undo_group = 'paste'
 						remove_selection(cursor_i)
-						insert_text_at(cursor, ui.clipboard_text)
+						let [line, char] = insert_text_at(cursor.line, cursor.char,
+							ui.clipboard_text)
+						set_cursor(cursor_i, line, char)
 					} else if (full_key == 'ctrl z') { // undo, redo
 						undo_group = 'undo'
 						undo()
