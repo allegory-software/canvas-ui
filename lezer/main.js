@@ -1,4 +1,5 @@
 import {parseMixed, Tree, TreeFragment} from "@lezer/common";
+import {classHighlighter, highlightTree} from "@lezer/highlight";
 import {Text} from "@codemirror/state";
 import {parser as htmlParser} from "@lezer/html";
 import {parser as jsParser} from "@lezer/javascript";
@@ -10,6 +11,8 @@ import {parser as luaParser} from "./lezer-lua/lua-parser.js";
 window.Lezer = {
 	Tree,
 	TreeFragment,
+	classHighlighter,
+	highlightTree,
 	Text,
 	parsers: {
 		js:  jsParser,

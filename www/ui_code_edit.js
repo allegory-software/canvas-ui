@@ -72,63 +72,20 @@ ui.fg_style('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
 ui.fg_style('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
 ui.fg_style('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
 
-let node_colors = {
-// HTML
-	StartTag:        'keyword',
-	EndTag:          'keyword',
-	StartCloseTag:   'keyword',
-	TagName:         'keyword', // shared with CSS tag selector
-	AttributeName:   'text',
-	AttributeValue:  'string',
-	UnquotedAttributeValue: 'string',
-	Comment:         'comment',
-	DoctypeDecl:     'keyword',
-	Is:              'symbol',
-// CSS
-	UniversalSelector: 'keyword',
-	'#':             'symbol',
-	'::':            'symbol',
-	':':             'symbol', // shared with JS
-	TypeSelector:    'keyword',
-	AttributeSelector: 'keyword', // TODO: followed by TagSelector, TagName etc.
-	MatchOp:         'symbol', // = from [a=b] from AttributeSelector
-	PseudoClassName: 'string',
-	Atrule:          'keyword', // @media
-	AtruleName:      'keyword',
-	MediaFeature:    'keyword',
-	//PropertyName:    'symbol', // shared with JS
-	Important:       'keyword',
-	ValueName:       'symbol',
-	NumberLiteral:   'number',
-	Unit:            'symbol',
-// JS
-	String:          'string',
-	Number:          'number',
-	BooleanLiteral:  'keyword',
-	ArithOp:         'symbol',
-	CompareOp:       'symbol',
-	LogicOp:         'symbol',
-	BitOp:           'symbol',
-	UpdateOp:        'symbol',
-	Arrow:           'symbol',
-	Equals:          'symbol',
-	LineComment:     'comment',
-	BlockComment:    'comment',
-}
-
-for (let keyword of [
-	'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
-	'default', 'delete', 'do', 'else', 'export', 'extends', 'finally',
-	'for', 'function', 'if', 'import', 'in', 'instanceof', 'let', 'new', 'null',
-	'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var',
-	'void', 'while', 'with', 'yield',
-]) {
-	node_colors[keyword] = 'keyword'
-}
-for (let symbol of [
-	'(', ')', '{', '}', '[', ']', '.', ';', ',', ':', '?', '?.',
-]) {
-	node_colors[symbol] = 'symbol'
+let token_colors = {
+	'tok-keyword':     'keyword',
+	'tok-atom':        'keyword',
+	'tok-bool':        'keyword',
+	'tok-typeName':    'keyword',
+	'tok-className':   'keyword',
+	'tok-meta':        'keyword',
+	'tok-string':      'string',
+	'tok-string2':     'string',
+	'tok-url':         'string',
+	'tok-number':      'number',
+	'tok-operator':    'symbol',
+	'tok-punctuation': 'symbol',
+	'tok-comment':     'comment',
 }
 
 function indent(s, tab_width) {
@@ -951,19 +908,20 @@ function code_edit_view(id, opt) {
 	function build_colors() {
 		for (let a of line_colors)
 			a.length = 0
-		let c = syntax_tree.cursor()
-		let text = lines.join(newline)
-		do {
-			// pr(c.name, text.substring(c.from, c.to).substring(0, 20))
-			if (c.name == 'VariableName')
-				{} // TODO: look up known variable names
-			let color = node_colors[c.name]
+		Lezer.highlightTree(syntax_tree, Lezer.classHighlighter,
+		function(from, to, classes) {
+			let color = classes.includes('tok-invalid') ? 'error' : null
+			for (let cls of classes.split(' ')) {
+				color = color || token_colors[cls]
+				if (color)
+					break
+			}
 			if (!color)
-				continue
-			let line1 = find_line(c.from)
-			let line2 = find_line(c.to)
+				return
+			let line1 = find_line(from)
+			let line2 = find_line(to)
 			let line1_s = lines[line1]
-			let char1 = c.from - line_offset(line1)
+			let char1 = from - line_offset(line1)
 			let col1 = char_to_col(char1, line1_s, tab_width)
 			if (line2 > line1) {
 				let w1 = char_to_col(line1_s.length, line1_s, tab_width) - col1
@@ -974,14 +932,14 @@ function code_edit_view(id, opt) {
 					line_colors[line].push(0, w, color)
 				}
 				let line2_s = lines[line2]
-				let char2 = c.to - line_offset(line2)
+				let char2 = to - line_offset(line2)
 				let col2 = char_to_col(char2, line2_s, tab_width)
 				line_colors[line2].push(0, col2, color)
 			} else {
-				let w = c.to - c.from
+				let w = to - from
 				line_colors[line1].push(col1, w, color)
 			}
-		} while (c.next())
+		})
 	}
 
 	// UI ---------------------------------------------------------------------
@@ -1044,7 +1002,7 @@ function code_edit_view(id, opt) {
 			font_descent = m.fontBoundingBoxDescent
 		}
 		let sidebar_w = (lines.length+'').length * char_w
-		let text_w = ceil(max_line_col * char_w)
+		let text_w = ceil(max_line_col * char_w + caret_w)
 		let text_h = lines.length * line_h
 
 		let [drag_state, , , drag_cs] = ui.drag(id+'.text_contentbox')
@@ -1077,7 +1035,7 @@ function code_edit_view(id, opt) {
 								remove_cursor(cursor_i)
 								drag_cs.set('removed_cursor', true)
 							}
-						} else if (cursor_has_selection(cursors[0]))
+						} else
 							add_first_cursor(hit_line, hit_char)
 					} else {
 						remove_extra_cursors()
@@ -1206,8 +1164,10 @@ function code_edit_view(id, opt) {
 								if (cursor.char) {
 									set_cursor(cursor_i, cursor.line, cursor.char-1)
 								} else if (cursor.line) {
-									set_cursor(cursor_i, cursor.line-1, lines[cursor.line].length)
-								}
+									let prev_line = cursor.line-1
+									set_cursor(cursor_i, prev_line, lines[prev_line].length)
+								} else
+									continue
 							}
 							remove_char_at(cursor.line, cursor.char)
 						}

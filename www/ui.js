@@ -3089,8 +3089,12 @@ function settle_scrollbox(a, i) {
 		a[i+SB_CW+1] = ch
 	}
 
+	let sx0 = sx
+	let sy0 = sy
 	if (!infinite_x) sx = max(0, min(sx, cw - w))
 	if (!infinite_y) sy = max(0, min(sy, ch - h))
+	if (sx != sx0) xstate.set('scroll_x', sx)
+	if (sy != sy0) ystate.set('scroll_y', sy)
 
 	let psx = sx / (cw - w)
 	let psy = sy / (ch - h)
