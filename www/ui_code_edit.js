@@ -440,7 +440,7 @@ function code_edit_view(id, opt) {
 	// compute line offsets, starting with the 2nd line!
 	function compute_line_offsets() {
 		line_offsets.length = lines.length-1
-		let pos = lines[0].length + 1
+		let pos = lines[0].length + newline.length
 		for (let i = 1, n = lines.length; i < n; i++) {
 			line_offsets[i-1] = pos
 			pos += lines[i].length + newline.length
@@ -448,7 +448,7 @@ function code_edit_view(id, opt) {
 	}
 
 	function text_length() {
-		return line_offsets.at(-1) + lines.at(-1).length
+		return line_offset(lines.length-1) + lines.at(-1).length
 	}
 
 	function line_offset(line) {
@@ -463,8 +463,7 @@ function code_edit_view(id, opt) {
 	}
 
 	function find_char(line, pos) {
-		let line_pos = line_offset(line)
-		return pos - line_offset
+		return pos - line_offset(line)
 	}
 
 	// char <-> col -----------------------------------------------------------
@@ -499,8 +498,8 @@ function code_edit_view(id, opt) {
 		return char_to_col(cursor.char, line_s, tab_width)
 	}
 
-	function cursor_want_col_char(cursor) {
-		let line_s = lines[cursor.line]
+	function cursor_want_col_char(cursor, line) {
+		let line_s = lines[line]
 		return col_to_char(cursor.want_col, line_s, tab_width)
 	}
 
@@ -869,7 +868,7 @@ function code_edit_view(id, opt) {
 				sel_line: line2,
 				sel_char: char2,
 			})
-			return Lezer.Text.of(s.split(newline))
+			return s
 		}
 		get lineChunks() {
 			return false
@@ -1129,14 +1128,18 @@ function code_edit_view(id, opt) {
 							remove_extra_cursors()
 						let new_line
 						let new_char
-						if (lines_n < 0) {
+						if (lines_n == -1/0) {
+							new_line = 0
+							new_char = 0
+						} else if (lines_n == 1/0) {
+							new_line = lines.length-1
+							new_char = lines[new_line].length
+						} else if (lines_n < 0) {
 							new_line = max(cursor.line + lines_n, 0)
-							new_char = cursor.line ? cursor_want_col_char(cursor) : 0
+							new_char = cursor_want_col_char(cursor, new_line)
 						} else if (lines_n > 0) {
 							new_line = min(cursor.line + lines_n, lines.length-1)
-							new_char = cursor.line < lines.length-1
-								? cursor_want_col_char(cursor)
-								: lines[cursor.line].length
+							new_char = cursor_want_col_char(cursor, new_line)
 						}
 						set_cursor(cursor_i, new_line, new_char, shift && !alt, true)
 						if (alt)
