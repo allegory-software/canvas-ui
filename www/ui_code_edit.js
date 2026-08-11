@@ -926,7 +926,7 @@ function code_edit_view(id, opt) {
 			let char1 = c.from - line_offset(line1)
 			let col1 = char_to_col(char1, line1_s, tab_width)
 			if (line2 > line1) {
-				let w1 = char_to_col(line1_s.length, line1_s, tab_width)
+				let w1 = char_to_col(line1_s.length, line1_s, tab_width) - col1
 				line_colors[line1].push(col1, w1, color)
 				for (let line = line1 + 1; line < line2; line++) {
 					let line_s = lines[line]
@@ -936,8 +936,7 @@ function code_edit_view(id, opt) {
 				let line2_s = lines[line2]
 				let char2 = c.to - line_offset(line2)
 				let col2 = char_to_col(char2, line2_s, tab_width)
-				let w2 = char_to_col(line2_s.length, line2_s, tab_width)
-				line_colors[line2].push(0, w2, color)
+				line_colors[line2].push(0, col2, color)
 			} else {
 				let w = c.to - c.from
 				line_colors[line1].push(col1, w, color)
