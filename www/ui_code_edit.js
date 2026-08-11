@@ -776,31 +776,57 @@ function code_edit_view(id, opt) {
 		lines_changed(pos1, pos2)
 	}
 
-	function indent_selection(cursor) {
-		let line1 = min(cursor.line, cursor.sel_line)
-		let line2 = max(cursor.line, cursor.sel_line)
-		for (let i = line1; i <= line2; i++)
-			lines[i] = '\t' + lines[i]
-		cursor.char     ++
-		cursor.sel_char ++
-
+	function replace_lines(line1, new_lines) { // new_lines become old_lines!
+		for (let i = 0; i < new_lines.length; i++) {
+			let old_line = lines[line1 + i]
+			lines[line1 + i] = new_lines[i]
+			new_lines[i] = old_line
+		}
+		undo_push(replace_lines, line1, new_lines)
 		lines_changed()
 	}
 
-	function outdent_selection(cursor) {
+	function indent_selection(cursor_i) {
+		let cursor = cursors[cursor_i]
 		let line1 = min(cursor.line, cursor.sel_line)
 		let line2 = max(cursor.line, cursor.sel_line)
-		for (let i = line1; i <= line2; i++) {
-			let s1 = lines[i]
-			let s2 = s1.replace(/^\t/, '')
-			lines[i] = s2
-			if (cursor.line == i)
-				cursor.char -= s1.length - s2.length
-			if (cursor.sel_line == i)
-				cursor.sel_char -= s1.length - s2.length
-		}
+		let new_lines = lines.slice(line1, line2 + 1)
+		for (let i = 0; i < new_lines.length; i++)
+			new_lines[i] = '\t' + new_lines[i]
+		replace_lines(line1, new_lines)
+		let new_cursor = assign({}, cursor)
+		new_cursor.char++
+		new_cursor.sel_char++
+		replace_cursor(cursor_i, new_cursor)
+	}
 
-		lines_changed()
+	function outdent_selection(cursor_i) {
+		let cursor = cursors[cursor_i]
+		let line1 = min(cursor.line, cursor.sel_line)
+		let line2 = max(cursor.line, cursor.sel_line)
+		let has_tabs = false
+		for (let i = line1; i <= line2; i++) {
+			if (lines[i].charCodeAt(0) == 9) {
+				has_tabs = true
+				break
+			}
+		}
+		if (!has_tabs)
+			return
+		let new_lines = lines.slice(line1, line2 + 1)
+		let new_cursor = assign({}, cursor)
+		for (let i = line1; i <= line2; i++) {
+			let line_s = new_lines[i - line1]
+			if (line_s.charCodeAt(0) != 9)
+				continue
+			new_lines[i - line1] = line_s.slice(1)
+			if (cursor.line == i && cursor.char)
+				new_cursor.char--
+			if (cursor.sel_line == i && cursor.sel_char)
+				new_cursor.sel_char--
+		}
+		replace_lines(line1, new_lines)
+		replace_cursor(cursor_i, new_cursor)
 	}
 
 	// undo/redo --------------------------------------------------------------
@@ -1181,9 +1207,11 @@ function code_edit_view(id, opt) {
 							remove_char_at(cursor.line, cursor.char)
 						}
 					} else if (full_key == 'tab') {
-						indent_selection(cursor)
+						undo_group = 'indent'
+						indent_selection(cursor_i)
 					} else if (full_key == 'shift tab') {
-						outdent_selection(cursor)
+						undo_group = 'indent'
+						outdent_selection(cursor_i)
 					} else if (full_key == 'ctrl c') { // cut, copy, paste
 						let sel_text = selected_text(cursor)
 						navigator.clipboard.writeText(sel_text)
