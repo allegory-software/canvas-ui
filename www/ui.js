@@ -4770,7 +4770,7 @@ frame.create = function(cmd, on_measure, on_frame, fr, align, valign, min_w, min
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		on_measure, on_frame,
 		rel_ct_i,
-		-1, // rec_i, unset (0 is the main record)
+		null, // rec_i, unset (0 is the main record)
 		current_layer.i,
 		...args
 	)
@@ -4787,7 +4787,7 @@ frame.measure = function(a, i, axis) {
 
 frame.translate = function(a, i, dx, dy) {
 
-	assert(a[i+FRAME_REC_I] == -1, 'frame re-entered')
+	assert(a[i+FRAME_REC_I] == null, 'frame re-entered')
 
 	a[i+0] += dx
 	a[i+1] += dy
