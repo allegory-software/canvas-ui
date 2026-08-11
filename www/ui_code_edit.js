@@ -482,17 +482,6 @@ function code_edit_view(id, opt) {
 		return line_offset(line) + char
 	}
 
-	// TODO: unused
-	function cursor_in_indent(cursor) {
-		let s = lines[cursor.line]
-		for (let i = 0, n = cursor.char; i < n; i++) {
-			let c = s.charCodeAt(i)
-			if (c != 9 && c != 32)
-				return false
-		}
-		return true
-	}
-
 	function cursor_want_col(cursor) {
 		let line_s = lines[cursor.line]
 		return char_to_col(cursor.char, line_s, tab_width)
@@ -729,7 +718,7 @@ function code_edit_view(id, opt) {
 		set_cursor(cursor_i, line1, char1)
 	}
 
-	function insert_text_at(line, char, s) {
+	function insert_text_at(line, char, s, normalize_tabs) {
 		let line_s = lines[line]
 		let s1 = line_s.slice(0, char)
 		let s2 = line_s.slice(char)
@@ -738,6 +727,22 @@ function code_edit_view(id, opt) {
 		s = normalize_newlines(s)
 		// split insert text into lines
 		let ins_lines = text_lines(s)
+		if (normalize_tabs) {
+			let in_indent = !/[^\t ]/.test(s1)
+			let changed
+			for (let i = 0; i < ins_lines.length; i++) {
+				let line_s = ins_lines[i]
+				let content_char = i > 0 || in_indent
+					? line_s.search(/[^\t ]/) : 0
+				if (content_char < 0 || line_s.indexOf('\t', content_char) < 0)
+					continue
+				ins_lines[i] = line_s.slice(0, content_char)
+					+ line_s.slice(content_char).replaceAll('\t', ' ')
+				changed = true
+			}
+			if (changed)
+				s = ins_lines.join(newline)
+		}
 		// prepend s1 to the first insert line.
 		ins_lines[0] = s1 + ins_lines[0]
 		// append s2 to the last insert line.
@@ -1224,7 +1229,7 @@ function code_edit_view(id, opt) {
 						undo_group = 'paste'
 						remove_selection(cursor_i)
 						let [line, char] = insert_text_at(cursor.line, cursor.char,
-							ui.clipboard_text)
+							ui.clipboard_text, true)
 						set_cursor(cursor_i, line, char)
 					} else if (full_key == 'ctrl z') { // undo, redo
 						undo_group = 'undo'
