@@ -335,6 +335,8 @@ ui.widget('code_edit_text', {
 			cx.fillStyle = ui.bg_color('item', 'focused item-focused item-selected')
 			let sline1 = min(cursor.sel_line, cursor.line)
 			let sline2 = max(cursor.sel_line, cursor.line)
+			if (sline2 < vline1 || sline1 > vline2)
+				continue
 			let vsline1 = clamp(sline1, vline1, vline2)
 			let vsline2 = clamp(sline2, vline1, vline2)
 			if (sline1 < sline2) { // multi-line
