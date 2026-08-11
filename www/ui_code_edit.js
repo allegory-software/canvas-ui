@@ -367,6 +367,8 @@ function code_edit_view(id, opt) {
 	let max_line_col
 
 	// parsing/highlighting state.
+	let lang = opt.lang ?? 'html'
+	let parser = assert(Lezer.parsers[lang], 'invalid language ', lang)
 	let syntax_tree // per Lezer parsing
 	let line_colors = [] // token colors: [[char, width, color], ...], ...]  1:1 with lines
 
@@ -846,24 +848,28 @@ function code_edit_view(id, opt) {
 		chunk(pos) {
 			let line = find_line(pos)
 			let line_pos = line_offset(line)
-			let s = lines[line].slice(pos - line_pos)
+			let char = pos - line_pos
+			let line_s = lines[line]
+			if (char < line_s.length)
+				return line_s.slice(char)
+					+ (line < lines.length - 1 ? newline : '')
 			if (line < lines.length - 1)
-				s += newline
-			return s
+				return newline.slice(char - line_s.length)
+			return ''
 		}
 		read(from, to) {
-			// TODO: this is stupid
-			let line1 = find_line(from)
-			let line2 = find_line(to)
-			let char1 = find_char(line1, from)
-			let char2 = find_char(line2, to)
-			let s = selected_text({
-				line: line1,
-				char: char1,
-				sel_line: line2,
-				sel_char: char2,
-			})
-			return s
+			let line = find_line(from)
+			let line_pos = line_offset(line)
+			let line_s = lines[line]
+			if (to <= line_pos + line_s.length)
+				return line_s.slice(from - line_pos, to - line_pos)
+			let parts = []
+			while (from < to) {
+				let s = this.chunk(from).slice(0, to - from)
+				parts.push(s)
+				from += s.length
+			}
+			return parts.join('')
 		}
 		get lineChunks() {
 			return false
@@ -898,9 +904,9 @@ function code_edit_view(id, opt) {
 			}]
 			let fragments = Lezer.TreeFragment.addTree(syntax_tree)
 			fragments = Lezer.TreeFragment.applyChanges(fragments, change_ranges)
-			syntax_tree = Lezer.parsers.html.parse(lines_input, fragments)
+			syntax_tree = parser.parse(lines_input, fragments)
 		} else {
-			syntax_tree = Lezer.parsers.html.parse(lines_input)
+			syntax_tree = parser.parse(lines_input)
 		}
 		build_colors()
 	}

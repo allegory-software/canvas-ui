@@ -10650,24 +10650,29 @@
   });
 
   // main.js
+  var errorProps = [styleTags({
+    '"\\u26a0"!': tags.invalid
+  })];
+  var parsers = {
+    js: parser2.configure({ props: errorProps }),
+    css: parser3.configure({ props: errorProps }),
+    cpp: parser4.configure({ props: errorProps }),
+    md: parser5.configure({ props: errorProps }),
+    lua: parser6.configure({ props: errorProps })
+  };
+  parsers.html = parser.configure({
+    props: errorProps,
+    wrap: parseMixed((node) => {
+      if (node.name == "ScriptText") return { parser: parsers.js };
+      if (node.name == "StyleText") return { parser: parsers.css };
+    })
+  });
   window.Lezer = {
     Tree,
     TreeFragment,
     classHighlighter,
     highlightTree,
     Text,
-    parsers: {
-      js: parser2,
-      css: parser3,
-      cpp: parser4,
-      md: parser5,
-      lua: parser6,
-      html: parser.configure({
-        wrap: parseMixed((node) => {
-          if (node.name == "ScriptText") return { parser: parser2 };
-          if (node.name == "StyleText") return { parser: parser3 };
-        })
-      })
-    }
+    parsers
   };
 })();
