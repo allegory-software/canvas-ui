@@ -1056,9 +1056,6 @@ function code_edit_view(id, opt) {
 
 		// process keyboard input
 
-		let lines_n = 0
-		let chars_n = 0
-		let scroll_lines = 0
 		if (ui.focused(id)) {
 
 			ui.capture_keydown(id, 'ctrl f') // browser: find -> editor: find
@@ -1069,6 +1066,9 @@ function code_edit_view(id, opt) {
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
 					continue
+				let lines_n = 0
+				let chars_n = 0
+				let scroll_lines = 0
 
 				// NOTE: some key combos are captured by browser, namely:
 				// ctrl+pgup/dn, ctrl(+shift)+tab
