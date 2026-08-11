@@ -422,9 +422,7 @@ function code_edit_view(id, opt) {
 	let vcolors = [] // token colors: [vline1_colors, ...]
 
 	// mouse state
-	let drag_state
 	let hit_line
-	let hit_char
 
 	// cursors state.
 	let cursors = [] // dragging cursor always at cursors[0].
@@ -1010,13 +1008,12 @@ function code_edit_view(id, opt) {
 		let text_w = ceil(max_line_len * char_w)
 		let text_h = lines.length * line_h
 
-		;[drag_state] = ui.drag(id+'.text_contentbox')
+		let [drag_state, , , drag_cs] = ui.drag(id+'.text_contentbox')
 		if (drag_state == 'drag')
 			ui.focus(id)
 
 		// move cursor and select text based on mouse clicking and dragging.
 		hit_line = null
-		hit_char = null
 		if (drag_state) {
 			let text_state = ui.state(id+'.text_contentbox')
 			let x = text_state.get('x')
@@ -1025,7 +1022,7 @@ function code_edit_view(id, opt) {
 			hit_line = clamp(hit_line, 0, lines.length-1)
 			let line_s = lines[hit_line]
 			let hit_col = floor((ui.mx - x + char_w / 2) / char_w)
-			hit_char = col_to_char(hit_col, line_s, tab_width)
+			let hit_char = col_to_char(hit_col, line_s, tab_width)
 			hit_char = clamp(hit_char, 0, line_s.length)
 			let shift = ui.key('shift') // TODO: use to change selection end
 			let ctrl  = ui.key('ctrl' )
@@ -1034,17 +1031,20 @@ function code_edit_view(id, opt) {
 				let cursor_i = -1
 				if (drag_state == 'drag') {
 					if (ctrl) { // add/remove cursor
-						cursor_i = cursors.findIndex(c => c.line == hit_line && c.char && hit_char)
+						cursor_i = cursors.findIndex(c =>
+							c.line == hit_line && c.char == hit_char)
 						if (cursor_i != -1) {
-							if (cursors.length > 1)
+							if (cursors.length > 1) {
 								remove_cursor(cursor_i)
+								drag_cs.set('removed_cursor', true)
+							}
 						} else if (cursor_has_selection(cursors[0]))
 							add_first_cursor(hit_line, hit_char)
 					} else {
 						remove_extra_cursors()
 					}
 				}
-				if (cursor_i == -1) {
+				if (cursor_i == -1 && !drag_cs.get('removed_cursor')) {
 					if (drag_state == 'dragging')
 						undo_group = 'ignore'
 					let keep_selection = drag_state != 'drag'
