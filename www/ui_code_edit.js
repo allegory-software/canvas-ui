@@ -982,10 +982,46 @@ function code_edit_view(id, opt) {
 			last_vline2 = vline2
 		}
 
+		ui.stack(id+'.text_contentbox')
+			ui.measure(id+'.text_contentbox')
+			ui.code_edit_text(x, y, vx, vy, vw, vh,
+				line_h, font_size, font_descent, char_w,
+				vline1, vline2, vlines, tab_width, vcolors,
+				hit_line, ui.focused(id) ? cursors : empty_array,
+		)
+
+		ui.end_stack()
+	}
+
+	e.render = function(min_w, min_h) {
+
+		// set layout vars
+
+		font_size = ui.get_font_size()
+		line_h = round(font_size * 1.5)
+		{
+			let font0 = cx.font
+			cx.font = font_size+'px mono'
+			let m = ui.measure_text(cx, 'm')
+			cx.font = font0
+			char_w = m.width
+			font_descent = m.fontBoundingBoxDescent
+		}
+		let sidebar_w = (lines.length+'').length * char_w
+		let text_w = ceil(max_line_len * char_w)
+		let text_h = lines.length * line_h
+
+		;[drag_state] = ui.drag(id+'.text_contentbox')
+		if (drag_state == 'drag')
+			ui.focus(id)
+
 		// move cursor and select text based on mouse clicking and dragging.
 		hit_line = null
 		hit_char = null
 		if (drag_state) {
+			let text_state = ui.state(id+'.text_contentbox')
+			let x = text_state.get('x')
+			let y = text_state.get('y')
 			hit_line = floor((ui.my - y) / line_h)
 			hit_line = clamp(hit_line, 0, lines.length-1)
 			let line_s = lines[hit_line]
@@ -1018,41 +1054,6 @@ function code_edit_view(id, opt) {
 			}
 			undo_group = null
 		}
-
-		ui.stack(id+'.text_contentbox')
-			ui.code_edit_text(x, y, vx, vy, vw, vh,
-				line_h, font_size, font_descent, char_w,
-				vline1, vline2, vlines, tab_width, vcolors,
-				hit_line, ui.focused(id) ? cursors : empty_array,
-		)
-
-		ui.end_stack()
-	}
-
-	e.render = function(min_w, min_h) {
-
-		// set layout vars
-
-		font_size = ui.get_font_size()
-		line_h = round(font_size * 1.5)
-		{
-			let font0 = cx.font
-			cx.font = font_size+'px mono'
-			let m = ui.measure_text(cx, 'm')
-			cx.font = font0
-			char_w = m.width
-			font_descent = m.fontBoundingBoxDescent
-		}
-		let sidebar_w = (lines.length+'').length * char_w
-		let text_w = ceil(max_line_len * char_w)
-		let text_h = lines.length * line_h
-
-		// process mouse input (more processing is done in the frame callback
-		// when we know the view x,y.
-
-		;[drag_state] = ui.drag(id+'.text_contentbox')
-		if (drag_state == 'drag')
-			ui.focus(id)
 
 		// process keyboard input
 
