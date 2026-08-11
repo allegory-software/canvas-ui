@@ -407,7 +407,7 @@ function code_edit_view(id, opt) {
 	let tab_width = 3 // user setting
 	let lines // [line1, ...]
 	let line_offsets = [] // [line2_offset, ...]  <-- it starts with the second line!
-	let max_line_len
+	let max_line_col
 
 	// parsing/highlighting state.
 	let syntax_tree // per Lezer parsing
@@ -883,9 +883,9 @@ function code_edit_view(id, opt) {
 		last_vline1 = -1
 		last_vline2 = -1
 
-		max_line_len = 0
+		max_line_col = 0
 		for (let s of lines)
-			max_line_len = max(max_line_len, s.length)
+			max_line_col = max(max_line_col, char_to_col(s.length, s, tab_width))
 
 		compute_line_offsets()
 
@@ -1006,7 +1006,7 @@ function code_edit_view(id, opt) {
 			font_descent = m.fontBoundingBoxDescent
 		}
 		let sidebar_w = (lines.length+'').length * char_w
-		let text_w = ceil(max_line_len * char_w)
+		let text_w = ceil(max_line_col * char_w)
 		let text_h = lines.length * line_h
 
 		let [drag_state, , , drag_cs] = ui.drag(id+'.text_contentbox')
