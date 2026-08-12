@@ -613,9 +613,17 @@ function code_edit_view(id, opt) {
 		undo_push(replace_cursor, cursor_i, assign({}, cursors[cursor_i]))
 		cursors[cursor_i] = cursor
 	}
+
+	function replace_all_cursors(new_cursors) {
+		if (undo_group != 'ignore')
+			undo_push(replace_all_cursors, cursors.map(c => assign({}, c)))
+		cursors.length = 0
+		cursors.push(...new_cursors)
+	}
 	function set_cursor(cursor_i, line, char, keep_selection, keep_want_col) {
 		let cursor = cursors[cursor_i]
-		undo_push(replace_cursor, cursor_i, assign({}, cursor))
+		if (undo_group != 'ignore')
+			undo_push(replace_cursor, cursor_i, assign({}, cursor))
 		cursor.line = line
 		cursor.char = char
 		if (!keep_want_col)
@@ -1020,7 +1028,7 @@ function code_edit_view(id, opt) {
 		let text_w = ceil(max_line_col * char_w + caret_w)
 		let text_h = lines.length * line_h
 
-		let [drag_state] = ui.drag(id+'.text_contentbox')
+		let [drag_state, dx, dy, cs] = ui.drag(id+'.text_contentbox')
 		if (drag_state == 'drag')
 			ui.focus(id)
 
@@ -1041,10 +1049,31 @@ function code_edit_view(id, opt) {
 			if (drag_state != 'hover') {
 				undo_group = 'drag'
 				let cursor_i = -1
-				if (drag_state == 'drag') {
-					if (ctrl && shift) { // extend current cursor, killing anyone in the new range
-						kill_cursors_in_range(0, min(cursors[0].sel_line, hit_line), max(cursors[0].sel_line, hit_line))
-					} else if (ctrl) { // add cursor, killing anyone on hit_line
+				if (ctrl && shift) { // block-select: one cursor per line, same column
+					let anchor = cs.get('block_sel_anchor')
+					if (anchor) {
+						undo_group = 'ignore'
+					} else {
+						anchor = {line: hit_line, col: hit_col}
+						cs.set('block_sel_anchor', anchor)
+					}
+					let line1 = min(anchor.line, hit_line)
+					let line2 = max(anchor.line, hit_line)
+					let block_cursors = []
+					for (let line = line1; line <= line2; line++) {
+						let line_s = lines[line]
+						block_cursors.push({
+							line: line,
+							char: col_to_char(hit_col, line_s, tab_width),
+							sel_line: line,
+							sel_char: col_to_char(anchor.col, line_s, tab_width),
+							want_col: hit_col,
+						})
+					}
+					replace_all_cursors(block_cursors)
+					cursor_i = 0
+				} else if (drag_state == 'drag') {
+					if (ctrl) { // add cursor, killing anyone on hit_line
 						kill_cursors_in_range(-1, hit_line, hit_line)
 						add_first_cursor(hit_line, hit_char)
 						cursor_i = 0
@@ -1058,7 +1087,7 @@ function code_edit_view(id, opt) {
 				if (cursor_i == -1) {
 					if (drag_state == 'dragging')
 						undo_group = 'ignore'
-					let keep_selection = drag_state != 'drag' || (ctrl && shift)
+					let keep_selection = drag_state != 'drag'
 					set_cursor(0, hit_line, hit_char, keep_selection)
 				}
 			}
