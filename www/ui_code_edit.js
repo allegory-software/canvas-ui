@@ -572,6 +572,18 @@ function code_edit_view(id, opt) {
 		remove(cursors, cursor_i)
 	}
 
+	function kill_cursors_in_range(except_i, line1, line2) {
+		for (let i = cursors.length - 1; i >= 0; i--) {
+			if (i == except_i)
+				continue
+			let c = cursors[i]
+			let cl1 = min(c.line, c.sel_line)
+			let cl2 = max(c.line, c.sel_line)
+			if (cl2 >= line1 && cl1 <= line2)
+				remove_cursor(i)
+		}
+	}
+
 	function remove_first_cursor() {
 		let c = cursors.shift()
 		undo_break()
@@ -1009,7 +1021,7 @@ function code_edit_view(id, opt) {
 		let text_w = ceil(max_line_col * char_w + caret_w)
 		let text_h = lines.length * line_h
 
-		let [drag_state, , , drag_cs] = ui.drag(id+'.text_contentbox')
+		let [drag_state] = ui.drag(id+'.text_contentbox')
 		if (drag_state == 'drag')
 			ui.focus(id)
 
@@ -1025,30 +1037,29 @@ function code_edit_view(id, opt) {
 			let hit_col = floor((ui.mx - x + char_w / 2) / char_w)
 			let hit_char = col_to_char(hit_col, line_s, tab_width)
 			hit_char = clamp(hit_char, 0, line_s.length)
-			let shift = ui.key('shift') // TODO: use to change selection end
+			let shift = ui.key('shift')
 			let ctrl  = ui.key('ctrl' )
 			if (drag_state != 'hover') {
 				undo_group = 'drag'
 				let cursor_i = -1
 				if (drag_state == 'drag') {
-					if (ctrl) { // add/remove cursor
-						cursor_i = cursors.findIndex(c =>
-							c.line == hit_line && c.char == hit_char)
-						if (cursor_i != -1) {
-							if (cursors.length > 1) {
-								remove_cursor(cursor_i)
-								drag_cs.set('removed_cursor', true)
-							}
-						} else
-							add_first_cursor(hit_line, hit_char)
+					if (ctrl && shift) { // extend current cursor, killing anyone in the new range
+						kill_cursors_in_range(0, min(cursors[0].sel_line, hit_line), max(cursors[0].sel_line, hit_line))
+					} else if (ctrl) { // add cursor, killing anyone on hit_line
+						kill_cursors_in_range(-1, hit_line, hit_line)
+						add_first_cursor(hit_line, hit_char)
+						cursor_i = 0
 					} else {
 						remove_extra_cursors()
 					}
+				} else {
+					// dragging: keep killing anyone the growing selection sweeps over
+					kill_cursors_in_range(0, min(cursors[0].sel_line, hit_line), max(cursors[0].sel_line, hit_line))
 				}
-				if (cursor_i == -1 && !drag_cs.get('removed_cursor')) {
+				if (cursor_i == -1) {
 					if (drag_state == 'dragging')
 						undo_group = 'ignore'
-					let keep_selection = drag_state != 'drag'
+					let keep_selection = drag_state != 'drag' || (ctrl && shift)
 					set_cursor(0, hit_line, hit_char, keep_selection)
 				}
 			}
