@@ -3,12 +3,9 @@
 	Canvas IMGUI code editor widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	* TODO: lines_changed() must move cursors.
 	* TODO: insert mode + caret
-	* TODO: undo/redo
 	* TODO: load, save, tabs
 	* TODO: search, replace
-	* TODO: block selection
 	* TODO: bookmarks
 	* TODO: remote cursors
 	* TODO: save
@@ -1125,7 +1122,6 @@ function code_edit_view(id, opt) {
 
 				if (scroll_lines) { // scrolling without moving the cursor
 					let ss = ui.state(id+'.text_scrollbox')
-					// TODO: scroll_y is allowed to get out of range!
 					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
 				}
 
