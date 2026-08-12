@@ -1078,8 +1078,8 @@ function code_edit_view(id, opt) {
 
 				// NOTE: some key combos are captured by browser, namely:
 				// ctrl+pgup/dn, ctrl(+shift)+tab
-				if      (key == 'arrowup'    && !ctrl) lines_n = -1
-				else if (key == 'arrowdown'  && !ctrl) lines_n =  1
+				if      (key == 'arrowup'    && (!ctrl || shift)) lines_n = -1
+				else if (key == 'arrowdown'  && (!ctrl || shift)) lines_n =  1
 				else if (key == 'pageup'             ) lines_n = -(last_vline2 - last_vline1)
 				else if (key == 'pagedown'           ) lines_n =  (last_vline2 - last_vline1)
 				else if (key == 'home'       &&  ctrl) lines_n = -1/0
@@ -1101,7 +1101,7 @@ function code_edit_view(id, opt) {
 				// when moving multiple cursors vertically we clamp lines_n
 				// so that the whole block can move as a whole.
 				let max_lines_n = 0
-				if (lines_n && !alt) {
+				if (lines_n && !((key == 'arrowup' || key == 'arrowdown') && ctrl && shift)) {
 					let line1 = cursors[0].line
 					let line2 = cursors[0].line
 					for (let c of cursors) {
@@ -1141,7 +1141,7 @@ function code_edit_view(id, opt) {
 						}
 					} else if (lines_n) {
 						undo_group = 'move'
-						if (alt) {
+						if ((key == 'arrowup' || key == 'arrowdown') && ctrl && shift) {
 							add_first_cursor(cursor.line, cursor.char)
 							let new_line
 							let new_char
