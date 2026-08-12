@@ -902,12 +902,12 @@ function code_edit_view(id, opt) {
 		} else {
 			syntax_tree = parser.parse(lines_input)
 		}
-		build_colors()
+		build_colors(from != null ? find_line(from) : 0)
 	}
 
-	function build_colors() {
-		for (let a of line_colors)
-			a.length = 0
+	function build_colors(from_line = 0) {
+		for (let line = from_line; line < line_colors.length; line++)
+			line_colors[line].length = 0
 		Lezer.highlightTree(syntax_tree, Lezer.classHighlighter,
 		function(from, to, classes) {
 			let color = classes.includes('tok-invalid') ? 'error' : null
@@ -924,22 +924,26 @@ function code_edit_view(id, opt) {
 			let char1 = from - line_offset(line1)
 			let col1 = char_to_col(char1, line1_s, tab_width)
 			if (line2 > line1) {
-				let w1 = char_to_col(line1_s.length, line1_s, tab_width) - col1
-				line_colors[line1].push(col1, w1, color)
-				for (let line = line1 + 1; line < line2; line++) {
+				if (line1 >= from_line) {
+					let w1 = char_to_col(line1_s.length, line1_s, tab_width) - col1
+					line_colors[line1].push(col1, w1, color)
+				}
+				for (let line = max(line1 + 1, from_line); line < line2; line++) {
 					let line_s = lines[line]
 					let w = char_to_col(line_s.length, line_s, tab_width)
 					line_colors[line].push(0, w, color)
 				}
-				let line2_s = lines[line2]
-				let char2 = to - line_offset(line2)
-				let col2 = char_to_col(char2, line2_s, tab_width)
-				line_colors[line2].push(0, col2, color)
-			} else {
+				if (line2 >= from_line) {
+					let line2_s = lines[line2]
+					let char2 = to - line_offset(line2)
+					let col2 = char_to_col(char2, line2_s, tab_width)
+					line_colors[line2].push(0, col2, color)
+				}
+			} else if (line1 >= from_line) {
 				let w = to - from
 				line_colors[line1].push(col1, w, color)
 			}
-		})
+		}, from_line == 0 ? 0 : pos_at(from_line, 0))
 	}
 
 	// UI ---------------------------------------------------------------------
