@@ -11,8 +11,6 @@ box_widget box_hit -> use hit_box
 
 BUGS UI
 ------------------------------------------------------------------------------
-- force-scroll with popups double-translate bug (repro: h-scroll a grid and
-drag a gcol back to the col header)
 - text hit clip (repro: hover to the right of the first grid gcol)
 
 
