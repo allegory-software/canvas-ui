@@ -88,14 +88,13 @@ let token_colors = {
 	'tok-comment':     'comment',
 }
 
-function indent(s, tab_width) {
+function tab_draw_offset(s, tab_width) {
 	let i = 0 // char index (i.e. index in line string s)
 	let j = 0 // col index (i.e. visual char index, or column)
 	while (1) {
 		let c = s.charCodeAt(i++)
 		if (c == 9) j += tab_width
-		else if (c == 32) j++
-		else return j
+		else if (c != 32) return j
 	}
 }
 
@@ -241,7 +240,7 @@ ui.widget('code_edit_text', {
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			// using tab_width-1 because tabs take one char with fillText().
-			let indent_w = indent(s, tab_width-1) * char_w
+			let indent_w = tab_draw_offset(s, tab_width-1) * char_w
 			cx.fillText(s, round(x0 + indent_w), y0 + (line + 1) * line_h - font_descent - 1)
 		}
 
@@ -773,8 +772,6 @@ function code_edit_view(id, opt) {
 	function undo_push(fn, ...args) {
 		if (undo_group == 'ignore')
 			return
-		if (!undoing)
-			pr('>', undo_group, fn.name, ...args)
 		assert(undo_group) // undoable ops must be done inside an undo_group.
 		undo_stack.push([undo_group, fn, ...args])
 	}
@@ -787,21 +784,18 @@ function code_edit_view(id, opt) {
 		undoing = true
 		let stack = undo_stack
 		undo_stack = redo_stack
-		pr('!', stack.map(rec => rec[0]+'='+rec[1].name).join(','))
 		while (1) {
 			let rec = stack.pop()
 			if (!rec)
 				break
 			undo_group = rec.shift()
 			let fn     = rec.shift()
-			pr('<', undo_group, fn.name, ...rec, 'cursors='+cursors.length)
 			fn(...rec)
 			if (!stack.length)
 				break
 			let next_undo_group = stack.at(-1)[0]
 			if (next_undo_group != undo_group) {
 				if (next_undo_group == 'break')
-					pr('<', 'break')
 					stack.pop()
 				break
 			}
