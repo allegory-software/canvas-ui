@@ -49,7 +49,6 @@ const G = window
 
 const {
 	cx,
-	BOX_ARGS,
 	caret_w = 2,
 } = ui
 
@@ -154,47 +153,39 @@ function cursor_has_selection(cursor) {
 	)
 }
 
-let SIDEBAR_SY     = BOX_ARGS+0
-let SIDEBAR_VLINE1 = BOX_ARGS+1
-let SIDEBAR_VLINE2 = BOX_ARGS+2
-
-ui.box_widget('code_edit_sidebar', {
-	create: function(cmd, sidebar_w, line_count, line_h, font_size, font_descent) {
-		return ui.cmd_box(cmd, 0, 's', 's', sidebar_w, 0,
-			0, 0, 0,
-			line_count, line_h, font_size, font_descent
-		)
+ui.widget('code_edit_sidebar', {
+	create: function(...args) {
+		return ui.cmd(...args)
 	},
 	draw: function(a, i) {
-		let x0  = a[i+0]
-		let y0  = a[i+1]
-		let w   = a[i+2]
-		let h   = a[i+3]
-
-		let sy     = a[i+SIDEBAR_SY]
-		let vline1 = a[i+SIDEBAR_VLINE1]
-		let vline2 = a[i+SIDEBAR_VLINE2]
-
-		let line_count   = a[i+BOX_ARGS+3]
-		let line_h       = a[i+BOX_ARGS+4]
-		let font_size    = a[i+BOX_ARGS+5]
-		let font_descent = a[i+BOX_ARGS+6]
+		let x0          = a[i+0]
+		let y0          = a[i+1]
+		let w           = a[i+2]
+		let vx          = a[i+3]
+		let vy          = a[i+4]
+		let vw          = a[i+5]
+		let vh          = a[i+6]
+		let vline1      = a[i+7]
+		let vline2      = a[i+8]
+		let line_h      = a[i+9]
+		let font_size   = a[i+10]
+		let font_descent= a[i+11]
+		let margin      = a[i+12]
 
 		cx.save()
 
 		cx.beginPath()
-		cx.rect(x0, y0, w, h)
+		cx.rect(vx, vy, vw, vh)
 		cx.clip()
-
-		cx.translate(w, -sy)
 
 		cx.font = font_size+'px mono'
 		cx.fontKerning = 'none'
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 
+		let x = x0 + w + margin
 		for (let line = vline1; line <= vline2; line++)
-			cx.fillText(line+1, x0, y0 + (line + 1) * line_h - font_descent - 1)
+			cx.fillText(line+1, x, y0 + (line + 1) * line_h - font_descent - 1)
 
 		cx.restore()
 	},
@@ -373,6 +364,7 @@ function code_edit_view(id, opt) {
 	let font_descent
 	let line_h
 	let char_w
+	let digits_w
 	let last_vline1 = -1
 	let last_vline2 = -1 // visible line range
 	let vlines = [] // visible lines array: [vline1_s, ...]
@@ -964,7 +956,16 @@ function code_edit_view(id, opt) {
 
 	// UI ---------------------------------------------------------------------
 
-	let sidebar_i
+	function on_sidebar_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
+		let sy = vy - y
+		let vline1 = floor(sy / line_h)
+		let vline2 = vline1 + (floor(vh / line_h) + 2) - 1
+		vline1 = max(0, min(vline1, lines.length - 1))
+		vline2 = max(0, min(vline2, lines.length - 1))
+
+		ui.code_edit_sidebar(x, y, digits_w, vx, vy, vw, vh, vline1, vline2,
+			line_h, font_size, font_descent, ui.sp1())
+	}
 
 	function on_text_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
 
@@ -977,11 +978,6 @@ function code_edit_view(id, opt) {
 		let vline2 = vline1 + vline_n - 1
 		vline1 = max(0, min(vline1, lines.length - 1))
 		vline2 = max(0, min(vline2, lines.length - 1))
-
-		// TODO: make the sidebar a popup anchored to this frame and remove this hack!
-		a[sidebar_i+SIDEBAR_SY ] = sy
-		a[sidebar_i+SIDEBAR_VLINE1] = vline1
-		a[sidebar_i+SIDEBAR_VLINE2] = vline2
 
 		if (last_vline1 != vline1 || last_vline2 != vline2) {
 			vlines .length = vline2 - vline1 + 1
@@ -1021,7 +1017,8 @@ function code_edit_view(id, opt) {
 			char_w = m.width
 			font_descent = m.fontBoundingBoxDescent
 		}
-		let sidebar_w = (lines.length+'').length * char_w
+		digits_w = (lines.length+'').length * char_w
+		let sidebar_w = digits_w + ui.sp1() * 2
 		let text_w = ceil(max_line_col * char_w + caret_w)
 		let text_h = lines.length * line_h
 
@@ -1277,11 +1274,12 @@ function code_edit_view(id, opt) {
 				ui.bb('bg2')
 			ui.end_stack()
 			ui.h(1, ui.sp025())
-				ui.p(ui.sp1(), 0)
 				ui.stack('', 0)
 					ui.bb('bg1')
-					sidebar_i = ui.code_edit_sidebar(sidebar_w,
-						lines.length, line_h, font_size, font_descent)
+					ui.scrollbox(id+'.sidebar_scrollbox', 0, 'hide', 'hide',
+						's', 's', sidebar_w, 0, null, null, null, id+'.text_scrollbox')
+						ui.frame(noop, on_sidebar_frame, 0, 's', 's', sidebar_w, text_h)
+					ui.end_scrollbox()
 				ui.end_stack()
 				ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll')
 					ui.frame(noop, on_text_frame, 1, 's', 's', text_w, text_h)
