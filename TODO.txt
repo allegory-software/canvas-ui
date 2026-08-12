@@ -12,37 +12,31 @@ box_widget box_hit -> use hit_box
 BUGS UI
 ------------------------------------------------------------------------------
 - text hit clip (repro: hover to the right of the first grid gcol)
-
-
-TODO GRID
-------------------------------------------------------------------------------
-
-TODO UI
-------------------------------------------------------------------------------
-- scroll-to-view-rect cascade to all scrollboxes
-
-- remove scopes and automatic container scopes and replace them with
-	begin_font() end_font()
-	begin_bold() end_bold()
-	- careful with begin_rec()
-	- careful with frames
-
-
-BUGS
-------------------------------------------------------------------------------
-- set_cursor() must be set in draw? hittest? where?
 - toolbox constrain bug
 - toolbox resize bug
 
+- set_cursor() must be set in draw? hittest? where?
 - bb on text
 - bb on scrollbox?
 - negative margins?
 
 - filter out available APIs and state for each phase
 	- draw phase should not be able to access state
-	- etc.
 - make drawing phase stateless
 	- empty context in drawing phase!
+
+
+TODO GRID
+------------------------------------------------------------------------------
+
+
+TODO UI
+------------------------------------------------------------------------------
+- remove scopes and automatic container scopes and replace them with
+	begin_font() end_font()
+	begin_bold() end_bold()
+	- careful with begin_rec()
+	- careful with frames
 
 ------------------------------------------------------------------------------
 
