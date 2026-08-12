@@ -13,6 +13,8 @@ the <body> element prevents the body from rendering white for a split second
 -->
 <script>
 
+ui.load_font('mono', 'fonts/jetbrains-mono-nl-regular.woff2')
+
 let demo_state = json_arg(load('demo_state')) ?? {}
 ui.set_default_theme(demo_state.theme ?? 'dark')
 
@@ -27,7 +29,7 @@ ui.main = function() {
 
 	let code = document.documentElement.outerHTML
 
-	ui.code_edit('code_editor', {code: code}, 1, 's', 's')
+	ui.code_edit('code_editor', {code: code}, 1)
 
 	ui.focus('code_editor')
 
