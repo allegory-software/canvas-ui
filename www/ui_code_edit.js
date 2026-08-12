@@ -872,6 +872,7 @@ function code_edit_view(id, opt) {
 
 		if (from != null) {
 			let delta = (insert_s?.length ?? 0) - (to - from)
+			let collapsed_i = [] // indices of cursors that collapsed onto `from`
 			for (let i = 0; i < cursors.length; i++) {
 				let cursor = cursors[i]
 				let pos = old_pos[i]
@@ -881,6 +882,8 @@ function code_edit_view(id, opt) {
 					cursor.char = find_char(cursor.line, new_pos)
 					cursor.want_col = cursor_want_col(cursor)
 				}
+				if (to > from && new_pos == from)
+					collapsed_i.push(i)
 				let sel_pos = old_sel_pos[i]
 				let new_sel_pos = sel_pos < from ? sel_pos : sel_pos < to ? from : sel_pos + delta
 				if (new_sel_pos != sel_pos) {
@@ -888,6 +891,8 @@ function code_edit_view(id, opt) {
 					cursor.sel_char = find_char(cursor.sel_line, new_sel_pos)
 				}
 			}
+			for (let i = collapsed_i.length - 1; i >= 1; i--)
+				remove_cursor(collapsed_i[i])
 		}
 
 		// TODO: save this and make it retreivable somehow.
