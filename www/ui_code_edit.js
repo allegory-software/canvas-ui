@@ -674,7 +674,6 @@ function code_edit_view(id, opt) {
 			char2 = line2 == cursor.line ? cursor.char : cursor.sel_char
 		}
 		remove_text_at(line1, char1, line2, char2)
-		set_cursor(cursor_i, line1, char1)
 	}
 
 	function insert_text_at(line, char, s, normalize_tabs) {
@@ -848,11 +847,42 @@ function code_edit_view(id, opt) {
 		last_vline1 = -1
 		last_vline2 = -1
 
+		let old_pos, old_sel_pos
+		if (from != null) {
+			old_pos = new Array(cursors.length)
+			old_sel_pos = new Array(cursors.length)
+			for (let i = 0; i < cursors.length; i++) {
+				let c = cursors[i]
+				old_pos[i] = pos_at(c.line, c.char)
+				old_sel_pos[i] = pos_at(c.sel_line, c.sel_char)
+			}
+		}
+
 		max_line_col = 0
 		for (let s of lines)
 			max_line_col = max(max_line_col, char_to_col(s.length, s, tab_width))
 
 		compute_line_offsets()
+
+		if (from != null) {
+			let delta = (insert_s?.length ?? 0) - (to - from)
+			for (let i = 0; i < cursors.length; i++) {
+				let cursor = cursors[i]
+				let pos = old_pos[i]
+				let new_pos = pos < from ? pos : pos < to ? from : pos + delta
+				if (new_pos != pos) {
+					cursor.line = find_line(new_pos)
+					cursor.char = find_char(cursor.line, new_pos)
+					cursor.want_col = cursor_want_col(cursor)
+				}
+				let sel_pos = old_sel_pos[i]
+				let new_sel_pos = sel_pos < from ? sel_pos : sel_pos < to ? from : sel_pos + delta
+				if (new_sel_pos != sel_pos) {
+					cursor.sel_line = find_line(new_sel_pos)
+					cursor.sel_char = find_char(cursor.sel_line, new_sel_pos)
+				}
+			}
+		}
 
 		// TODO: save this and make it retreivable somehow.
 		if (!undoing)
@@ -1119,28 +1149,22 @@ function code_edit_view(id, opt) {
 						undo_group = 'insert'
 						remove_selection(cursor_i)
 						insert_char_at(cursor.line, cursor.char, key_char)
-						set_cursor(cursor_i, cursor.line, cursor.char+1, false, false)
 					} else if (key == 'enter') {
 						undo_group = 'insert'
 						remove_selection(cursor_i)
 						insert_line_at(cursor.line, cursor.char)
-						set_cursor(cursor_i, cursor.line+1, 0)
 					} else if (key == 'backspace' || key == 'delete') {
 						undo_group = 'delete'
 						if (cursor_has_selection(cursor)) {
 							remove_selection(cursor_i)
-						} else {
-							if (key == 'backspace') {
-								if (cursor.char) {
-									set_cursor(cursor_i, cursor.line, cursor.char-1)
-								} else if (cursor.line) {
-									let prev_line = cursor.line-1
-									set_cursor(cursor_i, prev_line, lines[prev_line].length)
-								} else
-									continue
-							}
+						} else if (key == 'delete') {
 							remove_char_at(cursor.line, cursor.char)
-						}
+						} else if (cursor.char) {
+							remove_char_at(cursor.line, cursor.char-1)
+						} else if (cursor.line) {
+							remove_char_at(cursor.line-1, lines[cursor.line-1].length)
+						} else
+							continue
 					} else if (full_key == 'tab') {
 						undo_group = 'indent'
 						indent_selection(cursor_i)
@@ -1158,9 +1182,7 @@ function code_edit_view(id, opt) {
 					} else if (key == 'paste') {
 						undo_group = 'paste'
 						remove_selection(cursor_i)
-						let [line, char] = insert_text_at(cursor.line, cursor.char,
-							ui.clipboard_text, true)
-						set_cursor(cursor_i, line, char)
+						insert_text_at(cursor.line, cursor.char, ui.clipboard_text, true)
 					} else if (full_key == 'ctrl z') { // undo, redo
 						undo_group = 'undo'
 						undo()
