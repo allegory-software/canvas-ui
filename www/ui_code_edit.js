@@ -1101,9 +1101,22 @@ function code_edit_view(id, opt) {
 					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
 				}
 
-				if (chars_n) {
+				if (chars_n)
 					undo_group = 'move'
-					remove_extra_cursors()
+
+				// when moving multiple cursors vertically we clamp lines_n
+				// so that the whole block can move as a whole.
+				let max_lines_n = 0
+				if (lines_n && !alt) {
+					let line1 = cursors[0].line
+					let line2 = cursors[0].line
+					for (let c of cursors) {
+						line1 = min(line1, c.line)
+						line2 = max(line2, c.line)
+					}
+					max_lines_n = lines_n < 0
+						? max(lines_n, -line1)
+						: min(lines_n, (lines.length-1) - line2)
 				}
 
 				let cursor_i = -1
@@ -1117,7 +1130,7 @@ function code_edit_view(id, opt) {
 							} else {
 								set_cursor(cursor_i, cursor.line, cursor.char-1, shift)
 							}
-						} else if (cursor.line) {
+						} else if (cursor.line && cursors.length == 1) {
 							let prev_line_s = lines[cursor.line-1]
 							set_cursor(cursor_i, cursor.line-1, prev_line_s.length, shift)
 						}
@@ -1129,37 +1142,43 @@ function code_edit_view(id, opt) {
 							} else {
 								set_cursor(cursor_i, cursor.line, cursor.char+1, shift)
 							}
-						} else if (cursor.line < lines.length-1) {
+						} else if (cursor.line < lines.length-1 && cursors.length == 1) {
 							set_cursor(cursor_i, cursor.line+1, 0, shift)
 						}
 					} else if (lines_n) {
 						undo_group = 'move'
-						if (alt)
+						if (alt) {
 							add_first_cursor(cursor.line, cursor.char)
-						else
-							remove_extra_cursors()
-						let new_line
-						let new_char
-						if (lines_n == -1/0) {
-							new_line = 0
-							new_char = 0
-						} else if (lines_n == 1/0) {
-							new_line = lines.length-1
-							new_char = lines[new_line].length
-						} else if (lines_n < 0) {
-							new_line = max(cursor.line + lines_n, 0)
-							new_char = cursor_want_col_char(cursor, new_line)
-						} else if (lines_n > 0) {
-							new_line = min(cursor.line + lines_n, lines.length-1)
-							new_char = cursor_want_col_char(cursor, new_line)
-						}
-						set_cursor(cursor_i, new_line, new_char, shift && !alt, true)
-						if (alt)
+							let new_line
+							let new_char
+							if (lines_n == -1/0) {
+								new_line = 0
+								new_char = 0
+							} else if (lines_n == 1/0) {
+								new_line = lines.length-1
+								new_char = lines[new_line].length
+							} else if (lines_n < 0) {
+								new_line = max(cursor.line + lines_n, 0)
+								new_char = cursor_want_col_char(cursor, new_line)
+							} else {
+								new_line = min(cursor.line + lines_n, lines.length-1)
+								new_char = cursor_want_col_char(cursor, new_line)
+							}
+							set_cursor(cursor_i, new_line, new_char, false, true)
 							break
+						} else {
+							let new_line = cursor.line + max_lines_n
+							let new_char = cursor_want_col_char(cursor, new_line)
+							set_cursor(cursor_i, new_line, new_char, shift, true)
+						}
 					} else if (full_key == 'ctrl a') {
 						undo_group = 'select_all'
 						remove_extra_cursors()
 						set_cursor(cursor_i, 0, 0, 'select_all')
+					} else if (key == 'escape') {
+						undo_group = 'move'
+						remove_extra_cursors()
+						set_cursor(cursor_i, cursor.line, cursor.char, false)
 					} else if (key_char) { // typing, deleting, indent
 						undo_group = 'insert'
 						remove_selection(cursor_i)
