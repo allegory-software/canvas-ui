@@ -1359,6 +1359,8 @@ ui.state = function(id, k) {
 		return
 	let m = id_state_maps.get(id)
 	if (!m) {
+		if (k)
+			return
 		m = id_state_map_freelist.alloc()
 		id_state_maps.set(id, m)
 	} else {
