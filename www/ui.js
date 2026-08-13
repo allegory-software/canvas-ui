@@ -4675,19 +4675,48 @@ draw[CMD_TEXT] = function(a, i) {
 		if (!input && ss_id)
 			input = remote_input_create(id, input_type)
 
-		input.value = s
-		input.style.fontFamily = font
-		input.style.fontWeight = font_weight
-		input.style.fontSize   = (font_size / dpr)+'px'
-		input.style.color      = col
-		input.style.left   = (x  / dpr)+'px'
-		input.style.top    = (y  / dpr)+'px'
-		input.style.width  = (sw / dpr)+'px'
+		let css_x = x  / dpr
+		let css_y = y  / dpr
+		let css_w = sw / dpr
+		let css_font_size = font_size / dpr
+		let opacity = focused ? 1 : 0
 
-		input.style.opacity = focused ? 1 : 0
+		if (input._ui_val != s) {
+			input.value = s
+			input._ui_val = s
+		}
+		if (input._ui_font != font
+				|| input._ui_font_weight != font_weight
+				|| input._ui_font_size != css_font_size) {
+			input.style.fontFamily = font
+			input.style.fontWeight = font_weight
+			input.style.fontSize   = css_font_size+'px'
+			input._ui_font        = font
+			input._ui_font_weight = font_weight
+			input._ui_font_size   = css_font_size
+		}
+		if (input._ui_x != css_x
+				|| input._ui_y != css_y
+				|| input._ui_w != css_w) {
+			input.style.left  = css_x+'px'
+			input.style.top   = css_y+'px'
+			input.style.width = css_w+'px'
+			input._ui_x = css_x
+			input._ui_y = css_y
+			input._ui_w = css_w
+		}
+		if (input._ui_opacity != opacity) {
+			input.style.opacity = opacity
+			input._ui_opacity = opacity
+		}
 
-		if (focused)
+		if (focused) {
+			if (input._ui_color != col) {
+				input.style.color = col
+				input._ui_color = col
+			}
 			return
+		}
 	}
 
 	let clip = w > sw
