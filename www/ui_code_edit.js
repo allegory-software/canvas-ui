@@ -3,10 +3,8 @@
 	Canvas IMGUI code editor widget.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	* TODO: insert mode + caret
 	* TODO: draw inline tabs, space indent, trailing whitespace
 	* TODO: search, replace
-	* TODO: bookmarks
 	* TODO: load, save, tabs, sessions
 
 DESIGN TRADEOFFS
@@ -27,7 +25,6 @@ IMPL. TERMINOLOGY
 
 	line      line number counting from 0.
 	char      char (so codepoint) index in line.
-	past      number of columns past EOL in cursor.
 	col       column (so visible char) index in line.
 	pos       char (so codepoint) index in whole text.
 
@@ -179,7 +176,8 @@ ui.widget('code_edit_sidebar', {
 		let line_h      = a[i+9]
 		let font_size   = a[i+10]
 		let font_descent= a[i+11]
-		let margin      = a[i+12]
+		let margin_l    = a[i+12]
+		let bookmarks   = a[i+13]
 
 		cx.save()
 
@@ -192,9 +190,19 @@ ui.widget('code_edit_sidebar', {
 		cx.textAlign = 'right'
 		cx.fillStyle = 'gray'
 
-		let x = x0 + w + margin
+		let x = x0 + margin_l + w
 		for (let line = vline1; line <= vline2; line++)
 			cx.fillText(line+1, x, y0 + (line + 1) * line_h - font_descent - 1)
+
+		cx.font = font_size+'px fas'
+		cx.textAlign = 'center'
+		cx.fillStyle = ui.fg_color('marker')
+
+		let bx = x0 + margin_l / 2
+		for (let line of bookmarks)
+			if (line >= vline1 && line <= vline2)
+				cx.fillText('\uf02e', bx,
+					y0 + (line + 1) * line_h - font_descent - 1)
 
 		cx.restore()
 	},
@@ -375,6 +383,7 @@ function code_edit_view(id, opt) {
 	let tab_width = 3 // user setting
 	let lines // [line1, ...]
 	let line_offsets = [] // [line2_offset, ...]  <-- it starts with the second line!
+	let bookmark_lines = []
 	let max_line_col
 
 	// last text this editor put on the clipboard, and whether it was a block.
@@ -395,7 +404,8 @@ function code_edit_view(id, opt) {
 	let font_descent
 	let line_h
 	let char_w
-	let digits_w
+	let sidebar_digits_w
+	let sidebar_margin_l
 	let last_vline1 = -1
 	let last_vline2 = -1 // visible line range
 	let vlines = [] // visible lines array: [vline1_s, ...]
@@ -536,6 +546,26 @@ function code_edit_view(id, opt) {
 		return i
 	}
 
+	// bookmarks --------------------------------------------------------------
+
+	function toggle_bookmark(line) {
+		if (remove_value(bookmark_lines, line) == -1)
+			bookmark_lines.push(line)
+	}
+
+	function next_bookmark_line(from_line, dir) {
+		let next_line
+		let wrap_line
+		for (let line of bookmark_lines) {
+			if ((line - from_line) * dir > 0
+					&& (next_line == null || (line - next_line) * dir < 0))
+				next_line = line
+			if (wrap_line == null || (line - wrap_line) * dir < 0)
+				wrap_line = line
+		}
+		return next_line ?? wrap_line
+	}
+
 	// selection --------------------------------------------------------------
 
 	function block_sel_range(cursor) {
@@ -609,11 +639,25 @@ function code_edit_view(id, opt) {
 		insert_n(line_colors, line1, n)
 		for (let i = 0; i < n; i++)
 			line_colors[line1 + i] = []
+		// update bookmarks
+		for (let i = 0, bn = bookmark_lines.length; i < bn; i++)
+			if (bookmark_lines[i] >= line1)
+				bookmark_lines[i] += n
 	}
 
 	function remove_lines(line1, n) {
 		lines.splice(line1, n)
 		line_colors.splice(line1, n)
+		// update bookmarks
+		let j = 0
+		for (let i = 0, bn = bookmark_lines.length; i < bn; i++) {
+			let line = bookmark_lines[i]
+			if (line < line1)
+				bookmark_lines[j++] = line
+			else if (line >= line1 + n)
+				bookmark_lines[j++] = line - n
+		}
+		bookmark_lines.length = j
 	}
 
 	function reset_editor(s) {
@@ -627,6 +671,7 @@ function code_edit_view(id, opt) {
 				line_colors[i].length = 0
 			else
 				line_colors[i] = []
+		bookmark_lines.length = 0
 		undo_stack.length = 0
 		redo_stack.length = 0
 		undo_group = null
@@ -1001,8 +1046,8 @@ function code_edit_view(id, opt) {
 		vline1 = max(0, min(vline1, lines.length - 1))
 		vline2 = max(0, min(vline2, lines.length - 1))
 
-		ui.code_edit_sidebar(x, y, digits_w, vx, vy, vw, vh, vline1, vline2,
-			line_h, font_size, font_descent, ui.sp1())
+		ui.code_edit_sidebar(x, y, sidebar_digits_w, vx, vy, vw, vh, vline1, vline2,
+			line_h, font_size, font_descent, sidebar_margin_l, bookmark_lines)
 	}
 
 	function on_text_frame(a, _i, x, y, w, h, vx, vy, vw, vh) {
@@ -1055,8 +1100,10 @@ function code_edit_view(id, opt) {
 			char_w = m.width
 			font_descent = m.fontBoundingBoxDescent
 		}
-		digits_w = (lines.length+'').length * char_w
-		let sidebar_w = digits_w + ui.sp1() * 2
+		sidebar_digits_w = (lines.length+'').length * char_w
+		sidebar_margin_l = ui.em(1.25)
+		let sidebar_margin_r = ui.sp1()
+		let sidebar_w = sidebar_margin_l + sidebar_digits_w + sidebar_margin_r
 		let text_w = ceil(max(max_line_col, cursor_col(cursor)) * char_w
 			+ caret_w)
 		let text_h = lines.length * line_h
@@ -1257,6 +1304,15 @@ function code_edit_view(id, opt) {
 					undo()
 				} else if (full_key == 'ctrl shift z' || full_key == 'ctrl y') {
 					redo()
+				} else if (full_key == 'f2' || full_key == 'shift f2') {
+					let line = next_bookmark_line(cursor.line, shift ? -1 : 1)
+					if (line != null) {
+						undo_group = 'move'
+						set_block_mode(false)
+						set_cursor(line, 0, false)
+					}
+				} else if (full_key == 'ctrl f2') {
+					toggle_bookmark(cursor.line)
 				} else if (full_key == 'ctrl f') { // search, replace
 					// TODO: find
 					pr('FIND')
