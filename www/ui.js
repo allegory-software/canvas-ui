@@ -2210,6 +2210,8 @@ function redraw_all() {
 
 			draw_frame(recs, layers)
 
+			sync_dom_focus()
+
 			for (let p of ui.pointers)
 				if (p != ui.mouse)
 					draw_pointer(p, 0, 0)
@@ -4586,8 +4588,25 @@ translate[CMD_TEXT] = function(a, i, dx, dy) {
 	a[i+TEXT_X] += dx
 }
 
+let dom_focused_input // input element that ui gave the DOM focus to
+
+function sync_dom_focus() {
+	let input = ui.state(ui.focused_id, 'input') ?? null
+	if (input == dom_focused_input)
+		return
+	if (input)
+		input.focus()
+	else if (document.activeElement == dom_focused_input)
+		canvas.focus()
+	dom_focused_input = input
+}
+
 function input_free(s, id) {
 	let input = s.get('input')
+	if (input == dom_focused_input) {
+		dom_focused_input = null
+		canvas.focus()
+	}
 	input.remove()
 }
 
