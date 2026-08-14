@@ -4594,10 +4594,14 @@ function sync_dom_focus() {
 	let input = ui.state(ui.focused_id, 'input') ?? null
 	if (input == dom_focused_input)
 		return
-	if (input)
-		input.focus()
-	else if (document.activeElement == dom_focused_input)
+	if (input) {
+		if (document.activeElement != input) { // select-all but not on click!
+			input.focus()
+			input.select()
+		}
+	} else if (document.activeElement == dom_focused_input) {
 		canvas.focus()
+	}
 	dom_focused_input = input
 }
 
@@ -4616,7 +4620,8 @@ function input_focus(ev) {
 }
 
 function input_blur(ev) {
-	ui.focused_id = null
+	if (ui.focused_id == this._ui_id)
+		ui.focused_id = null
 	animate()
 }
 
@@ -4627,9 +4632,11 @@ function input_input(ev) {
 }
 
 function input_keydown(ev) {
-	if (ev.key == 'Tab') {
-		// ev.preventDefault()
-	}
+	process_key(ev, 'down', ev.key)
+}
+
+function input_keyup(ev) {
+	process_key(ev, 'up', ev.key)
 }
 
 function input_create(id, input_type) {
@@ -4644,6 +4651,7 @@ function input_create(id, input_type) {
 		input.addEventListener('blur'   , input_blur)
 		input.addEventListener('input'  , input_input)
 		input.addEventListener('keydown', input_keydown)
+		input.addEventListener('keyup'  , input_keyup)
 		screen.appendChild(input)
 		ui.state(id).set('input', input)
 		ui.on_free(id, input_free)
