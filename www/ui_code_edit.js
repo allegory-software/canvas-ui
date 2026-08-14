@@ -1363,6 +1363,8 @@ function code_edit_view(id, opt) {
 			ui.capture_keydown(id, 'ctrl s') // browser: save as html -> editor: save
 			ui.capture_keydown(id, 'f3'      ) // browser: find next -> editor: find next
 			ui.capture_keydown(id, 'shift f3') // browser: find prev -> editor: find prev
+			ui.capture_keydown(id, 'tab'      )
+			ui.capture_keydown(id, 'shift tab')
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')

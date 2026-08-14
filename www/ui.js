@@ -132,6 +132,9 @@ FOCUS STATE
 	focus           (id)                 focus widget
 	focused         (id) -> t|f          check if widget is currently focused
 	focusing        (id) -> t|f          widget is focusing this frame
+	focusable       (id, [order])        add widget to the tab order
+	focus_group     ([trap], [order])    begin a tab order group
+	end_focus_group ()                   end a tab order group
 	window_focusing   = t                window is focusing this frame
 	window_unfocusing = t                window is unfocusing this frame
 	window_focused    = t|f              check if window is currently focused
@@ -1978,21 +1981,145 @@ function hit_frame(recs, layers) {
 
 // tab focusing --------------------------------------------------------------
 
-ui.focusables = []
+let FOCUSABLE_SLOTS = 4
+let FOCUSABLE_ID    = 0
+let FOCUSABLE_ORDER = 1
+let FOCUSABLE_END   = 2
+let FOCUSABLE_TRAP  = 3
 
-let FOCUSABLE = cmd('focusable')
+let focusables = []
+ui.focusables = focusables
 
-// TODO: tab_order
-// TODO: tab groups
-ui.focusable = function(id) {
-	ui_cmd(FOCUSABLE, id)
+let open_focus_groups = []
+
+let FOCUSABLE       = cmd('focusable')
+let FOCUS_GROUP     = cmd('focus_group')
+let END_FOCUS_GROUP = cmd('end_focus_group')
+
+ui.focusable = function(id, order) {
+	ui_cmd(FOCUSABLE, id, order ?? 0)
+}
+
+ui.focus_group = function(trap, order) {
+	ui_cmd(FOCUS_GROUP, order ?? 0, trap ? 1 : 0)
+}
+
+ui.end_focus_group = function() {
+	ui_cmd(END_FOCUS_GROUP)
 }
 
 // must happen on register phase because that's when secondary recordings
 // are already in the layout in the right order.
 register[FOCUSABLE] = function(a, i) {
-	let id = a[i]
-	ui.focusables.push(id)
+	focusables.push(a[i], a[i+1], 0, 0)
+}
+
+register[FOCUS_GROUP] = function(a, i) {
+	open_focus_groups.push(focusables.length)
+	focusables.push(null, a[i], 0, a[i+1])
+}
+
+register[END_FOCUS_GROUP] = function() {
+	let g = open_focus_groups.pop()
+	focusables[g+FOCUSABLE_END] = focusables.length
+}
+
+let is_focus_group = k => focusables[k+FOCUSABLE_ID] == null
+
+function focus_group_start(g) {
+	return g == null ? 0 : g + FOCUSABLE_SLOTS
+}
+
+function focus_group_end(g) {
+	return g == null ? focusables.length : focusables[g+FOCUSABLE_END]
+}
+
+function next_focus_sibling_i(k) {
+	return is_focus_group(k) ? focusables[k+FOCUSABLE_END] : k + FOCUSABLE_SLOTS
+}
+
+function focus_group_of(k) {
+	let g = null
+	for (let j = 0; j < k; j += FOCUSABLE_SLOTS)
+		if (is_focus_group(j) && focusables[j+FOCUSABLE_END] > k)
+			g = j
+	return g
+}
+
+function focus_find(id) {
+	if (id == null)
+		return null
+	for (let k = 0; k < focusables.length; k += FOCUSABLE_SLOTS)
+		if (focusables[k+FOCUSABLE_ID] == id)
+			return k
+	return null
+}
+
+function pick_focus_sibling(g, order0, k0, back) {
+	let best_k = null
+	let best_order
+	let end_i = focus_group_end(g)
+	for (let k = focus_group_start(g); k < end_i; k = next_focus_sibling_i(k)) {
+		let order = focusables[k+FOCUSABLE_ORDER]
+		if (k0 != null && !(back
+				? order < order0 || (order == order0 && k < k0)
+				: order > order0 || (order == order0 && k > k0)))
+			continue
+		if (best_k == null || (back
+				? order > best_order || (order == best_order && k > best_k)
+				: order < best_order || (order == best_order && k < best_k))) {
+			best_k = k
+			best_order = order
+		}
+	}
+	return best_k
+}
+
+function first_focusable_in(g, back) {
+	let k = pick_focus_sibling(g, 0, null, back)
+	if (k == null)
+		return null
+	if (!is_focus_group(k))
+		return k
+	let inner_k = first_focusable_in(k, back)
+	if (inner_k != null)
+		return inner_k
+	return next_focusable_after(g, k, back)
+}
+
+function next_focusable_after(g, k0, back) {
+	while (1) {
+		let k = pick_focus_sibling(g, focusables[k0+FOCUSABLE_ORDER], k0, back)
+		if (k == null)
+			return null
+		if (!is_focus_group(k))
+			return k
+		let inner_k = first_focusable_in(k, back)
+		if (inner_k != null)
+			return inner_k
+		k0 = k
+	}
+}
+
+function tab_captured(id) {
+	let keys = keydown_captured.get(id)
+	return keys ? keys.has(ui.key('shift') ? 'shift tab' : 'tab') : false
+}
+
+function step_focus(back) {
+	let k0 = focus_find(ui.focused_id)
+	if (k0 == null)
+		return first_focusable_in(null, back)
+	let g = focus_group_of(k0)
+	while (1) {
+		let k = next_focusable_after(g, k0, back)
+		if (k != null)
+			return k
+		if (g == null || focusables[g+FOCUSABLE_TRAP])
+			return first_focusable_in(g, back)
+		k0 = g
+		g = focus_group_of(k0)
+	}
 }
 
 // nohit command -------------------------------------------------------------
@@ -2158,16 +2285,12 @@ function redraw_all() {
 
 		hit_frame(recs, layers)
 
-		if (ui.keydown('tab')) {
-			let i = ui.focusables.indexOf(ui.focused_id)
-			if (i != -1) {
-				let n = ui.focusables.length
-				let next_i = (i + (ui.key('shift') ? -1 : 1) + n) % n
-				let id = ui.focusables[next_i]
-				ui.focus(id, true)
-			}
+		if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
+			let k = step_focus(ui.key('shift'))
+			if (k != null)
+				ui.focus(focusables[k+FOCUSABLE_ID], true)
 		}
-		ui.focusables.length = 0
+		focusables.length = 0
 
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
@@ -2197,6 +2320,7 @@ function redraw_all() {
 		let a = end_rec()
 		layout_rec(a, 0, 0, screen_w, screen_h)
 		register_rec(a, 0)
+		assert(!open_focus_groups.length, 'unbalanced focus_group')
 
 		t1 = clock_ms()
 		frame_graph_push('frame_layout_time', t1 - t0)
