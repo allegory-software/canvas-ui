@@ -5,7 +5,6 @@
 
 	* TODO: draw inline tabs, space indent, trailing whitespace
 	* TODO: search, replace
-	* TODO: load, save, tabs, sessions
 
 DESIGN TRADEOFFS
 
@@ -63,6 +62,12 @@ ui.fg_style('dark' , 'number'   , 'normal',   5, 0.95, 0.70)
 ui.fg_style('dark' , 'symbol'   , 'normal',   0, 1.00, 1.00)
 ui.fg_style('dark' , 'comment'  , 'normal', 140, 0.85, 0.30)
 ui.fg_style('dark' , 'error'    , 'normal',   0, 0.85, 0.65)
+
+ui.bg_style('light', 'find', 'normal' ,   0, 0.00, 0.93)
+ui.bg_style('light', 'find', 'focused', 209, 0.55, 0.92)
+
+ui.bg_style('dark' , 'find', 'normal' , 208, 0.08, 0.16)
+ui.bg_style('dark' , 'find', 'focused', 211, 0.50, 0.17)
 
 let token_colors = {
 	'tok-keyword':     'keyword',
@@ -192,7 +197,9 @@ ui.widget('code_edit_sidebar', {
 
 		let x = x0 + margin_l + w
 		for (let line = vline1; line <= vline2; line++)
-			cx.fillText(line+1, x, y0 + (line + 1) * line_h - font_descent - 1)
+			cx.fillText(
+				line+1, x,
+				y0 + (line + 1) * line_h - font_descent - 1)
 
 		cx.font = font_size+'px fas'
 		cx.textAlign = 'center'
@@ -230,6 +237,9 @@ ui.widget('code_edit_text', {
 		let vcolors     = a[i+14]
 		let hit_line    = a[i+15]
 		let cursor      = a[i+16]
+		let focused     = a[i+17]
+		let vfinds      = a[i+18]
+		let find_landed = a[i+19]
 
 		cx.save()
 
@@ -246,14 +256,17 @@ ui.widget('code_edit_text', {
 			let s = vlines[line - vline1]
 			// using tab_width-1 because tabs take one char with fillText().
 			let indent_w = tab_draw_offset(s, tab_width-1) * char_w
-			cx.fillText(s, round(x0 + indent_w), y0 + (line + 1) * line_h - font_descent - 1)
+			cx.fillText(s,
+				x0 + indent_w,
+				y0 + (line + 1) * line_h - font_descent - 1)
 		}
 
 		// this blending mode will draw only where alpha != 0, i.e. over the text.
 		cx.globalCompositeOperation = 'source-atop'
 
 		// draw highlighting rectangles.
-		let normal_colors = ui.get_theme().fg[0]
+		let fg_colors = ui.get_theme().fg[0] // get all fg colors once
+		let text_color = fg_colors.text
 		for (let line = vline1; line <= vline2; line++) {
 			let s = vlines[line - vline1]
 			let c = vcolors[line - vline1]
@@ -261,11 +274,11 @@ ui.widget('code_edit_text', {
 				let ci    = c[i+0]
 				let cw    = c[i+1]
 				let color = c[i+2]
-				let color_hsl = (normal_colors[color] || normal_colors.text)[0]
 				let x = round(x0 + ci * char_w)
 				let y = y0 + line * line_h
 				let w = round(cw * char_w)
 				let h = line_h
+				let color_hsl = (fg_colors[color] ?? text_color)[0]
 				cx.fillStyle = color_hsl
 				cx.fillRect(x, y, w, h)
 			}
@@ -275,42 +288,50 @@ ui.widget('code_edit_text', {
 		// i.e. around what's been drawn before i.e. drawing "behind".
 		cx.globalCompositeOperation = 'destination-over'
 
-		// draw carets.
-		cx.fillStyle = ui.fg_color('text')
-		if (cursor && cursor.block) {
-			let bline1 = max(min(cursor.line, cursor.sel_line), vline1)
-			let bline2 = min(max(cursor.line, cursor.sel_line), vline2)
-			for (let line = bline1; line <= bline2; line++)
+		// draw caret.
+		if (focused) {
+			cx.fillStyle = ui.fg_color('text')
+			if (cursor.block) {
+				let bline1 = max(min(cursor.line, cursor.sel_line), vline1)
+				let bline2 = min(max(cursor.line, cursor.sel_line), vline2)
+				for (let line = bline1; line <= bline2; line++)
+					cx.fillRect(
+						round(x0 + cursor.col * char_w),
+						y0 + line * line_h,
+						caret_w, line_h)
+			} else if (vlines[cursor.line - vline1] != null) {
+				let line_s = vlines[cursor.line - vline1]
+				let col = char_to_col(cursor.char, line_s, tab_width)
 				cx.fillRect(
-					round(x0 + cursor.col * char_w),
-					y0 + line * line_h,
+					round(x0 + col * char_w),
+					y0 + cursor.line * line_h,
 					caret_w, line_h)
-		} else if (cursor && vlines[cursor.line - vline1] != null) {
-			let line_s = vlines[cursor.line - vline1]
-			let col = char_to_col(cursor.char, line_s, tab_width)
-			cx.fillRect(
-				round(x0 + col * char_w),
-				y0 + cursor.line * line_h,
-				caret_w, line_h)
+			}
 		}
 
 		// draw multi-line selection.
-		let tail_width = ui.sp05()
-		let sline1 = cursor ? min(cursor.sel_line, cursor.line) : 0
-		let sline2 = cursor ? max(cursor.sel_line, cursor.line) : 0
-		if (cursor && cursor.block && cursor.col != cursor.sel_col
-				&& sline2 >= vline1 && sline1 <= vline2) {
-			cx.fillStyle = ui.bg_color('item', 'focused item-focused item-selected')
+		let tail_width = round(font_size * .25)
+		let sline1 = min(cursor.sel_line, cursor.line)
+		let sline2 = max(cursor.sel_line, cursor.line)
+		let sel_color = ui.bg_color('item', focused
+			? 'focused item-focused item-selected'
+			: 'item-focused item-selected')
+		if (cursor.block && cursor.col != cursor.sel_col
+			&& sline2 >= vline1 && sline1 <= vline2
+		) {
+			cx.fillStyle = sel_color
 			let bcol1 = min(cursor.col, cursor.sel_col)
 			let bcol2 = max(cursor.col, cursor.sel_col)
 			for (let line = max(sline1, vline1); line <= min(sline2, vline2); line++)
 				cx.fillRect(
-					x0 + bcol1 * char_w,
+					round(x0 + bcol1 * char_w),
 					y0 + line * line_h,
-					(bcol2 - bcol1) * char_w, line_h)
-		} else if (cursor && !cursor.block && cursor_has_selection(cursor)
-				&& sline2 >= vline1 && sline1 <= vline2) {
-			cx.fillStyle = ui.bg_color('item', 'focused item-focused item-selected')
+					round((bcol2 - bcol1) * char_w),
+					line_h)
+		} else if (!cursor.block && cursor_has_selection(cursor)
+				&& sline2 >= vline1 && sline1 <= vline2
+		) {
+			cx.fillStyle = sel_color
 			let vsline1 = clamp(sline1, vline1, vline2)
 			let vsline2 = clamp(sline2, vline1, vline2)
 			if (sline1 < sline2) { // multi-line
@@ -322,9 +343,10 @@ ui.widget('code_edit_text', {
 					let line_s = vlines[sline1 - vline1]
 					let scol2 = char_to_col(line_s.length, line_s, tab_width)
 					cx.fillRect(
-						x0 + scol1 * char_w,
+						round(x0 + scol1 * char_w),
 						y0 + sline1 * line_h,
-						max((scol2 - scol1) * char_w, tail_width), line_h)
+						round(max((scol2 - scol1) * char_w, tail_width)),
+						line_h)
 					vsline1++ // vsline1 is sline1 which we just drew.
 				}
 				if (scol2 != null)
@@ -334,16 +356,18 @@ ui.widget('code_edit_text', {
 					let scol1 = 0
 					let scol2 = char_to_col(line_s.length, line_s, tab_width)
 					cx.fillRect(
-						x0 + scol1 * char_w,
+						round(x0 + scol1 * char_w),
 						y0 + vsline * line_h,
-						max((scol2 - scol1) * char_w, tail_width), line_h)
+						round(max((scol2 - scol1) * char_w, tail_width)),
+						line_h)
 				}
 				if (scol2 != null) {
 					let scol1 = 0
 					cx.fillRect(
 						x0 + scol1,
 						y0 + sline2 * line_h,
-						max((scol2 - scol1) * char_w, tail_width), line_h)
+						round(max((scol2 - scol1) * char_w, tail_width)),
+						line_h)
 				}
 			} else if (vsline1 == sline1) { // single-line
 				let line_s = vlines[sline1 - vline1]
@@ -353,17 +377,32 @@ ui.widget('code_edit_text', {
 					let col1 = min(ccol, scol)
 					let col2 = max(ccol, scol)
 					cx.fillRect(
-						x0 + col1 * char_w,
+						round(x0 + col1 * char_w),
 						y0 + cursor.line * line_h,
-						(col2 - col1) * char_w, line_h)
+						round((col2 - col1) * char_w),
+						line_h)
 				}
 			}
 		}
 
-		// draw hit line.
-		if (0 && hit_line != null) {
+		// draw find matches.
+		cx.fillStyle = ui.bg_color('find', focused ? 'focused' : null)
+		for (let line = vline1; line <= vline2; line++) {
+			let f = vfinds[line - vline1]
+			for (let i = 0, n = f.length; i < n; i += 2) {
+				cx.fillRect(
+					round(x0 + f[i+0] * char_w),
+					y0 + line * line_h,
+					round(f[i+1] * char_w),
+					line_h
+				)
+			}
+		}
+
+		// draw find landing line.
+		if (find_landed) {
 			cx.fillStyle = ui.bg_color('bg1')
-			cx.fillRect(vx, y0 + hit_line * line_h, vw, line_h)
+			cx.fillRect(vx, y0 + cursor.line * line_h, vw, line_h)
 		}
 
 		// draw background.
@@ -383,14 +422,9 @@ function code_edit_view(id, opt) {
 	let tab_width = 3 // user setting
 	let lines // [line1, ...]
 	let line_offsets = [] // [line2_offset, ...]  <-- it starts with the second line!
-	let bookmark_lines = []
 	let max_line_col
 
-	// last text this editor put on the clipboard, and whether it was a block.
-	let copied_text
-	let copied_block
-
-	// text changes, flushed at the end of the frame.
+	// text changes from edits, flushed at the end of the frame.
 	let changes = [] // [line1, char1, removed_n1, inserted_n1, ...]
 
 	// parsing/highlighting state.
@@ -398,6 +432,13 @@ function code_edit_view(id, opt) {
 	let parser = assert(Lezer.parsers[lang], 'invalid language ', lang)
 	let syntax_tree // per Lezer parsing
 	let line_colors = [] // token colors: [[char, width, color], ...], ...]  1:1 with lines
+
+	// last text this editor put on the clipboard, and whether it was a block.
+	let copied_text
+	let copied_text_is_block
+
+	// bookmarks state
+	let bookmark_lines = [] // [line1,...]
 
 	// UI state, set on each frame.
 	let font_size
@@ -410,12 +451,22 @@ function code_edit_view(id, opt) {
 	let last_vline2 = -1 // visible line range
 	let vlines = [] // visible lines array: [vline1_s, ...]
 	let vcolors = [] // token colors: [vline1_colors, ...]
+	let vfinds = [] // find matches: [vline1_finds, ...]
 
 	// mouse state
 	let hit_line
 
 	// cursor state.
 	let cursor
+
+	// find state.
+	let find_open
+	let find_text = ''
+	let last_find_text = ''
+	let find_lines = [] // [match1_line, ...]
+	let find_chars = [] // [match1_char, ...]
+	let find_i // current match, as index into find_lines
+	let find_landed
 
 	// undo state.
 	let undo_stack = []
@@ -516,7 +567,7 @@ function code_edit_view(id, opt) {
 
 	function copy_selection() {
 		copied_text = selected_text(cursor)
-		copied_block = cursor.block
+		copied_text_is_block = cursor.block
 		navigator.clipboard.writeText(copied_text)
 	}
 
@@ -611,6 +662,82 @@ function code_edit_view(id, opt) {
 		}
 	}
 
+	// find -------------------------------------------------------------------
+
+	function cursor_start() {
+		return cursor.block
+			? [min(cursor.line, cursor.sel_line), 0]
+			: sel_range(cursor)
+	}
+
+	// decides which match should be current after the list is rebuilt
+	function find_index_at_cursor() {
+		if (!find_lines.length)
+			return
+		let [line1, char1] = cursor_start()
+		for (let i = 0, n = find_lines.length; i < n; i++)
+			if (find_lines[i] > line1
+					|| (find_lines[i] == line1 && find_chars[i] >= char1))
+				return i
+		return 0
+	}
+
+	function find_scan() {
+		find_lines.length = 0
+		find_chars.length = 0
+		if (find_text) {
+			let re = new RegExp(escape_regexp(find_text), 'gi')
+			for (let line = 0, line_n = lines.length; line < line_n; line++) {
+				let line_s = lines[line]
+				re.lastIndex = 0
+				let m = re.exec(line_s)
+				while (m) {
+					find_lines.push(line)
+					find_chars.push(m.index)
+					m = re.exec(line_s)
+				}
+			}
+		}
+		find_i = find_index_at_cursor()
+		last_vline1 = -1
+	}
+
+	function close_find() {
+		find_open = false
+		last_vline1 = -1
+	}
+
+	function select_match(i) {
+		find_i = i
+		let line = find_lines[i]
+		let char = find_chars[i]
+		undo_group = 'move'
+		set_block_mode(false)
+		set_cursor(line, char + find_text.length, null, false, line, char)
+		undo_group = null
+		find_landed = true
+	}
+
+	function goto_match(d) {
+		let n = find_lines.length
+		if (!n) return
+		select_match((find_i + d + n) % n)
+	}
+
+	// d > 0 goes to the first match at or after the cursor, or to the one
+	// after it when the cursor is already on that match.
+	function goto_match_from_cursor(d) {
+		let i = find_index_at_cursor()
+		if (i == null)
+			return
+		find_i = i
+		let [line1, char1] = cursor_start()
+		if (d < 0 || (find_lines[i] == line1 && find_chars[i] == char1))
+			goto_match(d)
+		else
+			select_match(i)
+	}
+
 	// text & lines helpers ---------------------------------------------------
 
 	let newline_re = /(?:\r\n|\r|\n)/g
@@ -694,6 +821,7 @@ function code_edit_view(id, opt) {
 
 	function restore_cursor(saved_cursor) {
 		undo_push_cursor()
+		find_landed = false
 		cursor = saved_cursor
 		ui.scroll_to_view(id+'.text_scrollbox', ...cursor_rect(cursor))
 	}
@@ -704,6 +832,7 @@ function code_edit_view(id, opt) {
 	) {
 		assert(!cursor.block)
 		undo_push_cursor()
+		find_landed = false
 		cursor.line = line
 		cursor.char = clamp(char, 0, lines[line].length)
 		if (!keep_want_col)
@@ -724,6 +853,7 @@ function code_edit_view(id, opt) {
 	function set_block_cursor(line, col, sel_line, sel_col) {
 		assert(cursor.block)
 		undo_push_cursor()
+		find_landed = false
 		cursor.line = line
 		cursor.col = col
 		cursor.sel_line = sel_line
@@ -993,6 +1123,9 @@ function code_edit_view(id, opt) {
 			build_colors(from_line)
 		}
 
+		if (find_text)
+			find_scan()
+
 		changes.length = 0
 	}
 
@@ -1065,11 +1198,31 @@ function code_edit_view(id, opt) {
 		if (last_vline1 != vline1 || last_vline2 != vline2) {
 			vlines .length = vline2 - vline1 + 1
 			vcolors.length = vline2 - vline1 + 1
+			vfinds .length = vline2 - vline1 + 1
 			for (let line = vline1; line <= vline2; line++) {
 				let s = lines[line]
 				let c = assert(line_colors[line])
+				let f = vfinds[line - vline1]
+				if (f) // reuse slot
+					f.length = 0
+				else
+					vfinds[line - vline1] = []
 				vlines [line - vline1] = s
 				vcolors[line - vline1] = c
+			}
+			if (find_open) {
+				let char_n = find_text.length
+				let i0 = binsearch(find_lines, vline1, '<')
+				for (let i = i0, n = find_lines.length; i < n; i++) {
+					let line = find_lines[i]
+					if (line > vline2)
+						break
+					let char = find_chars[i]
+					let line_s = lines[line]
+					let col1 = char_to_col(char, line_s, tab_width)
+					let col2 = char_to_col(char + char_n, line_s, tab_width)
+					vfinds[line - vline1].push(col1, col2 - col1)
+				}
 			}
 			last_vline1 = vline1
 			last_vline2 = vline2
@@ -1080,9 +1233,7 @@ function code_edit_view(id, opt) {
 			ui.code_edit_text(x, y, vx, vy, vw, vh,
 				line_h, font_size, font_descent, char_w,
 				vline1, vline2, vlines, tab_width, vcolors,
-				hit_line, ui.focused(id) ? cursor : null,
-		)
-
+				hit_line, cursor, ui.focused(id), vfinds, find_landed)
 		ui.end_stack()
 	}
 
@@ -1151,6 +1302,8 @@ function code_edit_view(id, opt) {
 			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
 			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
 			ui.capture_keydown(id, 'ctrl s') // browser: save as html -> editor: save
+			ui.capture_keydown(id, 'f3'      ) // browser: find next -> editor: find next
+			ui.capture_keydown(id, 'shift f3') // browser: find prev -> editor: find prev
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
@@ -1183,22 +1336,24 @@ function code_edit_view(id, opt) {
 				if (lines_n && ctrl && shift)
 					set_block_mode(true)
 
+				if (cursor.block && !shift && (chars_n || lines_n))
+					set_block_mode(false)
+
 				if (cursor.block && (chars_n || lines_n)) { // block navigation
 					let bline1 = min(cursor.line, cursor.sel_line)
 					let bline2 = max(cursor.line, cursor.sel_line)
 					if (chars_n) {
 						let col = next_block_col(cursor.col, bline1, bline2, chars_n)
-						set_block_cursor(cursor.line, col, cursor.sel_line,
-							shift ? cursor.sel_col : col)
+						set_block_cursor(cursor.line, col,
+							cursor.sel_line, cursor.sel_col)
 					} else {
 						let line = clamp(cursor.line + lines_n, 0, lines.length-1)
-						let sel_line = shift ? cursor.sel_line : line
-						let nline1 = min(line, sel_line)
-						let nline2 = max(line, sel_line)
+						let nline1 = min(line, cursor.sel_line)
+						let nline2 = max(line, cursor.sel_line)
 						if (block_col_ok(cursor.col, nline1, nline2)
 								&& block_col_ok(cursor.sel_col, nline1, nline2))
 							set_block_cursor(line, cursor.col,
-								sel_line, cursor.sel_col)
+								cursor.sel_line, cursor.sel_col)
 					}
 				} else if (cursor.block
 						&& (key == 'backspace' || key == 'delete')) {
@@ -1244,9 +1399,13 @@ function code_edit_view(id, opt) {
 					set_block_mode(false)
 					set_cursor(0, 0, 'select_all')
 				} else if (key == 'escape') {
-					undo_group = 'move'
-					set_block_mode(false)
-					set_cursor(cursor.line, cursor.char, false)
+					if (find_open) {
+						close_find()
+					} else {
+						undo_group = 'move'
+						set_block_mode(false)
+						set_cursor(cursor.line, cursor.char, false)
+					}
 				} else if (key_char) { // typing
 					undo_group = 'insert'
 					replace_selection(key_char)
@@ -1291,7 +1450,7 @@ function code_edit_view(id, opt) {
 					undo_group = 'paste'
 					if (cursor.block) {
 						let [line1, , line2] = block_sel_range(cursor)
-						let paste_lines = copied_block
+						let paste_lines = copied_text_is_block
 								&& ui.clipboard_text == copied_text
 							? text_lines(normalize_newlines(copied_text)) : null
 						if (paste_lines
@@ -1314,8 +1473,13 @@ function code_edit_view(id, opt) {
 				} else if (full_key == 'ctrl f2') {
 					toggle_bookmark(cursor.line)
 				} else if (full_key == 'ctrl f') { // search, replace
-					// TODO: find
-					pr('FIND')
+					find_open = true
+					ui.focus(id+'.find_input')
+					if (find_text)
+						find_scan()
+				} else if (full_key == 'f3' || full_key == 'shift f3') {
+					find_open = true
+					goto_match_from_cursor(shift ? -1 : 1)
 				} else if (full_key == 'ctrl h') {
 					// TODO: replace
 					pr('REPLACE')
@@ -1342,6 +1506,7 @@ function code_edit_view(id, opt) {
 				ui.bb('bg2')
 			ui.end_stack()
 			ui.h(1, ui.sp025())
+
 				ui.stack('', 0)
 					ui.bb('bg1')
 					ui.scrollbox(id+'.sidebar_scrollbox', 0, 'hide', 'hide',
@@ -1349,9 +1514,51 @@ function code_edit_view(id, opt) {
 						ui.frame(noop, on_sidebar_frame, 0, 's', 's', sidebar_w, text_h)
 					ui.end_scrollbox()
 				ui.end_stack()
-				ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll')
-					ui.frame(noop, on_text_frame, 1, 's', 's', text_w, text_h)
-				ui.end_scrollbox()
+
+				ui.stack('', 1, 's', 's')
+
+					ui.scrollbox(id+'.text_scrollbox', 1, 'auto', 'scroll')
+						ui.frame(noop, on_text_frame, 1, 's', 's', text_w, text_h)
+					ui.end_scrollbox()
+
+					if (find_open) {
+						ui.m(ui.sp2())
+						ui.p(ui.sp2(), ui.sp1())
+						ui.popup(id+'.find_popup', null, null, 'it', ']', 0, 0, 'constrain')
+							ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
+							ui.bb('bg2', null, 1, 'intense')
+							let iid = id+'.find_input'
+							ui.h(0, ui.sp05())
+								find_text = ui.input(iid, find_text, 0)
+								if (find_text != last_find_text) {
+									last_find_text = find_text
+									find_scan()
+								}
+								if (ui.bare_icon_button(id+'.find_prev', 'fas', '\uf062', 0))
+									goto_match(-1)
+								if (ui.bare_icon_button(id+'.find_next', 'fas', '\uf063', 0))
+									goto_match(1)
+								if (ui.bare_icon_button(id+'.find_close', 'fas', '\uf00d', 0)) {
+									close_find()
+									ui.focus(id)
+									ui.relayout()
+								}
+							ui.end_h()
+							ui.capture_keydown (iid, 'ctrl f')
+							ui.capture_keyup   (iid, 'ctrl f')
+							if (ui.focused(iid)) {
+								if (ui.keydown('escape')) {
+									close_find()
+									ui.focus(id)
+									ui.relayout()
+								}
+								if (ui.keydown('enter'))
+									goto_match(ui.key('shift') ? -1 : 1)
+							}
+						ui.end_popup()
+					}
+
+				ui.end_stack()
 			ui.end_h()
 		ui.end_v()
 
