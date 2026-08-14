@@ -467,6 +467,8 @@ function code_edit_view(id, opt) {
 	let find_chars = [] // [match1_char, ...]
 	let find_i // current match, as index into find_lines
 	let find_landed
+	let find_replace
+	let replace_text = ''
 
 	// undo state.
 	let undo_stack = []
@@ -736,6 +738,63 @@ function code_edit_view(id, opt) {
 			goto_match(d)
 		else
 			select_match(i)
+	}
+
+	function replace_at(i) {
+		let line = find_lines[i]
+		let char = find_chars[i]
+		remove_text(line, char, line, char + find_text.length)
+		insert_text(line, char, replace_text)
+	}
+
+	function replace_match() {
+		if (!find_lines.length)
+			return
+		let [line1, char1, line2, char2] = sel_range(cursor)
+		if (!cursor.block
+				&& find_lines[find_i] == line1 && line1 == line2
+				&& find_chars[find_i] == char1
+				&& char1 + find_text.length == char2
+		) {
+			undo_group = 'replace'
+			replace_at(find_i)
+			set_cursor(line1, char1 + replace_text.length, false)
+			undo_group = null
+			update_text_state()
+		}
+		goto_match_from_cursor(1)
+	}
+
+	function replace_all() {
+		if (!find_lines.length)
+			return
+		let line1, char1, line2, char2
+		if (cursor_has_selection(cursor)) {
+			if (cursor.block) {
+				line1 = min(cursor.line, cursor.sel_line)
+				line2 = max(cursor.line, cursor.sel_line)
+				char1 = 0
+				char2 = 1/0
+			} else {
+				;[line1, char1, line2, char2] = sel_range(cursor)
+			}
+		}
+		undo_group = 'replace'
+		set_block_mode(false)
+		for (let i = find_lines.length-1; i >= 0; i--) {
+			let line = find_lines[i]
+			let char = find_chars[i]
+			if (line1 != null && (
+				line < line1 || line > line2 ||
+				(line == line1 && char < char1) ||
+				(line == line2 && char + find_text.length > char2)
+			))
+				continue
+			replace_at(i)
+		}
+		set_cursor(cursor.line, cursor.char, false)
+		undo_group = null
+		update_text_state()
 	}
 
 	// text & lines helpers ---------------------------------------------------
@@ -1472,17 +1531,15 @@ function code_edit_view(id, opt) {
 					}
 				} else if (full_key == 'ctrl f2') {
 					toggle_bookmark(cursor.line)
-				} else if (full_key == 'ctrl f') { // search, replace
+				} else if (full_key == 'ctrl f' || full_key == 'ctrl h') {
 					find_open = true
+					find_replace = full_key == 'ctrl h'
 					ui.focus(id+'.find_input')
 					if (find_text)
 						find_scan()
 				} else if (full_key == 'f3' || full_key == 'shift f3') {
 					find_open = true
 					goto_match_from_cursor(shift ? -1 : 1)
-				} else if (full_key == 'ctrl h') {
-					// TODO: replace
-					pr('REPLACE')
 				}
 			}
 
@@ -1527,33 +1584,59 @@ function code_edit_view(id, opt) {
 						ui.popup(id+'.find_popup', null, null, 'it', ']', 0, 0, 'constrain')
 							ui.shadow(1, 1, 3, 0, false, ui.dark() ? 'black' : '#ccc')
 							ui.bb('bg2', null, 1, 'intense')
-							let iid = id+'.find_input'
-							ui.h(0, ui.sp05())
-								find_text = ui.input(iid, find_text, 0)
-								if (find_text != last_find_text) {
-									last_find_text = find_text
-									find_scan()
+							let fid = id+'.find_input'
+							let rid = id+'.replace_input'
+							ui.v(0, ui.sp05())
+								ui.h(0, ui.sp05())
+									find_text = ui.input(fid, find_text, 0)
+									if (find_text != last_find_text) {
+										last_find_text = find_text
+										find_scan()
+									}
+									if (ui.bare_icon_button(id+'.find_prev', 'fas', '\uf062', 0))
+										goto_match(-1)
+									if (ui.bare_icon_button(id+'.find_next', 'fas', '\uf063', 0))
+										goto_match(1)
+									if (ui.bare_icon_button(id+'.find_close', 'fas', '\uf00d', 0)) {
+										close_find()
+										ui.focus(id)
+										ui.relayout()
+									}
+								ui.end_h()
+								if (find_replace) {
+									ui.h(0, ui.sp05())
+										replace_text = ui.input(rid, replace_text, 0)
+										if (ui.button(id+'.replace', 'Replace', 0))
+											replace_match()
+										if (ui.button(id+'.replace_all', 'Replace All', 0))
+											replace_all()
+									ui.end_h()
 								}
-								if (ui.bare_icon_button(id+'.find_prev', 'fas', '\uf062', 0))
-									goto_match(-1)
-								if (ui.bare_icon_button(id+'.find_next', 'fas', '\uf063', 0))
-									goto_match(1)
-								if (ui.bare_icon_button(id+'.find_close', 'fas', '\uf00d', 0)) {
-									close_find()
-									ui.focus(id)
-									ui.relayout()
-								}
-							ui.end_h()
-							ui.capture_keydown (iid, 'ctrl f')
-							ui.capture_keyup   (iid, 'ctrl f')
-							if (ui.focused(iid)) {
+							ui.end_v()
+							ui.capture_keydown (fid, 'ctrl f')
+							ui.capture_keyup   (fid, 'ctrl f')
+							ui.capture_keydown (fid, 'ctrl h')
+							ui.capture_keyup   (fid, 'ctrl h')
+							ui.capture_keydown (rid, 'ctrl f')
+							ui.capture_keyup   (rid, 'ctrl f')
+							ui.capture_keydown (rid, 'ctrl h')
+							ui.capture_keyup   (rid, 'ctrl h')
+							if (ui.focused(fid) || ui.focused(rid)) {
 								if (ui.keydown('escape')) {
 									close_find()
 									ui.focus(id)
 									ui.relayout()
 								}
-								if (ui.keydown('enter'))
-									goto_match(ui.key('shift') ? -1 : 1)
+								if (ui.keydown('ctrl f') || ui.keydown('ctrl h')) {
+									find_replace = ui.keydown('ctrl h')
+									ui.relayout()
+								}
+								if (ui.keydown('enter')) {
+									if (ui.focused(rid))
+										replace_match()
+									else
+										goto_match(ui.key('shift') ? -1 : 1)
+								}
 							}
 						ui.end_popup()
 					}
