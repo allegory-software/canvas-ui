@@ -6939,29 +6939,31 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 		}
 
 		if (ctrl && (ui.keydown('arrowup') || ui.keydown('arrowdown'))) {
-			e.scroll_by_pages((key == 'arrowup' ? 1 : -1) * 0.5)
+			let sy = s.get('scroll_y') ?? 0
+			s.set('scroll_y', sy + (ui.keydown('arrowup') ? -1 : 1) * h / 2)
 			ui.capture_keys()
-		}
-
-		if (ui.keydown('pageup') || ui.keydown('pagedown')) {
-			e.scroll_by_pages((ui.keydown('pageup') ? 1 : -1))
+		} else if (ui.keydown('pageup') || ui.keydown('pagedown')) {
+			let sy = s.get('scroll_y') ?? 0
+			s.set('scroll_y', sy + (ui.keydown('pageup') ? -1 : 1) * h)
 			ui.capture_keys()
-		}
-
-		if (!ctrl && focused_range && (
+		} else if (!ctrl && (
 				ui.keydown('arrowdown') || ui.keydown('arrowup') ||
 				ui.keydown('arrowleft') || ui.keydown('arrowright')
-			) && e.can_change_range(focused_range)
+			)
 		) {
-			let r = focused_range
 			let ddays = (ui.keydown('arrowup') || ui.keydown('arrowdown') ? 7 : 1)
 				* ((ui.keydown('arrowdown') || ui.keydown('arrowright') ? 1 : -1))
 
 			if (mode == 'day') {
-				e.value = day(e.value ?? time(), ddays)
-				e.fireup('input', ev)
-				e.scroll_to_view_range(e.value, e.value, 0)
-			} else {
+				sel_day = day(sel_day ?? time(), ddays)
+				s.set('day', sel_day)
+				day_changed = true
+				let weeks_from_this_week = days(week(sel_day) - week(time())) / 7
+				ui.scroll_to_view(id, 0, (weeks_from_this_week + 1) * cell_h,
+					cells_w, cell_h)
+				ui.capture_keys()
+			} else if (focused_range && e.can_change_range(focused_range)) {
+				let r = focused_range
 				let min_range = e.min_range - 24 * 3600
 				let max_range = e.max_range - 24 * 3600
 				let d0 = r[0]
@@ -6979,8 +6981,8 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 				ranges_changed(ev)
 				sort_ranges()
 				e.scroll_to_view_range(r[0], r[1], 0)
+				return false
 			}
-			return false
 		}
 
 		if (0 && ui.keydown('tab')) {
