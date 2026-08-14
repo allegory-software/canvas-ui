@@ -661,6 +661,11 @@ function find_ai_ci(s, s1) {
 	return repl(lower_ai_ci(s).indexOf(lower_ai_ci(s1)), -1, null)
 }
 
+let regexp_special_re = /[.*+?^${}()|[\]\\]/g
+function escape_regexp(s) {
+	return s.replace(regexp_special_re, '\\$&')
+}
+
 // concat args, skipping null ones. returns null if all args are null.
 let non_null = s => s != null
 function catany(sep, ...args) {
