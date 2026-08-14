@@ -1159,11 +1159,11 @@ let keydown_captured = map()
 let keyup_captured = map()
 
 ui.capture_keydown = function(id, key) {
-	keydown_captured.set(key, id)
+	attr(keydown_captured, id, set).add(key)
 }
 
 ui.capture_keyup = function(id, key) {
-	keyup_captured.set(key, id)
+	attr(keyup_captured, id, set).add(key)
 }
 
 function process_key(ev, ev_name, key) {
@@ -1187,9 +1187,9 @@ function process_key(ev, ev_name, key) {
 		key_state.add(key)
 	else
 		key_state.delete(key)
-	let captured_set = ev_name == 'down' ? keydown_captured : keyup_captured
-	if (ev && (key == 'tab'
-		|| (ui.focused_id && captured_set.get(full_key) == ui.focused_id))) {
+	let captured = (ev_name == 'down' ? keydown_captured : keyup_captured)
+		.get(ui.focused_id)
+	if (ev && (key == 'tab' || (captured && captured.has(full_key)))) {
 		// this allows us to supress some (but not all) browser key events.
 		ev.preventDefault()
 	}
