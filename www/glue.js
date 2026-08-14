@@ -107,6 +107,7 @@ STRINGS
 	display_name(s)
 	lower_ai_ci(s)
 	find_ai_ci(s, s1)
+	escape_regexp(s)
 	words(s) -> a | null
 	wordset(s) -> {word1: true, ...} | null
 	catany(sep, ...)
@@ -2464,7 +2465,7 @@ pr, _, warn, debug, trace, trace_if, assert,
 push_log, push_log_if, pop_log, log, log_if, check,
 callable_constructor, inherit_properties,
 property, method, override, alias, override_property_setter, override_property_getter,
-subst, display_name, lower_ai_ci, find_ai_ci, catany, catall, esc, words, wordset, captures,
+subst, display_name, lower_ai_ci, find_ai_ci, escape_regexp, catany, catall, esc, words, wordset, captures,
 array, empty_array, range, extend, array_set,
 insert, insert_n, remove, remove_n, remove_value, replace_value, remove_values, array_move, array_equals,
 binsearch, uniq_sorted, group_sorted, remove_duplicates,
