@@ -5360,10 +5360,10 @@ ui.button_text = function(s, state, w, h) {
 
 ui.button_icon = function(font, icon, state, w, h) {
 	state = repl(state, 'click', 'hover')
-	w ??= ui.em(2.2)
+	w ??= ui.em(2.3)
 	h ??= ui.em(2.2) // force h
 	ui.font(font)
-	ui.font_size(1.3)
+	ui.font_size(1)
 	ui.color('text', state)
 	ui.text('', icon, 0, 'c', 'c', w, w, h)
 }
@@ -5376,7 +5376,7 @@ ui.end_button_stack = function(state) {
 ui.icon_button = function(
 	id, font, icon, fr, align, valign, min_w, min_h, style
 ) {
-	min_w ??= ui.em(1.5) // force h
+	min_w ??= ui.em(1.5) // force w
 	min_h ??= ui.em(1.5) // force h
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
 	let state = ui.button_state(id)
