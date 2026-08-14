@@ -4269,6 +4269,7 @@ ui.text = function(
 	}
 	if (editable) {
 		keepalive(id)
+		ui.focusable(id)
 		s = ui.state(id, 'text') ?? s
 	}
 	ui_cmd_box(CMD_TEXT, fr ?? 1, align ?? 'l', valign ?? 'c',
@@ -5330,23 +5331,29 @@ ui.widget('drag_point', {
 // though the mouse _is_ captured.
 
 ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
+	ui.focusable(id)
 	ui.stack(id, fr, align ?? 's', valign ?? 'c', min_w, min_h ?? ui.em(1.5))
 }
 
 ui.button_state = function(id) {
 	let cs = ui.capture(id)
 	let hs = hit(id) || (cs && hovers(id))
-	return cs && hs ? ui.clickup ? 'click' : 'active' : hs ? 'hover' : null
+	return cs && hs ? ui.clickup ? 'click' : 'active'
+		: hs ? 'hover' : ui.focused(id) ? 'focused' : null
 }
 
 ui.button_bb = function(style, state) {
 	state = repl(state, 'click', 'hover')
 	style = style ?? 'button'
-	if (!style) // false, 0, '' means no border
+	if (!style) { // false, 0, '' means no border
+		if (state == 'focused')
+			ui.focus_ring()
 		return
+	}
 	ui.shadow('button')
 	let radius = ui.sp05()
-	ui.bb(style, state, 1, 'intense', state, radius)
+	ui.bb(style, repl(state, 'focused', null),
+		1, 'intense', repl(state, 'focused', 'hover'), radius)
 }
 
 ui.button_text = function(s, state, w, h) {
