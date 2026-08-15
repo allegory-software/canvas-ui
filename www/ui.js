@@ -106,6 +106,8 @@ KEYBOARD STATE
 	key             (key) -> t|f     check if a key is pressed
 	key_events      -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
 	capture_keys    ()    remove current keydown() and keyup() events
+	capture_keydown (key)   stop the browser from acting on a keydown
+	capture_keyup   (key)   stop the browser from acting on a keyup
 
 LAYERS
 
@@ -133,6 +135,7 @@ FOCUS STATE
 	focused         (id) -> t|f          check if widget is currently focused
 	focusing        (id) -> t|f          widget is focusing this frame
 	focusable       (id, [order])        add widget to the tab order
+	capture_tab     (id, [back])         widget gets tab (shift-tab if back)
 	focus_group     ([trap], [order])    begin a tab order group
 	end_focus_group ()                   end a tab order group
 	window_focusing   = t                window is focusing this frame
@@ -1158,15 +1161,17 @@ let key_state = set()
 
 ui.key_events = [] // [key_event1, ...]
 
-let keydown_captured = map()
-let keyup_captured = map()
+// keys that the app handles itself so the browser must not act on them.
+// capture is app-wide, so widget modules register at load time.
+let captured_keydowns = set()
+let captured_keyups   = set()
 
-ui.capture_keydown = function(id, key) {
-	attr(keydown_captured, id, set).add(key)
+ui.capture_keydown = function(key) {
+	captured_keydowns.add(key)
 }
 
-ui.capture_keyup = function(id, key) {
-	attr(keyup_captured, id, set).add(key)
+ui.capture_keyup = function(key) {
+	captured_keyups.add(key)
 }
 
 function process_key(ev, ev_name, key) {
@@ -1190,9 +1195,8 @@ function process_key(ev, ev_name, key) {
 		key_state.add(key)
 	else
 		key_state.delete(key)
-	let captured = (ev_name == 'down' ? keydown_captured : keyup_captured)
-		.get(ui.focused_id)
-	if (ev && (key == 'tab' || (captured && captured.has(full_key)))) {
+	let captured = ev_name == 'down' ? captured_keydowns : captured_keyups
+	if (ev && (key == 'tab' || captured.has(full_key))) {
 		// this allows us to supress some (but not all) browser key events.
 		ev.preventDefault()
 	}
@@ -1477,8 +1481,6 @@ window.addEventListener('blur', function(ev) {
 	key_downs.clear()
 	key_ups.clear()
 	ui.key_events.length = 0
-	keydown_captured.clear()
-	keyup_captured.clear()
 	animate()
 })
 
@@ -2101,9 +2103,12 @@ function next_focusable_after(g, k0, back) {
 	}
 }
 
+ui.capture_tab = function(id, back) {
+	ui.state(id).set(back ? 'capture_shift_tab' : 'capture_tab', true)
+}
+
 function tab_captured(id) {
-	let keys = keydown_captured.get(id)
-	return keys ? keys.has(ui.key('shift') ? 'shift tab' : 'tab') : false
+	return !!ui.state(id, ui.key('shift') ? 'capture_shift_tab' : 'capture_tab')
 }
 
 function step_focus(back) {

@@ -69,6 +69,14 @@ ui.bg_style('light', 'find', 'focused', 209, 0.55, 0.92)
 ui.bg_style('dark' , 'find', 'normal' , 208, 0.08, 0.16)
 ui.bg_style('dark' , 'find', 'focused', 211, 0.50, 0.17)
 
+ui.capture_keydown('ctrl f'  ) // browser: find -> editor: find
+ui.capture_keyup  ('ctrl f'  ) // browser: find -> editor: find
+ui.capture_keydown('ctrl h'  ) // browser: history -> editor: replace
+ui.capture_keyup  ('ctrl h'  ) // browser: history -> editor: replace
+ui.capture_keydown('ctrl s'  ) // browser: save as html -> editor: save
+ui.capture_keydown('f3'      ) // browser: find next -> editor: find next
+ui.capture_keydown('shift f3') // browser: find prev -> editor: find prev
+
 let token_colors = {
 	'tok-keyword':     'keyword',
 	'tok-atom':        'keyword',
@@ -1357,14 +1365,8 @@ function code_edit_view(id, opt) {
 
 		if (ui.focused(id)) {
 
-			ui.capture_keydown(id, 'ctrl f') // browser: find -> editor: find
-			ui.capture_keyup  (id, 'ctrl f') // browser: find -> editor: find
-			ui.capture_keydown(id, 'ctrl h') // browser: history -> editor: replace
-			ui.capture_keydown(id, 'ctrl s') // browser: save as html -> editor: save
-			ui.capture_keydown(id, 'f3'      ) // browser: find next -> editor: find next
-			ui.capture_keydown(id, 'shift f3') // browser: find prev -> editor: find prev
-			ui.capture_keydown(id, 'tab'      )
-			ui.capture_keydown(id, 'shift tab')
+			ui.capture_tab(id)
+			ui.capture_tab(id, true)
 
 			for (let [event, full_key, key, key_char, ctrl, alt, shift] of ui.key_events) {
 				if (event != 'down')
@@ -1615,14 +1617,6 @@ function code_edit_view(id, opt) {
 									ui.end_h()
 								}
 							ui.end_v()
-							ui.capture_keydown (fid, 'ctrl f')
-							ui.capture_keyup   (fid, 'ctrl f')
-							ui.capture_keydown (fid, 'ctrl h')
-							ui.capture_keyup   (fid, 'ctrl h')
-							ui.capture_keydown (rid, 'ctrl f')
-							ui.capture_keyup   (rid, 'ctrl f')
-							ui.capture_keydown (rid, 'ctrl h')
-							ui.capture_keyup   (rid, 'ctrl h')
 							if (ui.focused(fid) || ui.focused(rid)) {
 								if (ui.keydown('escape')) {
 									close_find()
