@@ -6267,23 +6267,23 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	if (hit(id) && ui.click)
 		ts.set('to_top', id)
 	let [dstate, dx, dy] = ui.drag(id+'.title')
+	let cs = captured(id+'.title') // null unless dragging
 	let s = ui.state(id)
-	let mx1 =   align_start ? (s.get('mx1') ?? x0) + dx : 0
-	let mx2 =  !align_start ? (s.get('mx2') ?? x0) - dx : 0
-	let my1 =  valign_start ? (s.get('my1') ?? y0) + dy : 0
-	let my2 = !valign_start ? (s.get('my2') ?? y0) - dy : 0
+	// ox, oy: offset from the target edges that align and valign anchor the
+	// toolbox to, so that it keeps its distance from them when they move.
+	// x0, y0 are distances from those edges, the offsets are screen-directed.
+	// the popup keeps ox, oy on screen, the drag moves from where the grab
+	// found them so that the grabbed point stays under the mouse.
+	let ox = s.get('ox') ?? ( align_start ? x0 : -x0)
+	let oy = s.get('oy') ?? (valign_start ? y0 : -y0)
+	if (dstate == 'drag') { cs.set('ox0', ox); cs.set('oy0', oy) }
+	if (cs) { ox = cs.get('ox0') + dx; oy = cs.get('oy0') + dy }
 	let min_w = s.get('min_w')
 	let min_h = s.get('min_h')
-	if (dstate == 'drop') {
-		s.set('mx1', mx1)
-		s.set('mx2', mx2)
-		s.set('my1', my1)
-		s.set('my2', my2)
-	}
 
-	ui.m(mx1, my1, mx2, my2)
 	let i = ui.popup(id, 'window', target_i ?? 'screen',
-		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain'
+		valign_start ? 'it' : 'ib', align, min_w, min_h, 'constrain', null,
+		ox, oy
 	)
 		ts.get('popups').set(id, i)
 		//ui.p(1)
