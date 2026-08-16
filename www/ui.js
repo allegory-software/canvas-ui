@@ -1202,10 +1202,10 @@ function process_key(ev, ev_name, key) {
 	}
 	animate()
 }
-canvas.addEventListener('keydown', function(ev) {
+document.addEventListener('keydown', function(ev) {
 	process_key(ev, 'down', ev.key)
 })
-canvas.addEventListener('keyup', function(ev) {
+document.addEventListener('keyup', function(ev) {
 	process_key(ev, 'up', ev.key)
 })
 
@@ -4761,14 +4761,6 @@ function input_input(ev) {
 	animate()
 }
 
-function input_keydown(ev) {
-	process_key(ev, 'down', ev.key)
-}
-
-function input_keyup(ev) {
-	process_key(ev, 'up', ev.key)
-}
-
 function input_create(id, input_type) {
 	let input = ui.state(id, 'input')
 	if (!input) {
@@ -4780,8 +4772,6 @@ function input_create(id, input_type) {
 		input.addEventListener('focus'  , input_focus)
 		input.addEventListener('blur'   , input_blur)
 		input.addEventListener('input'  , input_input)
-		input.addEventListener('keydown', input_keydown)
-		input.addEventListener('keyup'  , input_keyup)
 		screen.appendChild(input)
 		ui.state(id).set('input', input)
 		ui.on_free(id, input_free)

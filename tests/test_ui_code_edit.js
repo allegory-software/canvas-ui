@@ -57,7 +57,8 @@ let ui = {
 	cx: {font: '', save(){}, restore(){}, fillRect(){}, fillText(){},
 		clearRect(){}, beginPath(){}, rect(){}, clip(){}},
 	caret_w: 2,
-	fg_style(){}, widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){},
+	fg_style(){}, bg_style(){},
+	widget(){}, cmd(){}, keepalive(){}, on_free(){}, focus(){},
 	capture_keydown(){}, capture_keyup(){}, capture_tab(){},
 	scroll_to_view(){}, measure(){},
 	v(){}, end_v(){}, h(){}, end_h(){}, stack(){}, end_stack(){},
@@ -71,6 +72,7 @@ let ui = {
 	fg_color: () => '#000',
 	bg_color: () => '#000',
 	sp025: () => 1, sp05: () => 2, sp1: () => 4,
+	em: n => Math.round((n ?? 1) * FONT_SIZE),
 	focused: () => true,
 	state,
 	drag: () => [drag_state, 0, 0, state('drag')],
@@ -308,28 +310,29 @@ eq(selection(), [2, 0, 0, 0], 'again extends it further')
 
 open_text('aaaa\nbbbb\n')
 make_block(0, 1, 1, 1)
-press('arrowright', 'arrowright')
-eq(selection(), [1, 2, 0, 2], 'right moves the whole block one column')
 press('arrowright', 'arrowright', null, false, false, true)
-eq(selection(), [1, 3, 0, 2], 'shift+right moves the caret column only')
-press('arrowleft', 'arrowleft')
-eq(selection(), [1, 2, 0, 2], 'left collapses it back')
+eq(selection(), [1, 2, 0, 1], 'shift+right moves the caret column only')
+press('arrowleft', 'arrowleft', null, false, false, true)
+eq(selection(), [1, 1, 0, 1], 'shift+left moves it back')
+press('arrowright', 'arrowright')
+eq([cursor().block, selection()], [false, [1, 2, 1, 2]],
+	'an unshifted arrow leaves block mode')
 
 open_text('\t\tab\n\tcd\n')
 make_block(0, 0, 1, 0)
-press('arrowright', 'arrowright')
+press('arrowright', 'arrowright', null, false, false, true)
 eq(caret()[1], 3, 'right stops at the first tab stop valid on both lines')
-press('arrowright', 'arrowright')
+press('arrowright', 'arrowright', null, false, false, true)
 eq(caret()[1], 6, 'right skips the column inside the deeper tab')
-press('arrowleft', 'arrowleft')
+press('arrowleft', 'arrowleft', null, false, false, true)
 eq(caret()[1], 3, 'left comes back to the same stop')
 
 open_text('aaaa\nbbbb\ncccc\n')
 make_block(0, 1, 1, 1)
 press('arrowdown', 'arrowdown')
 eq(selection(), [2, 1, 2, 1], 'down collapses the block to one line and moves')
-press('arrowdown', 'arrowdown', null, false, false, true)
-eq(selection(), [3, 1, 2, 1], 'shift+down grows it again')
+press('arrowdown', 'arrowdown', null, true, false, true)
+eq(selection(), [3, 1, 2, 1], 'ctrl+shift+down makes a block again and grows it')
 
 // block editing ---------------------------------------------------------------
 
