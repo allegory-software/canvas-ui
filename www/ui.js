@@ -236,7 +236,7 @@ CONTAINERS
 	h | v           (fr, gap, align, valign, min_w, min_h)
 	stack           (id, fr, align, valign, min_w, min_h)
 	sb | scrollbox  (id, fr, overflow_x, overflow_y, align, valign, min_w, min_h, sx, sy, x_id, y_id)
-	popup           (id, layer, target_i, side, align, min_w, min_h, flags)
+	popup           (id, layer, target_i, side, align, min_w, min_h, flags, z_index, ox, oy)
 	hsplit | vsplit (id, size, unit, fixed_side, split_fr, gap, align, valign, min_w, min_h)
 	splitter        ()
 	toolbox         (id, title, align, valign, x0, y0, target_i)
@@ -3600,11 +3600,14 @@ const POPUP_LAYER_I   = BOX_CT_ARGS+0
 const POPUP_TARGET_I  = BOX_CT_ARGS+1
 const POPUP_FLAGS     = BOX_CT_ARGS+2
 const POPUP_SIDE_REAL = BOX_CT_ARGS+3
+const POPUP_OX        = BOX_CT_ARGS+4 // offset x,y from where side+align put it
 
 const CMD_POPUP = cmd_ct('popup')
 
+// ox, oy shift the popup from where side and align put it, in screen
+// direction. margins stay a gap between the popup and its target.
 ui.popup = function(
-	id, layer, target, side, align, min_w, min_h, flags, z_index
+	id, layer, target, side, align, min_w, min_h, flags, z_index, ox, oy
 ) {
 	layer = ui_layer(layer)
 	let target_i = target == 'screen' ? 0
@@ -3622,6 +3625,7 @@ ui.popup = function(
 		// BOX_ARGS+0
 		layer.i, target_i, flags,
 		side, // side_real
+		ox ?? 0, oy ?? 0,
 	)
 	if (target_i)
 		a[i+POPUP_TARGET_I] -= i // make relative
@@ -3818,22 +3822,36 @@ translate[CMD_POPUP] = function(a, i) {
 
 	}
 
+	// step from the margin rect to the border rect, which is the rect that
+	// the user sees and thus the one to keep on screen. the popup's own
+	// offset moves it, its margins are the gap left around it.
+	x += a[i+POPUP_OX+0] + a[i+MX1+0]
+	y += a[i+POPUP_OX+1] + a[i+MX1+1]
+
 	// if nothing else works, adjust the offset to fit the screen.
-	// TODO: actually we should adjust the offset to fit the current viewport
-	// computed from all parent scrollboxes.
 	if (flags & POPUP_FIT_CONSTRAIN) {
 		let d = screen_margin
+		let border_w = w - a[i+MX1+0] - a[i+MX2+0]
+		let border_h = h - a[i+MX1+1] - a[i+MX2+1]
 		let ox1 = min(0, x - d)
 		let oy1 = min(0, y - d)
-		let ox2 = max(0, x + w - (bw - d))
-		let oy2 = max(0, y + h - (bh - d))
-		x -= ox1 ? ox1 : ox2
-		y -= oy1 ? oy1 : oy2
+		let ox2 = max(0, x + border_w - (bw - d))
+		let oy2 = max(0, y + border_h - (bh - d))
+		let cdx = ox1 ? ox1 : ox2 // constrain correction
+		let cdy = oy1 ? oy1 : oy2
+		x -= cdx
+		y -= cdy
+		// publish the offset that fits, so that a widget that keeps its
+		// popup's offset keeps one that it can actually be placed at.
+		let id = a[i+POPUP_ID]
+		if (id) {
+			ui.state(id).set('ox', a[i+POPUP_OX+0] - cdx)
+			ui.state(id).set('oy', a[i+POPUP_OX+1] - cdy)
+		}
 	}
 
-	// TODO: constrain should include these too (see toolbox constrain not working)!
-	x += a[i+MX1+0] + a[i+PX1+0]
-	y += a[i+MX1+1] + a[i+PX1+1]
+	x += a[i+PX1+0]
+	y += a[i+PX1+1]
 
 	a[i+0] = x
 	a[i+1] = y
