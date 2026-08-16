@@ -243,6 +243,9 @@ CONTAINERS
 	frame           (id, on_measure, on_frame, fr, align, valign, min_w, min_h, ...args)
 	end             ()
 
+	scroll_to_view  ()                 scroll the box recorded next into view
+	scroll_to_view  (id, x, y, w, h)   scroll a rect of scrollbox id into view
+
 BORDER & BACKGROUND
 
 	bb              (bg_color, bg_color_state, sides, border_color, border_color_state, border_radius)
@@ -1533,12 +1536,14 @@ let rec_stack = []
 // NOTE: ui.ct_i() and ui.rel_ct_i() are only valid if the container is
 // inside the same rec, so open a container first in a recording!
 ui.start_recording = function() {
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a1 = rec()
 	rec_stack.push(a, ct_stack.length)
 	a = a1
 }
 
 ui.end_recording = function() {
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let ct_stack_len = rec_stack.pop()
 	let a1 = a
 	a = rec_stack.pop()
@@ -1562,6 +1567,7 @@ let recs = []
 let rec_i
 
 function begin_rec() {
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a0 = a
 	a = rec()
 	ui.a = a
@@ -1571,6 +1577,7 @@ function begin_rec() {
 }
 
 function end_rec(a0) {
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let a1 = a
 	a = a0
 	return a1
@@ -2011,6 +2018,10 @@ ui.focusable = function(id, order) {
 		return
 	}
 	ui_cmd(FOCUSABLE, id, order ?? 0)
+	// tabbing can move the focus to a widget that is scrolled out of view.
+	// focusable() is always called right before recording the widget's box.
+	if (ui.focusing(id))
+		ui.scroll_to_view()
 }
 
 ui.focus_group = function(trap, order) {
@@ -2268,6 +2279,9 @@ function layout_rec(a, x, y, w, h) {
 	measure_rec(a, 1)
 	ct_stack_check()
 	position_rec(a, 1, h)
+
+	// reset scroll-to-view request if no scrollbox consumed it.
+	scroll_to_view_i = null
 
 	translate_rec(a, x, y)
 }
@@ -2598,6 +2612,10 @@ reset_spacings()
 
 // box command
 
+// set by ui.scroll_to_view(null) to indicate that the next box needs
+// to be revealed by its scrollbox(es).
+let scroll_to_view_next
+
 function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 	tui_snap_paddings()
 	let i = ui_cmd(cmd,
@@ -2613,6 +2631,11 @@ function ui_cmd_box(cmd, fr, align, valign, min_w, min_h, ...args) {
 		...args
 	)
 	reset_spacings()
+	if (scroll_to_view_next) {
+		scroll_to_view_next = false
+		let j = ui_cmd(CMD_SCROLL_TO_VIEW, i)
+		a[j+0] -= j // make the requested box index relative
+	}
 	return i
 }
 ui.cmd_box = ui_cmd_box
@@ -2776,6 +2799,8 @@ const CMD_END = cmd('end')
 
 ui.end = function(cmd) {
 	end_scope()
+	// bug: scroll_to_view() called but no box was recorded.
+	assert(!scroll_to_view_next, 'focusable widget recorded no box')
 	let i = assert(ct_stack.pop(), 'end command outside container')
 	if (cmd && a[i-1] != cmd)
 		assert(false, 'closing ', cmd_names[cmd], ' instead of ', C(a, i))
@@ -3253,6 +3278,20 @@ function settle_scrollbox(a, i) {
 		ui.state(id).delete('scroll_to_view')
 	}
 
+	// scroll to view the box asked for by ui.scroll_to_view(null).
+	// the index range check rejects a request left by a sibling scrollbox.
+	let j = scroll_to_view_i // requested box
+	if (j > i && j < i + a[i+BOX_CT_NEXT_EXT_I]) {
+		let bx = a[j+0] - a[i+0] // marked box coords, relative to the contents
+		let by = a[j+1] - a[i+1]
+		;[sx, sy] = scroll_to_view_rect(bx, by, a[j+2], a[j+3], w, h, sx, sy)
+		xstate.set('scroll_x', sx)
+		ystate.set('scroll_y', sy)
+		// mark this scrollbox as scroll-to-view from here on, so that its
+		// parent scrollbox if any reveals it in turn.
+		scroll_to_view_i = i
+	}
+
 	// only setting these for scrollbar_rect().
 	a[i+SB_SX+0] = sx
 	a[i+SB_SX+1] = sy
@@ -3340,8 +3379,26 @@ translate[CMD_SCROLLBOX] = function(a, i, dx, dy) {
 
 }
 
+const CMD_SCROLL_TO_VIEW = cmd('scroll_to_view')
+
+// scroll_to_view() -> reveal the box recorded next, in every scrollbox that
+//    contains it, innermost first. call it right before recording the box.
+// scroll_to_view(id, x, y, w, h) -> reveal a rect of scrollbox's contents,
+//    in that scrollbox alone. the rect is in contents coords.
 ui.scroll_to_view = function(id, x, y, w, h) {
-	ui.state(id).set('scroll_to_view', [x, y, w, h])
+	if (id == null)
+		scroll_to_view_next = true
+	else
+		ui.state(id).set('scroll_to_view', [x, y, w, h])
+}
+
+// box to scroll-to-view: set in position phase when the scroll_to_view()
+// request appears and later read by its scrollbox in the same position phase.
+let scroll_to_view_i
+
+position[CMD_SCROLL_TO_VIEW] = function(a, i, axis) {
+	if (axis)
+		scroll_to_view_i = i + a[i+0]
 }
 
 draw[CMD_SCROLLBOX] = function(a, i) {
@@ -3604,20 +3661,31 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 	let target_i = a[i+POPUP_TARGET_I]
 	let side     = a[i+POPUP_SIDE]
 	let align    = a[i+POPUP_ALIGN]
+	if (target_i) target_i += i // make absolute
 	if (side && align == POPUP_ALIGN_STRETCH) {
 		if (!target_i) {
 			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
 		} else {
-			// TODO: align border rects here!
-			target_i += i // make absolute
-			let ct_w = a[target_i+2+axis] + spacings(a, target_i, axis)
+			// stretch to the target's border rect, which is the rect that
+			// the popup is placed against in the translate phase.
+			let ct_w = a[target_i+2+axis]
+				+ a[target_i+PX1+axis]
+				+ a[target_i+PX2+axis]
 			a[i+2+axis] = max(a[i+2+axis], ct_w)
 		}
 	}
 
 	let w = inner_w(a, i, axis, a[i+2+axis])
 	a[i+2+axis] = w
+
+	// a popup's children are positioned from 0 here, so a scroll-to-view
+	// request can't cross into the popup: revealing a box inside it means
+	// revealing the box it is targeted at, which the popup follows. an
+	// untargeted popup is placed against the screen: drop the request.
+	let sv_i = scroll_to_view_i // marked box outside this popup
+	scroll_to_view_i = null
 	position_children_stacked(a, i, axis, 0, w)
+	scroll_to_view_i = scroll_to_view_i ? target_i : sv_i
 }
 
 {
@@ -3769,8 +3837,6 @@ translate[CMD_POPUP] = function(a, i) {
 
 	a[i+0] = x
 	a[i+1] = y
-	a[i+2] = w - spx
-	a[i+3] = h - spy
 
 	translate_children(a, i, x, y)
 
@@ -5411,7 +5477,7 @@ ui.widget('drag_point', {
 			ui.state(id).set('y', y)
 		}
 
-		// NOTE: we're making it a zero-sized box so that a popup can be anchored to it.
+		// NOTE: we're making it a zero-sized box because it's freely movable.
 		let i = ui_cmd(cmd, x, y,
 			0, 0, // w, h
 			0, 0, 0, 0, // p
