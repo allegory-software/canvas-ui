@@ -7317,12 +7317,22 @@ function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	cx.stroke()
 }
 
-ui.widget('sat_lum_square', {
+let SAT_LUM_ID  = BOX_ARGS+0
+let SAT_LUM_HUE = BOX_ARGS+1
+
+ui.box_widget('sat_lum_square', {
 
 	create: function(cmd, id, hue, sat, lum) {
 
 		keepalive(id)
 		ui.focusable(id)
+
+		let fr     = fr0     ?? 1
+		let align  = align0  ?? 's'
+		let valign = valign0 ?? 's'
+		let min_w  = min_w0  ?? 0
+		let min_h  = min_h0  ?? 0
+		ui.clear_box_args()
 
 		hue = hue ?? 0
 		sat = sat ?? .5
@@ -7346,10 +7356,6 @@ ui.widget('sat_lum_square', {
 			ui.capture(id)
 		}
 
-		// doesn't look too good...
-		// if (hit(id))
-		// 	ui.set_cursor('crosshair')
-
 		if (ui.focused(id)) {
 			let lum_step = ui.keydown('arrowup'   ) && 1 || ui.keydown('arrowdown') && -1
 			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
@@ -7363,19 +7369,18 @@ ui.widget('sat_lum_square', {
 			}
 		}
 
-		return ui_cmd(cmd, id, ui.rel_ct_i(), hue)
+		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h, id, hue)
 	},
 
 	draw: function(a, i) {
 
-		let id   = a[i+0]
-		let ct_i = i+a[i+1]
-		let hue  = a[i+2]
+		let id  = a[i+SAT_LUM_ID]
+		let hue = a[i+SAT_LUM_HUE]
 
-		let x = a[ct_i+0]
-		let y = a[ct_i+1]
-		let w = a[ct_i+2]
-		let h = a[ct_i+3]
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
 
 		let idata = ui.image_data(id, 'square', w, h)
 
@@ -7407,13 +7412,12 @@ ui.widget('sat_lum_square', {
 
 	hit: function(a, i) {
 
-		let id   = a[i+0]
-		let ct_i = i+a[i+1]
+		let id = a[i+SAT_LUM_ID]
 
-		let x = a[ct_i+0]
-		let y = a[ct_i+1]
-		let w = a[ct_i+2]
-		let h = a[ct_i+3]
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
 
 		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
 		if (hs) {
@@ -7438,13 +7442,22 @@ function draw_hue_line(x, y, h, w, hue, alpha) {
 	cx.stroke()
 }
 
-ui.widget('hue_bar', {
+let HUE_BAR_ID = BOX_ARGS+0
+
+ui.box_widget('hue_bar', {
 
 	create: function(cmd, id, hue) {
 
 		keepalive(id)
 		ui.focusable(id)
 		ui.state_init(id, 'hue', hue)
+
+		let fr     = fr0     ?? 0
+		let align  = align0  ?? 's'
+		let valign = valign0 ?? 's'
+		let min_w  = min_w0  ?? ui.em(1)
+		let min_h  = min_h0  ?? 0
+		ui.clear_box_args()
 
 		let [dstate, dx, dy, cs] = ui.drag(id)
 		if (dstate == 'drag')
@@ -7461,18 +7474,17 @@ ui.widget('hue_bar', {
 			}
 		}
 
-		ui_cmd(cmd, id, ui.rel_ct_i())
+		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h, id)
 	},
 
 	draw: function(a, i) {
 
-		let id   = a[i+0]
-		let ct_i = i+a[i+1]
+		let id = a[i+HUE_BAR_ID]
 
-		let x = a[ct_i+0]
-		let y = a[ct_i+1]
-		let w = a[ct_i+2]
-		let h = a[ct_i+3]
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
 
 		let idata = ui.image_data(id, 'bar', w, h)
 
@@ -7501,13 +7513,12 @@ ui.widget('hue_bar', {
 
 	hit: function(a, i) {
 
-		let id   = a[i+0]
-		let ct_i = i+a[i+1]
+		let id = a[i+HUE_BAR_ID]
 
-		let x = a[ct_i+0]
-		let y = a[ct_i+1]
-		let w = a[ct_i+2]
-		let h = a[ct_i+3]
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
 
 		let hs = ui.captured(id) || (hit_rect(x, y, w, h) && hover(id))
 		if (hs) {
@@ -7546,15 +7557,11 @@ ui.color_picker = function(id, hue, sat, lum) {
 	ui.v(1, ui.sp())
 		ui.h(1, ui.sp05())
 			ui.start_recording()
-				ui.stack('s1', 0, null, null, ui.em(1))
-				 	ui.hue_bar(id+'.hb', hue)
-				ui.end_stack()
+				ui.hue_bar(id+'.hb', hue)
 			let hue_bar = ui.end_recording()
 			ui.start_recording()
-				ui.stack('s2')
-					hue = ui.state(id+'.hb', 'hue') ?? hue
-					ui.sat_lum_square(id+'.sl', hue, sat, lum)
-				ui.end_stack()
+				hue = ui.state(id+'.hb', 'hue') ?? hue
+				ui.sat_lum_square(id+'.sl', hue, sat, lum)
 			let sl_square = ui.end_recording()
 			sat = ui.state(id+'.sl', 'sat') ?? sat
 			lum = ui.state(id+'.sl', 'lum') ?? lum
