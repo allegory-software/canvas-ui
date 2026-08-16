@@ -135,6 +135,7 @@ FOCUS STATE
 	focused         (id) -> t|f          check if widget is currently focused
 	focusing        (id) -> t|f          widget is focusing this frame
 	focusable       (id, [order])        add widget to the tab order
+	nofocus         ()                   keep the next widget out of the tab order
 	capture_tab     (id, [back])         widget gets tab (shift-tab if back)
 	focus_group     ([trap], [order])    begin a tab order group
 	end_focus_group ()                   end a tab order group
@@ -1998,7 +1999,17 @@ let FOCUSABLE       = cmd('focusable')
 let FOCUS_GROUP     = cmd('focus_group')
 let END_FOCUS_GROUP = cmd('end_focus_group')
 
+let nofocus
+
+ui.nofocus = function() {
+	nofocus = true
+}
+
 ui.focusable = function(id, order) {
+	if (nofocus) {
+		nofocus = false
+		return
+	}
 	ui_cmd(FOCUSABLE, id, order ?? 0)
 }
 

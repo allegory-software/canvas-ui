@@ -1555,6 +1555,8 @@ function code_edit_view(id, opt) {
 
 		// build editor
 
+		// not tab-focusable because then tab traps you in the editor.
+		// ui.focusable(id)
 		ui.v(1, 0, 's', 's', min_w, min_h)
 			let tabs = [
 				{id: 'tab1', label:'Tab 1'},
@@ -1590,6 +1592,7 @@ function code_edit_view(id, opt) {
 							ui.bb('bg2', null, 1, 'intense')
 							let fid = id+'.find_input'
 							let rid = id+'.replace_input'
+							ui.focus_group(true)
 							ui.v(0, ui.sp05())
 								ui.h(0, ui.sp05())
 									find_text = ui.input(fid, find_text, 0)
@@ -1597,10 +1600,13 @@ function code_edit_view(id, opt) {
 										last_find_text = find_text
 										find_scan()
 									}
+									ui.nofocus()
 									if (ui.bare_icon_button(id+'.find_prev', 'fas', '\uf062', 0))
 										goto_match(-1)
+									ui.nofocus()
 									if (ui.bare_icon_button(id+'.find_next', 'fas', '\uf063', 0))
 										goto_match(1)
+									ui.nofocus()
 									if (ui.bare_icon_button(id+'.find_close', 'fas', '\uf00d', 0)) {
 										close_find()
 										ui.focus(id)
@@ -1610,6 +1616,7 @@ function code_edit_view(id, opt) {
 								if (find_replace) {
 									ui.h(0, ui.sp05())
 										replace_text = ui.input(rid, replace_text, 0)
+										ui.nofocus()
 										if (ui.button(id+'.replace', 'Replace', 0))
 											replace_match()
 										if (ui.button(id+'.replace_all', 'Replace All', 0))
@@ -1617,6 +1624,7 @@ function code_edit_view(id, opt) {
 									ui.end_h()
 								}
 							ui.end_v()
+							ui.end_focus_group()
 							if (ui.focused(fid) || ui.focused(rid)) {
 								if (ui.keydown('escape')) {
 									close_find()
