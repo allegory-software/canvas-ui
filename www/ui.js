@@ -130,18 +130,20 @@ WIDGET STATE
 
 FOCUS STATE
 
-	focused_id      = id                 id of focused widget
-	focus           (id)                 focus widget
-	focused         (id) -> t|f          check if widget is currently focused
-	focusing        (id) -> t|f          widget is focusing this frame
-	focusable       (id, [order])        add widget to the tab order
-	nofocus         ()                   keep the next widget out of the tab order
-	capture_tab     (id, [back])         widget gets tab (shift-tab if back)
-	focus_group     ([trap], [order])    begin a tab order group
-	end_focus_group ()                   end a tab order group
-	window_focusing   = t                window is focusing this frame
-	window_unfocusing = t                window is unfocusing this frame
-	window_focused    = t|f              check if window is currently focused
+	focused_id      = id                    id of focused widget
+	focus           (id)                    focus widget
+	focused         (id) -> t|f             check if widget is currently focused
+	focusing        (id) -> t|f             widget is focusing this frame
+	focusable       (id, [order])           add widget to the tab order
+	nofocus         ()                      keep the next widget out of the tab order
+	capture_tab     (id, [back])            widget gets tab (shift-tab if back)
+	focus_group     ([trap], [order], [id]) begin a tab order group
+	end_focus_group ()                      end a tab order group
+	focus_inside    (group_id) -> t|f       focus is inside this focus group
+	tab_into        (id)                    next tab enters this focus group
+	window_focusing   = t                   window is focusing this frame
+	window_unfocusing = t                   window is unfocusing this frame
+	window_focused    = t|f                 check if window is currently focused
 
 SPACINGS (MARGINS & PADDINGS)
 
@@ -1468,6 +1470,7 @@ ui.focus = function(id, by_key) {
 	ui.focused_id = id
 	ui.focused_by_key = by_key
 	focusing_id = id
+	tab_into_id = null
 }
 
 ui.focused = function(id) {
@@ -1915,7 +1918,7 @@ function hovers(id, k) {
 }
 ui.hovers = hovers
 
-function hit(id, k) {
+function hit(id, k) { // looks in prev. frame
 	if (ui.captured_id != null) // unavailable while captured
 		return
 	return hovers(id, k)
@@ -2001,6 +2004,7 @@ let focusables = []
 ui.focusables = focusables
 
 let open_focus_groups = []
+let focus_group_map = map() // {focus_group_id->focusables_i}
 
 let FOCUSABLE       = cmd('focusable')
 let FOCUS_GROUP     = cmd('focus_group')
@@ -2024,8 +2028,9 @@ ui.focusable = function(id, order) {
 		ui.scroll_to_view()
 }
 
-ui.focus_group = function(trap, order) {
-	ui_cmd(FOCUS_GROUP, order ?? 0, trap ? 1 : 0)
+// id is optional, only needed for tab_into().
+ui.focus_group = function(trap, order, id) {
+	ui_cmd(FOCUS_GROUP, order ?? 0, trap ? 1 : 0, id)
 }
 
 ui.end_focus_group = function() {
@@ -2039,7 +2044,11 @@ register[FOCUSABLE] = function(a, i) {
 }
 
 register[FOCUS_GROUP] = function(a, i) {
-	open_focus_groups.push(focusables.length)
+	let g = focusables.length // group index, i.e. where the group starts
+	open_focus_groups.push(g)
+	let id = a[i+2]
+	if (id != null)
+		focus_group_map.set(id, g)
 	focusables.push(null, a[i], 0, a[i+1])
 }
 
@@ -2077,6 +2086,14 @@ function focus_find(id) {
 		if (focusables[k+FOCUSABLE_ID] == id)
 			return k
 	return null
+}
+
+ui.focus_inside = function(group_id) { // looks in prev. frame
+	let g = focus_group_map.get(group_id) // group index in focusables
+	if (g == null) return
+	let k = focus_find(ui.focused_id)
+	if (k == null) return
+	return k > g && k < focusables[g+FOCUSABLE_END]
 }
 
 function pick_focus_sibling(g, order0, k0, back) {
@@ -2133,7 +2150,24 @@ function tab_captured(id) {
 	return !!ui.state(id, ui.key('shift') ? 'capture_shift_tab' : 'capture_tab')
 }
 
+let tab_into_id // focus group that the next tab must move into
+
+ui.tab_into = function(id) {
+	tab_into_id = id
+}
+
 function step_focus(back) {
+	if (tab_into_id != null) {
+		let g = focus_group_map.get(tab_into_id) // group index in focusables
+		tab_into_id = null
+		// the group is missing if the widget that asked for it is gone: tab
+		// then continues from the focused widget as if nothing asked.
+		if (g != null) {
+			let k = first_focusable_in(g, back)
+			if (k != null)
+				return k
+		}
+	}
 	let k0 = focus_find(ui.focused_id)
 	if (k0 == null)
 		return first_focusable_in(null, back)
@@ -2320,8 +2354,6 @@ function redraw_all() {
 			if (k != null)
 				ui.focus(focusables[k+FOCUSABLE_ID], true)
 		}
-		focusables.length = 0
-
 		t1 = clock_ms()
 		frame_graph_push('frame_hit_time', t1 - t0)
 
@@ -2349,7 +2381,15 @@ function redraw_all() {
 
 		let a = end_rec()
 		layout_rec(a, 0, 0, screen_w, screen_h)
+
+		// prev frame's focusables have to be available in layout_rec for
+		// focus_inside() to work, and have to be cleared before register_rec
+		// which fills it back with this frame's values.
+		focusables.length = 0
+		focus_group_map.clear()
+
 		register_rec(a, 0)
+
 		assert(!open_focus_groups.length, 'unbalanced focus_group')
 
 		t1 = clock_ms()
@@ -6264,8 +6304,10 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 	let  align_start =  parse_align( align || '[') == ALIGN_START
 	let valign_start = parse_valign(valign || 't') == ALIGN_START
 	let ts = ui.state(assert(scope_get('toolboxes_id'), 'begin_toolboxes missing'))
-	if (hit(id) && ui.click)
+	if (hit(id) && ui.click) {
 		ts.set('to_top', id)
+		ui.tab_into(id)
+	}
 	let [dstate, dx, dy] = ui.drag(id+'.title')
 	let cs = captured(id+'.title') // null unless dragging
 	let s = ui.state(id)
@@ -6286,6 +6328,7 @@ ui.toolbox = function(id, title, align, valign, x0, y0, target_i) {
 		ox, oy
 	)
 		ts.get('popups').set(id, i)
+		ui.focus_group(null, null, id)
 		//ui.p(1)
 		ui.bb('bg1', null, 1, 'intense')//, null, ui.sp075())
 		ui.stack()
@@ -6305,6 +6348,7 @@ ui.end_toolbox = function() {
 			ui.end_v()
 			ui.resizer(id)
 		ui.end_stack()
+		ui.end_focus_group()
 	ui.end_popup()
 }
 
@@ -6320,6 +6364,13 @@ ui.end_toolboxes = function() {
 	let popups = s.get('popups')
 	if (!popups.size) return
 	let order = attr(s, 'order', array)
+	// focus moved into a toolbox this frame: bring that toolbox to front.
+	// checked here and not in toolbox() because a toolbox's contents are
+	// built after toolbox() returns, and they can focus themselves.
+	if (focusing_id != null)
+		for (let id of popups.keys())
+			if (ui.focus_inside(id))
+				s.set('to_top', id)
 	let to_top_id = s.get('to_top')
 	if (to_top_id || !order.length) {
 		for (let id of order) // remove toolboxes that have been removed
