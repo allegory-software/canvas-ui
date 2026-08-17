@@ -3425,6 +3425,8 @@ const CMD_SCROLL_TO_VIEW = cmd('scroll_to_view')
 //    contains it, innermost first. call it right before recording the box.
 // scroll_to_view(id, x, y, w, h) -> reveal a rect of scrollbox's contents,
 //    in that scrollbox alone. the rect is in contents coords.
+// a later request replaces an earlier one, so a widget can retarget the box
+// that its own focusable() asked to reveal.
 ui.scroll_to_view = function(id, x, y, w, h) {
 	if (id == null)
 		scroll_to_view_next = true
@@ -5855,6 +5857,9 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	ui.focusable(id)
 	let fi = s.get('focused_item_i') ?? 0
 	let list_focused = ui.focused(id)
+	// reveal the focused item when focus enters the list or when a key moved
+	// it. a clicked item is already visible.
+	let reveal_fi = ui.focusing(id) || s.get('focused_item_changed') == 'key'
 	let i = 0
 	hv = hv || 'v'
 	assert(hv == 'v' || hv == 'h')
@@ -5862,6 +5867,11 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(ui.sp(), ui.sp05())
+		// focusable() asked for the whole list to be revealed, which for a
+		// list taller than its scrollbox scrolls it to the end. this later
+		// request replaces that one.
+		if (fi == i && reveal_fi)
+			ui.scroll_to_view()
 		ui.stack(item_id, 0)
 			let item_focused = fi == i
 			ui.bb(
