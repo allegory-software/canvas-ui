@@ -2160,8 +2160,8 @@ function step_focus(back) {
 	if (tab_into_id != null) {
 		let g = focus_group_map.get(tab_into_id) // group index in focusables
 		tab_into_id = null
-		// the group is missing if the widget that asked for it is gone: tab
-		// then continues from the focused widget as if nothing asked.
+		// g is null when the group was not recorded this frame: fall through
+		// to stepping from the focused widget.
 		if (g != null) {
 			let k = first_focusable_in(g, back)
 			if (k != null)
@@ -3425,8 +3425,8 @@ const CMD_SCROLL_TO_VIEW = cmd('scroll_to_view')
 //    contains it, innermost first. call it right before recording the box.
 // scroll_to_view(id, x, y, w, h) -> reveal a rect of scrollbox's contents,
 //    in that scrollbox alone. the rect is in contents coords.
-// a later request replaces an earlier one, so a widget can retarget the box
-// that its own focusable() asked to reveal.
+// a later request replaces an earlier one, so a widget can request an inner
+// box after focusable() already requested the widget's own box.
 ui.scroll_to_view = function(id, x, y, w, h) {
 	if (id == null)
 		scroll_to_view_next = true
@@ -5857,8 +5857,8 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	ui.focusable(id)
 	let fi = s.get('focused_item_i') ?? 0
 	let list_focused = ui.focused(id)
-	// reveal the focused item when focus enters the list or when a key moved
-	// it. a clicked item is already visible.
+	// reveal the focused item on tab-focusing the list and on arrow keys.
+	// a clicked item is already in view.
 	let reveal_fi = ui.focusing(id) || s.get('focused_item_changed') == 'key'
 	let i = 0
 	hv = hv || 'v'
@@ -5867,9 +5867,6 @@ function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_
 	for (let item of items) {
 		let item_id = id+'.'+i
 		ui.p(ui.sp(), ui.sp05())
-		// focusable() asked for the whole list to be revealed, which for a
-		// list taller than its scrollbox scrolls it to the end. this later
-		// request replaces that one.
 		if (fi == i && reveal_fi)
 			ui.scroll_to_view()
 		ui.stack(item_id, 0)
@@ -6246,11 +6243,12 @@ ui.dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 	ui.state(id).set('open', open)
 
-	if (click)
-		if (open)
-			ui.focus(id+'.list')
-		else
-			ui.focus(id)
+	// id+'.list' only exists while open, so focus must move off it when
+	// closing: tab can't find an id that isn't in the tab order.
+	if (toggle && open)
+		ui.focus(id+'.list')
+	else if (!open && ui.focused(id+'.list'))
+		ui.focus(id)
 
 	if (!open && ui.focused(id)) {
 		let d = ui.key('arrowup') && -1 || ui.key('arrowdown') && 1 || 0
