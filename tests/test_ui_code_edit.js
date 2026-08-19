@@ -47,10 +47,13 @@ let keys = {}
 let captured = null
 let states = new Map()
 
-function state(id) {
-	let m = states.get(id) ?? new Map()
-	states.set(id, m)
-	return {get: k => m.get(k), set: (k, v) => m.set(k, v)}
+function state(id, k) {
+	let s = states.get(id)
+	if (!s) {
+		s = Object.create(null)
+		states.set(id, s)
+	}
+	return k ? s[k] : s
 }
 
 let ui = {
@@ -106,16 +109,16 @@ vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx, {filename: SRC})
 let ed
 
 function open_text(s) {
-	states.clear()
+	states = new Map()
 	key_events = []
 	keys = {}
 	drag_state = null
 	ui.mx = 0
 	ui.my = 0
 	ui.code_edit('ed', {code: s, lang: 'html'}, 100, 100)
-	ed = states.get('ed').get('view')
-	state('ed.text_contentbox').set('x', 0)
-	state('ed.text_contentbox').set('y', 0)
+	ed = states.get('ed').view
+	state('ed.text_contentbox').x = 0
+	state('ed.text_contentbox').y = 0
 }
 
 function press(full_key, key, key_char, ctrl, alt, shift) {

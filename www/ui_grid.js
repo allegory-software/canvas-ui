@@ -428,7 +428,7 @@ function init(id, e) {
 		if (!hit_zone) {
 			;[drag_state, dx, dy, cs] = ui.drag(id+'.header')
 			if (drag_state == 'hover' || drag_state == 'drag') {
-				let x0 = ui.state(id+'.header').get('x')
+				let x0 = ui.state(id+'.header').x
 				for (let field of e.fields) {
 					let x = field._x + x0
 					let w = field._w
@@ -440,16 +440,16 @@ function init(id, e) {
 						hit_zone = 'col'
 						hit_fi = field.index
 						if (drag_state == 'drag')
-							cs.set('dx', ui.mx - x0 - field._x)
+							cs.dx = ui.mx - x0 - field._x
 						break
 					}
 				}
-				cs.set('zone', hit_zone)
-				cs.set('field_index', hit_fi)
+				cs.zone = hit_zone
+				cs.field_index = hit_fi
 			} else if (drag_state) {
-				hit_zone = cs.get('zone')
-				hit_fi   = cs.get('field_index')
-				drag_op  = cs.get('op')
+				hit_zone = cs.zone
+				hit_fi   = cs.field_index
+				drag_op  = cs.op
 			}
 		}
 
@@ -457,11 +457,11 @@ function init(id, e) {
 		if (hit_zone == 'col_divider') {
 			let field = e.fields[hit_fi]
 			if (drag_state == 'drag') {
-				cs.set('w0', field.w)
+				cs.w0 = field.w
 				drag_state == 'dragging'
 			}
 			if (drag_state == 'dragging') {
-				field.w = clamp(cs.get('w0') + dx, field.min_w, field.max_w)
+				field.w = clamp(cs.w0 + dx, field.min_w, field.max_w)
 			}
 			ui.set_cursor('ew-resize')
 		}
@@ -487,17 +487,17 @@ function init(id, e) {
 				e.fields[0].is_group_field ? 1 : 0, e.fields.length)
 
 			drag_op = 'col_move'
-			cs.set('op', drag_op)
-			cs.set('mover', mover)
+			cs.op = drag_op
+			cs.mover = mover
 		}
 
 		// column move
 		if (drag_op == 'col_move') {
 
-			let mover = cs.get('mover')
+			let mover = cs.mover
 
-			let x0 = ui.state(id+'.header').get('x')
-			let mx = ui.mx - x0 - cs.get('dx')
+			let x0 = ui.state(id+'.header').x
+			let mx = ui.mx - x0 - cs.dx
 
 			mover.move_element_update(horiz ? mx : my)
 			e.scroll_to_cell(hit_ri ?? 0, hit_fi)
@@ -520,7 +520,7 @@ function init(id, e) {
 		) {
 			col_group_start = true
 			drag_op = 'col_group'
-			cs.set('op', drag_op)
+			cs.op = drag_op
 		}
 
 		// hover or drag group-bar column
@@ -563,7 +563,7 @@ function init(id, e) {
 
 				gcol_mover = ui.live_move_mixin()
 				mover = gcol_mover
-				cs.set('mover', gcol_mover)
+				cs.mover = gcol_mover
 
 				mover.cols = [...(e.groups.cols || empty_array)]
 				mover.range_defs = assign({}, e.groups.range_defs)
@@ -588,8 +588,8 @@ function init(id, e) {
 
 					let field = e.fld(hit_gcol)
 					let hs = ui.state(id+'.header')
-					let hx = hs.get('x')
-					let hy = hs.get('y')
+					let hx = hs.x
+					let hy = hs.y
 					let group_bar_was_visible = !(e.group_bar_visible == 'auto' && !e.groups.cols.length)
 					mover.x0 = field._x - sp2
 					mover.y0 = group_bar_was_visible ? group_bar_h() : 0
@@ -635,7 +635,7 @@ function init(id, e) {
 				}
 
 			} else {
-				gcol_mover = cs.get('mover')
+				gcol_mover = cs.mover
 				mover = gcol_mover
 			}
 
@@ -667,7 +667,7 @@ function init(id, e) {
 					if (drag_op != 'col_group') { // put back in grid
 						mover.move_element_update(null)
 						if (ui.hovers(id+'.header')) {
-							let hx = ui.state(id+'.header').get('x')
+							let hx = ui.state(id+'.header').x
 							for (let field of e.fields) {
 								let x = field._x + hx
 								let w = field._w
@@ -757,8 +757,8 @@ function init(id, e) {
 			;[drag_state, dx, dy] = ui.drag(id+'.cells')
 			if (drag_state == 'hover' || drag_state == 'drag') {
 				let s = ui.state(id+'.cells')
-				let x0 = s.get('x')
-				let y0 = s.get('y')
+				let x0 = s.x
+				let y0 = s.y
 				hit_ri = floor((ui.my - y0) / cell_h)
 				let row = e.rows[hit_ri]
 				for (let fi = 0; fi < e.fields.length; fi++) {
@@ -1302,12 +1302,12 @@ ui.grid = function(id, opt, fr, align, valign, min_w, min_h) {
 
 	ui.keepalive(id)
 	let s = ui.state(id)
-	let nav = s.get('nav')
+	let nav = s.nav
 	if (!nav) {
 		nav = ui.nav(opt, s)
 		ui.on_free(id, () => nav.free())
 		init(id, nav)
-		s.set('nav', nav)
+		s.nav = nav
 	}
 	nav.render(fr, align, valign, min_w, min_h)
 

@@ -814,7 +814,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = offer_con.signal_con.sid
-		ui.state('sid').set('text', my_sid)
+		ui.state('sid').text = my_sid
 		ui.input('sid')
 		ui.text('', 'Other ID', 0)
 		let to_sid = ui.input('to_sid')
@@ -849,7 +849,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID', 0)
 		let my_sid = answer_con.signal_con.sid
-		ui.state('sid').set('text', my_sid)
+		ui.state('sid').text = my_sid
 		ui.input('sid')
 		ui.text('', 'Other ID')
 		let to_sid = ui.input('to_sid')
@@ -882,7 +882,7 @@ ui.v(1, ui.sp())
 	ui.h(0, ui.sp())
 		ui.text('', 'My ID')
 		let my_sid = str(offer_con.signal_con.sid)
-		ui.state('offer_sid').set('text', my_sid)
+		ui.state('offer_sid').text = my_sid
 		ui.input('offer_sid')
 		if (offer_con.open) {
 			if (ui.button('btn_stop_sharing', 'Stop Sharing', 0, 'c', 'c', ui.em(10))) {
@@ -904,7 +904,7 @@ ui.v(1, ui.sp())
 		}
 
 		/*
-		ui.state('in_send').set('text', json(signal_queue.signals))
+		ui.state('in_send').text = json(signal_queue.signals)
 		ui.input('in_send')
 		if (ui.button('btn_send')) {
 			signal_queue.signals.length = 0

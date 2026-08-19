@@ -1335,8 +1335,8 @@ function code_edit_view(id, opt) {
 		hit_line = null
 		if (drag_state) {
 			let text_state = ui.state(id+'.text_contentbox')
-			let x = text_state.get('x')
-			let y = text_state.get('y')
+			let x = text_state.x
+			let y = text_state.y
 			hit_line = floor((ui.my - y) / line_h)
 			hit_line = clamp(hit_line, 0, lines.length-1)
 			let line_s = lines[hit_line]
@@ -1390,7 +1390,7 @@ function code_edit_view(id, opt) {
 
 				if (scroll_lines) { // scrolling without moving the cursor
 					let ss = ui.state(id+'.text_scrollbox')
-					ss.set('scroll_y', (ss.get('scroll_y') ?? 0) + scroll_lines * line_h)
+					ss.scroll_y = (ss.scroll_y ?? 0) + scroll_lines * line_h
 				}
 
 				if (chars_n || lines_n)
@@ -1661,11 +1661,11 @@ function code_edit_view(id, opt) {
 ui.code_edit = function(id, opt, min_w, min_h) {
 	ui.keepalive(id)
 	let s = ui.state(id)
-	let view = s.get('view')
+	let view = s.view
 	if (!view) {
 		view = code_edit_view(id, opt)
 		ui.on_free(id, () => view.free())
-		s.set('view', view)
+		s.view = view
 	}
 	view.render(min_w, min_h)
 }
