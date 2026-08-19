@@ -127,6 +127,7 @@ WIDGET STATE
 	state           (id) -> state        get widget state
 	state_init      (id, k, v)           set widget state var if widget is alive
 	on_free         (id, free_fn)        add a widget gc hook
+	render_state    (id) -> state        get renderer-local widget state
 
 FOCUS STATE
 
@@ -1333,16 +1334,16 @@ or when the widget is created in the frame.
 
 */
 
-let id_states      = map() // {id->state}
-let id_current_set = set() // {id}
-let id_remove_set  = set() // {id}
+let state_map      = map() // {id->state}
+let current_id_set = set() // {id}
+let remove_id_set  = set() // {id}
 
-ui._id_states = id_states
+ui._state_map = state_map
 
 function keepalive(id, update_f) {
 	assert(id, 'id required')
-	id_current_set.add(id)
-	id_remove_set.delete(id)
+	current_id_set.add(id)
+	remove_id_set.delete(id)
 
 	if (update_f) {
 		let s = ui.state(id)
@@ -1364,12 +1365,12 @@ ui.state = function(id, k) {
 		return
 	if (ss_id && id != ss_id)
 		return
-	let s = id_states.get(id)
+	let s = state_map.get(id)
 	if (!s) {
 		if (k)
 			return
 		s = obj()
-		id_states.set(id, s)
+		state_map.set(id, s)
 	} else {
 		state_update(id, s)
 	}
@@ -1382,21 +1383,21 @@ ui.state_init = function(id, k, v) {
 	s[k] = v
 }
 
-function id_state_gc() {
-	for (let id of id_remove_set) {
-		let s = id_states.get(id)
+function state_gc() {
+	for (let id of remove_id_set) {
+		let s = state_map.get(id)
 		if (!s)
 			continue
 		assert(!(ui.captured_id == id), 'id removed while captured')
 		let free = s.free
 		if (free)
 			free(s, id)
-		id_states.delete(id)
+		state_map.delete(id)
 	}
-	id_remove_set.clear()
-	let empty = id_remove_set
-	id_remove_set = id_current_set
-	id_current_set = empty
+	remove_id_set.clear()
+	let empty = remove_id_set
+	remove_id_set = current_id_set
+	current_id_set = empty
 }
 
 ui.on_free = function(id, free1) {
@@ -1839,6 +1840,19 @@ function register_rec(a, rec_i) {
 
 // drawing phase -------------------------------------------------------------
 
+let root_render_state_map = map()
+let render_state_map
+
+ui.render_state = function(id, k) {
+	assert(render_state_map, 'render_state() outside rendering')
+	let s = render_state_map.get(id)
+	if (!s) {
+		s = obj()
+		render_state_map.set(id, s)
+	}
+	return k ? s[k] : s
+}
+
 let theme_stack = []
 
 function draw_cmd(a, i, recs) {
@@ -1883,7 +1897,10 @@ function draw_layers(layers, recs) {
 	}
 }
 
-function draw_frame(recs, layers) {
+function draw_frame(recs, layers, render_state_map1) {
+	let render_state_map0 = render_state_map
+	render_state_map = assert(render_state_map1)
+
 	let theme_stack_length0 = theme_stack.length
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
@@ -1893,17 +1910,19 @@ function draw_frame(recs, layers) {
 
 	theme = theme_stack.pop()
 	assert(theme_stack.length == theme_stack_length0)
+
+	render_state_map = render_state_map0
 }
 
 // hit-testing phase ---------------------------------------------------------
 
-let hit_state_maps = map() // {id->state}
+let hit_state_map = map() // {id->state}
 
-ui._hit_state_maps = hit_state_maps
+ui._hit_state_map = hit_state_map
 
 function hovers(id, k) {
 	if (!id) return
-	let s = hit_state_maps.get(id)
+	let s = hit_state_map.get(id)
 	return k ? s?.[k] : s
 }
 ui.hovers = hovers
@@ -1916,7 +1935,7 @@ function hit(id, k) { // looks in prev. frame
 ui.hit = hit
 
 function hit_match(prefix) {
-	for (let [id] of hit_state_maps)
+	for (let [id] of hit_state_map)
 		if (id.startsWith(prefix))
 			return id.substring(prefix.length)
 }
@@ -1924,10 +1943,10 @@ ui.hit_match = hit_match
 
 function hover(id) {
 	if (!id) return
-	let s = hit_state_maps.get(id)
+	let s = hit_state_map.get(id)
 	if (!s) {
 		s = obj()
-		hit_state_maps.set(id, s)
+		hit_state_map.set(id, s)
 	}
 	return s
 }
@@ -1968,7 +1987,7 @@ function hit_frame(recs, layers) {
 	hit_template_i0 = null
 
 	hit_template_i1 = null
-	hit_state_maps.clear()
+	hit_state_map.clear()
 
 	if (ui.mx == null)
 		return
@@ -2381,14 +2400,14 @@ function redraw_all() {
 		t1 = clock_ms()
 		frame_graph_push('frame_layout_time', t1 - t0)
 
-		id_state_gc()
+		state_gc()
 
 		if (!want_relayout) {
 			t0 = clock_ms()
 
 			cx.clearRect(0, 0, canvas.width, canvas.height)
 
-			draw_frame(recs, layers)
+			draw_frame(recs, layers, root_render_state_map)
 
 			sync_dom_focus()
 
@@ -5208,7 +5227,9 @@ ss.draw = function(a, i) {
 	}
 	cx.save()
 	cx.translate(x, y)
-	draw_frame(frame.recs, frame.layers)
+	let s = ui.render_state(id)
+	s.render_state_map = s.render_state_map ?? map()
+	draw_frame(frame.recs, frame.layers, s.render_state_map)
 	cx.restore()
 	draw_pointer(frame, x, y)
 	ss_id = null
@@ -7409,7 +7430,7 @@ ui.box_widget('img', {
 // blit'able -----------------------------------------------------------------
 
 ui.image_data = function(id, key, w, h) {
-	let s = ui.state(id)
+	let s = ui.render_state(id)
 	let idata = s[key]
 	if (!idata
 		|| s[key+'.w'] != w
@@ -8162,7 +8183,7 @@ ui.debug_pane = function() {
 		ui.end_stack()
 		ui.scrollbox('demo_id_states_sb')
 			ui.v(0, 0, 's', '[')
-				for (let [id, s] of ui._id_states) {
+				for (let [id, s] of ui._state_map) {
 					ui.p(ui.sp(), ui.sp05())
 					ui.color('link')
 					ui.text('', id, 0, 'l')
@@ -8192,11 +8213,11 @@ ui.debug_pane = function() {
 		ui.end_stack()
 		ui.scrollbox('demo_hit_states_sb', .5)
 			ui.v(0, 0, 's', '[')
-				for (let [id, m] of ui._hit_state_maps) {
+				for (let [id, s] of ui._hit_state_map) {
 					ui.p(ui.sp(), ui.sp05())
 					ui.color('link')
 					ui.text('', isstr(id) ? id : typeof id, 0, 'l')
-					for (let [k, v] of entries(m)) {
+					for (let [k, v] of entries(s)) {
 						ui.ml(ui.sp2())
 						ui.h(0, ui.sp())
 							let s = isobject(v) || isfunc(v) ? '<'+(typeof v)+'>' : str(v)
