@@ -1344,7 +1344,7 @@ function code_edit_view(id, opt) {
 			let hit_char = col_to_char(hit_col, line_s, tab_width)
 			if (drag_state != 'hover') {
 				undo_group = drag_state == 'dragging' ? 'ignore' : 'drag'
-				if (ui.key('ctrl')) {
+				if (ui.keypressed('ctrl')) {
 					set_block_mode(true)
 					let sel_line = drag_state == 'drag' ? hit_line : cursor.sel_line
 					let sel_col  = drag_state == 'drag' ? hit_col  : cursor.sel_col
@@ -1639,7 +1639,7 @@ function code_edit_view(id, opt) {
 									if (ui.focused(rid))
 										replace_match()
 									else
-										goto_match(ui.key('shift') ? -1 : 1)
+										goto_match(ui.keypressed('shift') ? -1 : 1)
 								}
 							}
 						ui.end_popup()

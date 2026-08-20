@@ -403,8 +403,8 @@ function init(id, e) {
 		// set keyboard state
 
 		focused = ui.focused(id)
-		shift = ui.key('shift')
-		ctrl  = ui.key('ctrl')
+		shift = ui.keypressed('shift')
+		ctrl  = ui.keypressed('ctrl')
 
 		// check mouse state ---------------------------------------------------
 

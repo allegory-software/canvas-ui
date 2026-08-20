@@ -91,6 +91,8 @@ MOUSE STATE
 	captured        (id) -> captured_state_map | null  get captured state if mouse is captured
 
 	hit             (id[, k) -> hit_state_map | v | null    get hit state map if mouse hovers widget and not captured
+	hit_enter       (id) -> t|f                  mouse started hovering widget
+	hit_leave       (id) -> t|f                  mouse stopped hovering widget
 	hovers          (id) -> hit_state_map | null   get hit state map if mouse hovers widget incl. if mouse captured
 	hover           (id) -> hit_state_map       declare that mouse hovers widget
 	nohit           ()      exclude last command from hit-testing
@@ -103,7 +105,7 @@ KEYBOARD STATE
 
 	keydown         (key) -> t|f     check if a key was just pressed
 	keyup           (key) -> t|f     check if a key was just depressed
-	key             (key) -> t|f     check if a key is pressed
+	keypressed      (key) -> t|f     check if a key is pressed
 	key_events      -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
 	capture_keys    ()    remove current keydown() and keyup() events
 	capture_keydown (key)   stop the browser from acting on a keydown
@@ -229,6 +231,7 @@ SCREEN SHARING
 
 	frame           (on_measure, on_frame, fr, align, valign, min_w, min_h)
 	shared_screen   (id, answer_con, fr, align, valign, min_w, min_h)
+	process_shared_screen_input (p, t)
 
 	pack_frame      () -> s     pack current frame for sending over the network
 	frame_changed   = noop      hook this for sending frames out
@@ -1225,17 +1228,18 @@ document.addEventListener('paste', async function(e) {
 ui.capture_keys = function() {
 	key_downs.clear()
 	key_ups.clear()
+	ui.key_events.length = 0
 }
 
-ui.keydown = function(key, capture) {
+ui.keydown = function(key) {
 	return key_downs.has(key)
 }
 
-ui.keyup = function(key, capture) {
+ui.keyup = function(key) {
 	return key_ups.has(key)
 }
 
-ui.key = function(key, capture) {
+ui.keypressed = function(key) {
 	return key_state.has(key)
 }
 
@@ -1361,9 +1365,8 @@ function state_update(id, s) {
 }
 
 ui.state = function(id, k) {
+	assert(!render_state_map, 'state() called while rendering')
 	if (!id)
-		return
-	if (ss_id && id != ss_id)
 		return
 	let s = state_map.get(id)
 	if (!s) {
@@ -1838,13 +1841,42 @@ function register_rec(a, rec_i) {
 	}
 }
 
-// drawing phase -------------------------------------------------------------
+/* drawing phase -------------------------------------------------------------
 
-let root_render_state_map = map()
+Drawing phase is the only phase that can run on a remote machine on a received
+and deserialized frame object, so ui.state(), ui.hit() state, ui.captured_id,
+etc. don't work here. Drawing can keep local inter-frame state with
+ui.render_state().
+
+*/
+
+function create_render_state_map() {
+	let sm = map()
+	sm.current_id_set = set()
+	sm.remove_id_set = set()
+	return sm
+}
+
+function render_state_gc(sm) {
+	for (let id of sm.remove_id_set) {
+		let s = sm.get(id)
+		if (s?.free)
+			s.free(s, id)
+		sm.delete(id)
+	}
+	sm.remove_id_set.clear()
+	let empty = sm.remove_id_set
+	sm.remove_id_set = sm.current_id_set
+	sm.current_id_set = empty
+}
+
+let root_render_state_map = create_render_state_map()
 let render_state_map
 
 ui.render_state = function(id, k) {
-	assert(render_state_map, 'render_state() outside rendering')
+	assert(render_state_map, 'render_state() called outside rendering')
+	render_state_map.current_id_set.add(id)
+	render_state_map.remove_id_set.delete(id)
 	let s = render_state_map.get(id)
 	if (!s) {
 		s = obj()
@@ -1897,26 +1929,29 @@ function draw_layers(layers, recs) {
 	}
 }
 
-function draw_frame(recs, layers, render_state_map1) {
-	let render_state_map0 = render_state_map
-	render_state_map = assert(render_state_map1)
+function draw_frame(recs, layers, sm1) {
+	let sm0 = render_state_map
+	render_state_map = assert(sm1)
+	let current_layer_i0 = current_layer_i
 
 	let theme_stack_length0 = theme_stack.length
 	theme_stack.push(theme)
 	theme = themes[ui.default_theme]
 
 	draw_layers(layers, recs)
-	assert(current_layer_i == null)
+	assert(current_layer_i == current_layer_i0)
 
 	theme = theme_stack.pop()
 	assert(theme_stack.length == theme_stack_length0)
 
-	render_state_map = render_state_map0
+	render_state_gc(render_state_map)
+	render_state_map = sm0
 }
 
 // hit-testing phase ---------------------------------------------------------
 
-let hit_state_map = map() // {id->state}
+let hit_state_map      = map() // {id->state}
+let prev_hit_state_map = map() // {id->state}
 
 ui._hit_state_map = hit_state_map
 
@@ -1928,11 +1963,26 @@ function hovers(id, k) {
 ui.hovers = hovers
 
 function hit(id, k) { // looks in prev. frame
+	assert(!render_state_map, 'hit() called while rendering')
 	if (ui.captured_id != null) // unavailable while captured
 		return
 	return hovers(id, k)
 }
 ui.hit = hit
+
+ui.hit_enter = function(id) {
+	assert(!render_state_map, 'hit_enter() called while rendering')
+	if (ui.captured_id != null)
+		return false
+	return hit_state_map.has(id) && !prev_hit_state_map.has(id)
+}
+
+ui.hit_leave = function(id) {
+	assert(!render_state_map, 'hit_leave() called while rendering')
+	if (ui.captured_id != null)
+		return false
+	return !hit_state_map.has(id) && prev_hit_state_map.has(id)
+}
 
 function hit_match(prefix) {
 	for (let [id] of hit_state_map)
@@ -1987,7 +2037,11 @@ function hit_frame(recs, layers) {
 	hit_template_i0 = null
 
 	hit_template_i1 = null
+	let sm = prev_hit_state_map
+	prev_hit_state_map = hit_state_map
+	hit_state_map = sm
 	hit_state_map.clear()
+	ui._hit_state_map = hit_state_map
 
 	if (ui.mx == null)
 		return
@@ -2152,7 +2206,7 @@ ui.capture_tab = function(id, back) {
 }
 
 function tab_captured(id) {
-	return !!ui.state(id, ui.key('shift') ? 'capture_shift_tab' : 'capture_tab')
+	return !!ui.state(id, ui.keypressed('shift') ? 'capture_shift_tab' : 'capture_tab')
 }
 
 let tab_into_id // focus group that the next tab must move into
@@ -2355,7 +2409,7 @@ function redraw_all() {
 		hit_frame(recs, layers)
 
 		if (ui.keydown('tab') && !tab_captured(ui.focused_id)) {
-			let k = step_focus(ui.key('shift'))
+			let k = step_focus(ui.keypressed('shift'))
 			if (k != null)
 				ui.focus(focusables[k+FOCUSABLE_ID], true)
 		}
@@ -2407,6 +2461,7 @@ function redraw_all() {
 
 			cx.clearRect(0, 0, canvas.width, canvas.height)
 
+			drawn_focused_input = null
 			draw_frame(recs, layers, root_render_state_map)
 
 			sync_dom_focus()
@@ -4507,14 +4562,15 @@ function force_scope_vars() {
 
 // text box ------------------------------------------------------------------
 
-const TEXT_ASC      = BOX_ARGS+0
-const TEXT_DSC      = BOX_ARGS+1
-const TEXT_X        = BOX_ARGS+2
-const TEXT_W        = BOX_ARGS+3
-const TEXT_H        = BOX_ARGS+4
-const TEXT_ID       = BOX_ARGS+5
-const TEXT_S        = BOX_ARGS+6
-const TEXT_FLAGS    = BOX_ARGS+7
+const TEXT_ASC        = BOX_ARGS+0
+const TEXT_DSC        = BOX_ARGS+1
+const TEXT_X          = BOX_ARGS+2
+const TEXT_W          = BOX_ARGS+3
+const TEXT_H          = BOX_ARGS+4
+const TEXT_ID         = BOX_ARGS+5
+const TEXT_S          = BOX_ARGS+6
+const TEXT_FLAGS      = BOX_ARGS+7
+const TEXT_INPUT_TYPE = BOX_ARGS+8
 
 // TEXT_FLAGS
 const TEXT_WRAP      = 3 // bits 0 and 1
@@ -4554,9 +4610,8 @@ ui.text = function(
 		id,
 		s,
 		wrap | (editable ? TEXT_EDITABLE : 0) | (ui.focused(id) ? TEXT_FOCUSED : 0), // flags
+		input_type,
 	)
-	if (editable)
-		input_create(id, input_type)
 
 	return s
 }
@@ -4853,27 +4908,32 @@ translate[CMD_TEXT] = function(a, i, dx, dy) {
 	a[i+TEXT_X] += dx
 }
 
-let dom_focused_input // input element that ui gave the DOM focus to
+let prev_drawn_focused_input
+let drawn_focused_input
 
+// sync input elements based on what current frame did:
+// 1) same input focused (do nothing)
+// 2) diff input focused (focus and select-all)
+// 3) no input focused (focus back the canvas).
 function sync_dom_focus() {
-	let input = ui.state(ui.focused_id, 'input') ?? null
-	if (input == dom_focused_input)
+	let input = drawn_focused_input
+	if (input == prev_drawn_focused_input)
 		return
 	if (input) {
 		if (document.activeElement != input) { // select-all but not on click!
 			input.focus()
 			input.select()
 		}
-	} else if (document.activeElement == dom_focused_input) {
+	} else if (document.activeElement == prev_drawn_focused_input) {
 		canvas.focus()
 	}
-	dom_focused_input = input
+	prev_drawn_focused_input = input
 }
 
 function input_free(s, id) {
 	let input = s.input
-	if (input == dom_focused_input) {
-		dom_focused_input = null
+	if (input == prev_drawn_focused_input) {
+		prev_drawn_focused_input = null
 		canvas.focus()
 	}
 	input.remove()
@@ -4896,8 +4956,72 @@ function input_input(ev) {
 	animate()
 }
 
+function remote_input_focus() {
+	// UI focus can change before the DOM blur event.
+	this._ui_con = ui.state(this._ui_ss_id, 'con')
+	remote_input_send(this, {input: this._ui_id, event: 'focus'})
+}
+
+function remote_input_blur() {
+	remote_input_send(this, {input: this._ui_id, event: 'blur'})
+	this._ui_con = null
+}
+
+function remote_input_input() {
+	remote_input_send(this, {input: this._ui_id, event: 'input', value: this.value})
+}
+
+function remote_input_send(input, t) {
+	if (input._ui_ss_ids.length)
+		t.ss_ids = input._ui_ss_ids
+	input._ui_con.send(json(t))
+}
+
+function remote_input_keydown(ev) {
+	ev.stopPropagation()
+	process_key(ev, 'down', ev.key)
+}
+
+function remote_input_keyup(ev) {
+	ev.stopPropagation()
+	process_key(ev, 'up', ev.key)
+}
+
+ui.process_shared_screen_input = function(p, t) {
+	if (t.event == 'pointer_state') {
+		assign(p, t)
+		p.activate()
+		animate()
+	} else if (t.event == 'key_state') {
+		key_state.clear()
+		for (let key of t.keys)
+			key_state.add(key)
+		animate()
+	} else if (t.event == 'keydown') {
+		process_key(null, 'down', t.key)
+	} else if (t.event == 'keyup') {
+		process_key(null, 'up', t.key)
+	} else if (t.ss_ids?.length) {
+		let con = ui.state(t.ss_ids.shift(), 'con')
+		con.send(json(t))
+	} else if (t.event == 'focus') {
+		ui.focus(t.input)
+		animate()
+	} else if (t.event == 'blur') {
+		if (ui.focused_id == t.input)
+			ui.focused_id = null
+		animate()
+	} else if (t.event == 'input') {
+		ui.state(t.input).text = t.value
+		animate()
+	} else {
+		assert(false, 'invalid shared screen input event')
+	}
+}
+
 function input_create(id, input_type) {
-	let input = ui.state(id, 'input')
+	let s = ui.render_state(id)
+	let input = s.input
 	if (!input) {
 		input = document.createElement('input')
 		input._ui_id = id
@@ -4908,18 +5032,20 @@ function input_create(id, input_type) {
 		input.addEventListener('blur'   , input_blur)
 		input.addEventListener('input'  , input_input)
 		screen.appendChild(input)
-		ui.state(id).input = input
-		ui.on_free(id, input_free)
+		s.input = input
+		s.free = input_free
 	}
 	return input
 }
 
 function remote_input_create(id, input_type) {
-	let inputs = ui.state(ss_id, 'inputs')
-	let input = inputs.get(id)
+	let s = ui.render_state(id)
+	let input = s.input
 	if (!input) {
 		input = document.createElement('input')
 		input._ui_id = id
+		input._ui_ss_id = ss_ids[0]
+		input._ui_ss_ids = ss_ids.slice(1)
 		if (input_type)
 			input.setAttribute('type', input_type)
 		input.classList.add('ui-input')
@@ -4927,41 +5053,54 @@ function remote_input_create(id, input_type) {
 		input.addEventListener('blur'   , remote_input_blur)
 		input.addEventListener('input'  , remote_input_input)
 		input.addEventListener('keydown', remote_input_keydown)
+		input.addEventListener('keyup'  , remote_input_keyup)
 		screen.appendChild(input)
-		inputs.set(id, input)
+		s.input = input
+		s.free = input_free
 	}
 	return input
 }
 
 draw[CMD_TEXT] = function(a, i) {
 
-	let x        = a[i+0]
-	let y        = a[i+1]
-	let w        = a[i+2]
-	let s        = a[i+TEXT_S]
-	let asc      = a[i+TEXT_ASC]
-	let dsc      = a[i+TEXT_DSC]
-	let sx       = a[i+TEXT_X]
-	let sw       = a[i+TEXT_W]
-	let id       = a[i+TEXT_ID]
-	let flags    = a[i+TEXT_FLAGS]
+	let x          = a[i+0]
+	let y          = a[i+1]
+	let w          = a[i+2]
+	let s          = a[i+TEXT_S]
+	let asc        = a[i+TEXT_ASC]
+	let dsc        = a[i+TEXT_DSC]
+	let sx         = a[i+TEXT_X]
+	let sw         = a[i+TEXT_W]
+	let id         = a[i+TEXT_ID]
+	let flags      = a[i+TEXT_FLAGS]
+	let input_type = a[i+TEXT_INPUT_TYPE]
 	let wrap     = flags & TEXT_WRAP
 	let editable = flags & TEXT_EDITABLE
 	let focused  = flags & TEXT_FOCUSED
+	if (ss_ids.length)
+		focused = focused && ss_focused
 
 	let col = ui.fg_color(color, color_state)
 
 	if (editable) {
-		let input = ui.state(id, 'input')
-
-		if (!input && ss_id)
-			input = remote_input_create(id, input_type)
+		let input = ss_ids.length
+			? remote_input_create(id, input_type)
+			: input_create(id, input_type)
 
 		let css_x = x  / dpr
 		let css_y = y  / dpr
 		let css_w = sw / dpr
 		let css_font_size = font_size / dpr
 		let opacity = focused ? 1 : 0
+		if (ss_ids.length) {
+			// Let the canvas receive the first click so hit-testing can focus
+			// every shared screen between this input and its model.
+			let pointer_events = focused ? 'auto' : 'none'
+			if (input._ui_pointer_events != pointer_events) {
+				input.style.pointerEvents = pointer_events
+				input._ui_pointer_events = pointer_events
+			}
+		}
 
 		if (input._ui_val != s) {
 			input.value = s
@@ -4993,6 +5132,7 @@ draw[CMD_TEXT] = function(a, i) {
 		}
 
 		if (focused) {
+			drawn_focused_input = input
 			if (input._ui_color != col) {
 				input.style.color = col
 				input._ui_color = col
@@ -5172,106 +5312,161 @@ ui.box_widget('frame', frame)
 
 // shared screen widget ------------------------------------------------------
 
-let SS_ID = BOX_ARGS+0
+let SS_ID    = BOX_ARGS+0
+let SS_FRAME = BOX_ARGS+1
+let SS_STATE = BOX_ARGS+2
+
+let SS_FOCUSED = 1
 
 let ss = {}
 
+function ss_send_pointer(con, mx, my) {
+	let p = con.pointer
+	if (!p)
+		return
+	let inside   = mx != null
+	let pressed  = inside && ui.pressed
+	let click    = inside && ui.click
+	let clickup  = inside && ui.clickup
+	let dblclick = inside && ui.dblclick
+	let wheel_dy = inside ? ui.wheel_dy : 0
+	let trackpad = inside && ui.trackpad
+	if (
+		mx       == p.mx       &&
+		my       == p.my       &&
+		pressed  == p.pressed  &&
+		click    == p.click    &&
+		clickup  == p.clickup  &&
+		dblclick == p.dblclick &&
+		wheel_dy == p.wheel_dy &&
+		trackpad == p.trackpad
+	)
+		return
+	p.mx       = mx
+	p.my       = my
+	p.pressed  = pressed
+	p.click    = click
+	p.clickup  = clickup
+	p.dblclick = dblclick
+	p.wheel_dy = wheel_dy
+	p.trackpad = trackpad
+	con.send(json(p))
+}
+
+function ss_free(s) {
+	ss_send_pointer(s.con, null, null)
+	if (s.key_state?.size)
+		s.con.send(json({event: 'key_state', keys: []}))
+}
+
 ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 
-	if (ui.state(id, 'con') != answer_con) {
-		ui.state(id).con = answer_con
+	keepalive(id)
+	ui.focusable(id)
+	ui.capture_tab(id)
+	ui.capture_tab(id, true)
+	let s = ui.state(id)
+	if (s.con != answer_con) {
+		if (s.con)
+			ss_free(s)
+		s.con = answer_con
+		s.key_state = null
+		s.free = ss_free
 		answer_con.recv = async function(cb) {
 			answer_con.frame = await unpack_frame(cb)
 			ui.animate()
 		}
-		answer_con.pointer = {}
+		answer_con.pointer = {event: 'pointer_state'}
 	}
+
+	let hs = captured(id) || hit(id)
+	if (hs && ui.click) {
+		ui.focus(id)
+		hs = ui.capture(id) || hs
+	}
+	let keys = ui.focused(id) ? key_state : empty_set
+	if (!s.key_state || !set_equals(s.key_state, keys)) {
+		s.key_state = set(keys)
+		answer_con.send(json({event: 'key_state', keys: [...keys]}))
+	}
+	if (ui.focused(id)) {
+		for (let [event, full_key, key, char] of ui.key_events)
+			answer_con.send(json({event: 'key'+event, key: char ?? key}))
+		ui.capture_keys()
+	}
+	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - hs.x : null
+	let my = answer_con.frame && hs && ui.my != null ? ui.my - hs.y : null
+	ss_send_pointer(answer_con, mx, my)
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		id,
+		answer_con.frame,
+		// The renderer needs this to decide if nested DOM inputs can be active.
+		ui.focused(id) ? SS_FOCUSED : 0,
 	)
 
 }
 
 ss.measure = function(a, i, axis) {
-	let id = a[i+SS_ID]
-	let t = ui.state(id, 'con')?.frame
+	let t = a[i+SS_FRAME]
 	a[i+2+axis] = max(a[i+2+axis], a[i+0+axis])
 	a[i+2+axis] += spacings(a, i, axis) + ((axis ? t?.h : t?.w) ?? 0)
 	let min_w = a[i+2+axis]
 	add_ct_min_wh(a, axis, min_w)
 }
 
-function ss_free_inputs(s) {
-	for (let input of s.inputs.values())
-		input.remove()
+ss.hit = function(a, i) {
+	if (!a[i+SS_FRAME])
+		return
+	let id = a[i+SS_ID]
+	let cs = captured(id)
+	let hs
+	if (hit_rect(a[i+0], a[i+1], a[i+2], a[i+3]))
+		hs = hover(id)
+	if (!hs && !cs)
+		return
+	if (hs) {
+		hs.x = a[i+0]
+		hs.y = a[i+1]
+	}
+	if (cs) {
+		cs.x = a[i+0]
+		cs.y = a[i+1]
+	}
+	return true
 }
 
-let ss_id
+// Recorded on remote DOM inputs for routing through nested shared screens.
+let ss_ids = []
+// A remote input is active only if every shared screen containing it is focused.
+let ss_focused
 ss.draw = function(a, i) {
 	let id = a[i+SS_ID]
-	if (ss_id == id)
+	if (ss_ids[ss_ids.length-1] == id)
 		return
-	let con = ui.state(id, 'con')
-	let frame = con?.frame
-	//let frame = a[i+SS_ID]
+	let frame = a[i+SS_FRAME]
 	if (!frame) return
 	let x = a[i+0]
 	let y = a[i+1]
-	let w = a[i+2]
-	let h = a[i+3]
-	ss_id = id
-	if (!ui.state(id, 'inputs')) {
-		ui.state(id).inputs = map() // {id->input}
-		ui.on_free(id, ss_free_inputs)
-	}
+	let ss_focused0 = ss_focused
+	ss_ids.push(id)
+	ss_focused = (ss_focused0 ?? true) && (a[i+SS_STATE] & SS_FOCUSED)
 	cx.save()
 	cx.translate(x, y)
 	let s = ui.render_state(id)
-	s.render_state_map = s.render_state_map ?? map()
+	if (!s.render_state_map) {
+		s.render_state_map = create_render_state_map()
+		s.free = function(s) {
+			for (let [id, s1] of s.render_state_map)
+				if (s1.free)
+					s1.free(s1, id)
+		}
+	}
 	draw_frame(frame.recs, frame.layers, s.render_state_map)
 	cx.restore()
 	draw_pointer(frame, x, y)
-	ss_id = null
-
-	// send mouse state to the remote peer.
-	// make sure not to leak mouse state when ouside the shared screen viewport.
-	if (ui.mouse.changed) {
-		let m = ui.mouse
-		let p = con.pointer
-
-		let mx = m.mx
-		let my = m.my
-		if (mx != null) {
-			mx -= x
-			my -= y
-			if (!m.captured)
-				if (mx < 0 || my < 0 || mx >= w || my >= h) {
-					mx = null
-					my = null
-				}
-		}
-
-		if (
-			mx         != p.mx       ||
-			my         != p.my       ||
-			m.pressed  != p.pressed  ||
-			m.wheel_dy != p.wheel_dy ||
-			m.trackpad != p.trackpad
-		) {
-			p.mx       = mx
-			p.my       = my
-			p.pressed  = m.pressed
-			p.click    = m.click
-			p.clickup  = m.clickup
-			p.dblclick = m.dblclick
-			p.wheel_dy = m.wheel_dy
-			p.trackpad = m.trackpad
-
-			con.send(json(p))
-		}
-
-	}
+	ss_ids.pop()
+	ss_focused = ss_focused0
 
 }
 
@@ -5848,7 +6043,7 @@ function list_update(id, s) {
 	}
 	s.focused_item_i = fi
 	s.focused_item_changed = before_fi != fi ? fi_changed : false
-	s.item_picked = fi_changed == 'click' || (fi != null && ui.focused(id) && ui.key('enter'))
+	s.item_picked = fi_changed == 'click' || (fi != null && ui.focused(id) && ui.keydown('enter'))
 }
 function hvlist(hv, id, items, fr, align, valign, item_align, item_valign, item_fr, max_w, min_w) {
 	let s = ui.state(id)
@@ -6237,6 +6432,8 @@ ui.dropdown = function(id, items, fr, max_w, min_w, min_h) {
 
 	if (toggle) {
 		open = !open
+	} else if (open && !ui.focused(id+'.list')) {
+		open = false
 	} else if (open && ui.click && !hit(id) && !picked && !captured(id+'.list')) {
 		open = false
 	}
@@ -6251,7 +6448,7 @@ ui.dropdown = function(id, items, fr, max_w, min_w, min_h) {
 		ui.focus(id)
 
 	if (!open && ui.focused(id)) {
-		let d = ui.key('arrowup') && -1 || ui.key('arrowdown') && 1 || 0
+		let d = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1 || 0
 		if (d) {
 			sel_i = ui.valid_list_index(sel_i + d, items)
 			ui.state(id).i = sel_i
@@ -6530,28 +6727,30 @@ ui.bg_style('*', 'toggle'      , 'normal item-selected', 'link', 'normal')
 ui.bg_style('*', 'toggle'      , 'hover  item-selected', 'link', 'hover' )
 ui.bg_style('*', 'toggle-thumb', '*', 'text')
 
-let TOGGLE_ID = BOX_ARGS+0
+let TOGGLE_ID    = BOX_ARGS+0
+let TOGGLE_STATE = BOX_ARGS+1
+
+let TOGGLE_ON    = 1
+let TOGGLE_HOVER = 2
 
 let toggle = {}
 
-function toggle_toggle(id) {
-	let clicked = (hit(id) || hit(id+'.label')) && ui.click
-	let on
-	if (clicked) {
-		on = !ui.state(id, 'on')
-		ui.state(id).on = on
-	}
-	return on
-}
-
 toggle.create = function(cmd, id, fr, align, valign, min_w, min_h) {
 	keepalive(id)
-	let on = toggle_toggle(id)
+	let hs = hit(id) || hit(id+'.label')
+	let on = ui.state(id, 'on')
+	let changed_on
+	if (hs && ui.click) {
+		on = !on
+		ui.state(id).on = on
+		changed_on = on
+	}
 	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(2.5),
 		min_h ?? ui.em(1.5),
-		id)
-	return on
+		id,
+		(on ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0))
+	return changed_on
 }
 toggle.ID = TOGGLE_ID
 
@@ -6561,10 +6760,9 @@ toggle.draw = function(a, i) {
 	let y = a[i+1]
 	let w = a[i+2]
 	let h = a[i+3]
-	let id = a[i+TOGGLE_ID]
-
-	let hs = hit(id) || hit(id+'.label')
-	let on = ui.state(id, 'on')
+	let flags = a[i+TOGGLE_STATE]
+	let on = flags & TOGGLE_ON
+	let hs = flags & TOGGLE_HOVER
 
 	// button
 
@@ -6608,10 +6806,9 @@ checkbox.draw = function(a, i) {
 	let y = a[i+1]
 	let w = a[i+2]
 	let h = a[i+3]
-	let id = a[i+TOGGLE_ID]
-
-	let hs = hit(id) || hit(id+'.label')
-	let on = ui.state(id, 'on')
+	let flags = a[i+TOGGLE_STATE]
+	let on = flags & TOGGLE_ON
+	let hs = flags & TOGGLE_HOVER
 
 	let state =
 		(on ? STATE_ITEM_SELECTED : 0) |
@@ -6655,7 +6852,7 @@ ui.box_widget('checkbox', checkbox)
 
 let radio = {...checkbox}
 
-let RADIO_GROUP_ID = BOX_CT_ARGS+0
+let RADIO_GROUP_ID = BOX_ARGS+2
 
 //|| hit(id+'.label')
 radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
@@ -6668,10 +6865,13 @@ radio.create = function(cmd, id, group_id, fr, align, valign, min_w, min_h) {
 		ui.state(id).on = false
 		ui.state(clicked_id).on = true
 	}
+	let hs = hit(id) || hit(id+'.label')
+	let selected = ui.state(id, 'on')
 	ui_cmd_box(cmd, fr, align ?? 'c', valign ?? 'c',
 		min_w ?? ui.em(1.5),
 		min_h ?? ui.em(1.5),
 		id,
+		(selected ? TOGGLE_ON : 0) | (hs ? TOGGLE_HOVER : 0),
 		group_id)
 	return on
 }
@@ -6682,10 +6882,9 @@ radio.draw = function(a, i) {
 	let y = a[i+1]
 	let w = a[i+2]
 	let h = a[i+3]
-	let id = a[i+TOGGLE_ID]
-
-	let hs = hit(id) || hit(id+'.label')
-	let on = ui.state(id, 'on')
+	let flags = a[i+TOGGLE_STATE]
+	let on = flags & TOGGLE_ON
+	let hs = flags & TOGGLE_HOVER
 
 	let cx1 = x + w / 2
 	let cy1 = y + h / 2
@@ -6760,6 +6959,10 @@ let SLIDER_MARKERS    = BOX_ARGS+5
 let SLIDER_SCALE_BASE = BOX_ARGS+6
 let SLIDER_SCALES     = BOX_ARGS+7
 let SLIDER_THUMB_I    = BOX_ARGS+8
+let SLIDER_STATE      = BOX_ARGS+9
+
+let SLIDER_HOVER   = 1
+let SLIDER_FOCUSED = 2
 
 let fr0, align0, valign0, min_w0, min_h0
 
@@ -6871,7 +7074,7 @@ ui.box_widget('slider', {
 			let d = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
 			if (d) {
 				let p = ui.slider_progress(id)
-				p += d * (ui.key('shift') ? .01 : .1)
+				p += d * (ui.keypressed('shift') ? .01 : .1)
 				ui.slider_set_progress(id, p)
 			}
 		}
@@ -6891,6 +7094,7 @@ ui.box_widget('slider', {
 				scale_base ?? 10,
 				scales ?? 0,
 				0, // thumb_i
+				(hs ? SLIDER_HOVER : 0) | (ui.focused(id) ? SLIDER_FOCUSED : 0),
 			)
 
 			let thumb_i = ui.stack('', 0, 'l', 't'); ui.end_stack()
@@ -6961,12 +7165,11 @@ ui.box_widget('slider', {
 		let w = a[i+2]
 		let h = a[i+3]
 
-		let id      = a[i+SLIDER_ID]
 		let p       = a[i+SLIDER_P] / 32767
 		let markers = a[i+SLIDER_MARKERS]
-
-		let hs = hit(id)
-		let focused = ui.focused(id)
+		let state   = a[i+SLIDER_STATE]
+		let hs      = state & SLIDER_HOVER
+		let focused = state & SLIDER_FOCUSED
 
 		let shaft_h = round(ui.em(ui.slider_shaft_h_em))
 		let r = round(shaft_h / 2) // shaft corner radius
@@ -7029,7 +7232,7 @@ ui.box_widget('slider', {
 			let dsc = m.fontBoundingBoxDescent
 			let x0 = x
 
-			let v = ui.slider_value(id, from, to)
+			let v = lerp(p, 0, 1, from, to)
 			let vx = round(x0 + lerp(v, from, to, 0, w)) + .5
 
 			for (let v = min; v <= max; v += step) {
@@ -7197,8 +7400,8 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 	if (ui.focused(id) && ui.keys_down()) {
 		let mode = 'day'
 		let focused_range
-		let ctrl  = ui.key('ctrl')
-		let shift = ui.key('shift')
+		let ctrl  = ui.keypressed('ctrl')
+		let shift = ui.keypressed('shift')
 		if (mode == 'ranges' && ui.keydown('delete')) {
 			if (focused_range) {
 				if (!e.can_remove_range(focused_range))
@@ -7410,14 +7613,15 @@ ui.box_widget('img', {
 		let src  = a[i+BOX_ARGS+0]
 		let data = a[i+BOX_ARGS+2]
 
-		let image = ui.state(src, 'image')
+		let s = ui.render_state(src)
+		let image = s.image
 		if (data && !image) { // have data but no image (remote image)
 			image = new Image()
 			image.onload = function() {
-				ui.relayout()
+				animate()
 			}
 			image.src = data
-			ui.state(src).image = image
+			s.image = image
 		}
 		if (!image?.complete) return
 		if (!w || !h) return
@@ -7460,8 +7664,12 @@ function draw_cross(x0, y0, w, h, hue, sat, lum, alpha) {
 	cx.stroke()
 }
 
-let SAT_LUM_ID  = BOX_ARGS+0
-let SAT_LUM_HUE = BOX_ARGS+1
+let SAT_LUM_ID      = BOX_ARGS+0
+let SAT_LUM_HUE     = BOX_ARGS+1
+let SAT_LUM_HIT_SAT = BOX_ARGS+2
+let SAT_LUM_HIT_LUM = BOX_ARGS+3
+let SAT_LUM_SEL_SAT = BOX_ARGS+4
+let SAT_LUM_SEL_LUM = BOX_ARGS+5
 
 ui.box_widget('sat_lum_square', {
 
@@ -7504,21 +7712,31 @@ ui.box_widget('sat_lum_square', {
 			let sat_step = ui.keydown('arrowright') && 1 || ui.keydown('arrowleft') && -1
 			if (lum_step) {
 				let lum = ui.state(id, 'lum')
-				ui.state(id).lum = lum + (ui.key('shift') ? 0.1 : 1) * 0.1 * lum_step
+				ui.state(id).lum = lum + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * lum_step
 			}
 			if (sat_step) {
 				let sat = ui.state(id, 'sat')
-				ui.state(id).sat = sat + (ui.key('shift') ? 0.1 : 1) * 0.1 * sat_step
+				ui.state(id).sat = sat + (ui.keypressed('shift') ? 0.1 : 1) * 0.1 * sat_step
 			}
 		}
 
-		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h, id, hue)
+		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			id,
+			hue,
+			hit(id, 'sat'),
+			hit(id, 'lum'),
+			ui.state(id, 'sat'),
+			ui.state(id, 'lum'))
 	},
 
 	draw: function(a, i) {
 
-		let id  = a[i+SAT_LUM_ID]
-		let hue = a[i+SAT_LUM_HUE]
+		let id      = a[i+SAT_LUM_ID]
+		let hue     = a[i+SAT_LUM_HUE]
+		let hit_sat = a[i+SAT_LUM_HIT_SAT]
+		let hit_lum = a[i+SAT_LUM_HIT_LUM]
+		let sel_sat = a[i+SAT_LUM_SEL_SAT]
+		let sel_lum = a[i+SAT_LUM_SEL_LUM]
 
 		let x = a[i+0]
 		let y = a[i+1]
@@ -7542,11 +7760,6 @@ ui.box_widget('sat_lum_square', {
 		}
 
 		cx.putImageData(idata, x, y)
-
-		let hit_sat = hit(id, 'sat')
-		let hit_lum = hit(id, 'lum')
-		let sel_sat = ui.state(id, 'sat')
-		let sel_lum = ui.state(id, 'lum')
 
 		draw_cross(x, y, w, h, hue, hit_sat, hit_lum, 0.3)
 		draw_cross(x, y, w, h, hue, sel_sat, sel_lum, 1.0)
@@ -7585,7 +7798,9 @@ function draw_hue_line(x, y, h, w, hue, alpha) {
 	cx.stroke()
 }
 
-let HUE_BAR_ID = BOX_ARGS+0
+let HUE_BAR_ID      = BOX_ARGS+0
+let HUE_BAR_HIT_HUE = BOX_ARGS+1
+let HUE_BAR_SEL_HUE = BOX_ARGS+2
 
 ui.box_widget('hue_bar', {
 
@@ -7612,17 +7827,22 @@ ui.box_widget('hue_bar', {
 			let step = ui.keydown('arrowup') && -1 || ui.keydown('arrowdown') && 1
 			if (step) {
 				let hue = ui.state(id, 'hue')
-				hue = clamp(round(hue + (ui.key('shift') ? 1 : 10) * step), 0, 360)
+				hue = clamp(round(hue + (ui.keypressed('shift') ? 1 : 10) * step), 0, 360)
 				ui.state(id).hue = hue
 			}
 		}
 
-		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h, id)
+		return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			id,
+			hit(id, 'hue'),
+			ui.state(id, 'hue'))
 	},
 
 	draw: function(a, i) {
 
-		let id = a[i+HUE_BAR_ID]
+		let id      = a[i+HUE_BAR_ID]
+		let hit_hue = a[i+HUE_BAR_HIT_HUE]
+		let sel_hue = a[i+HUE_BAR_SEL_HUE]
 
 		let x = a[i+0]
 		let y = a[i+1]
@@ -7645,9 +7865,6 @@ ui.box_widget('hue_bar', {
 		}
 
 		cx.putImageData(idata, x, y)
-
-		let sel_hue = ui.state(id, 'hue')
-		let hit_hue = hit(id, 'hue')
 
 		draw_hue_line(x, y, h, w, hit_hue, 0.3)
 		draw_hue_line(x, y, h, w, sel_hue, 1.0)
@@ -7774,11 +7991,11 @@ ui.widget('bg_dots', {
 		if (!dot_num)
 			return
 
-		keepalive(id)
-		let dots = ui.state(id, 'dots')
+		let s = ui.render_state(id)
+		let dots = s.dots
 		if (!dots) {
 			dots = []
-			ui.state(id).dots = dots
+			s.dots = dots
 
 			dots.mouse_dot = {}
 			dots.push(dots.mouse_dot)
@@ -7894,6 +8111,13 @@ frame_graph('frame_compression', '', '%'   , 0, 0,   100)
 frame_graph('frame_pack_time'  , '', 'ms'  , 1, 0,    10)
 frame_graph('frame_unpack_time', '', 'ms'  , 1, 0,    10)
 
+let overlapped_frame_graphs = []
+for (let name in ui.frame_graphs) {
+	let g = ui.frame_graphs[name]
+	if (g.color)
+		overlapped_frame_graphs.push(g)
+}
+
 function draw_graph(x0, y0, w, h, g, with_agg) {
 
 	cx.save()
@@ -7956,7 +8180,8 @@ function draw_graph(x0, y0, w, h, g, with_agg) {
 
 ui.box_widget('frame_graph_overlapped', {
 	create: function(cmd, fr, align, valign, min_w, min_h) {
-		ui_cmd_box(cmd, fr, align, valign, min_w, min_h)
+		ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
+			overlapped_frame_graphs)
 		//ui.animate()
 	},
 	draw: function(a, i) {
@@ -7964,11 +8189,9 @@ ui.box_widget('frame_graph_overlapped', {
 		let y0 = a[i+1]
 		let w  = a[i+2]
 		let h  = a[i+3]
-		for (let name in ui.frame_graphs) {
-			let g = ui.frame_graphs[name]
-			if (g.color)
-				draw_graph(x0, y0, w, h, g, false)
-		}
+		let graphs = a[i+BOX_ARGS+0]
+		for (let g of graphs)
+			draw_graph(x0, y0, w, h, g, false)
 	},
 })
 
@@ -8154,7 +8377,7 @@ ui.debug_pane = function() {
 		fgr('frame_layout_time')
 		fgr('frame_draw_time')
 		fgr('frame_hit_time')
-		if (0) {
+		if (1) {
 			fgr('frame_pack_time')
 			fgr('frame_compression')
 			fgr('frame_bandwidth')

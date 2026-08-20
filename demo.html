@@ -10,7 +10,6 @@
 <script src=ui_grid.js></script>
 <script src=ui_ast_edit.js></script>
 <script src=ui_code_edit.js></script>
-<script src=adapter.js></script>
 <script src=webrtc.js></script>
 <script src=lezer.js></script>
 <!--
@@ -38,6 +37,7 @@ if (demo_state.theme)
 ui.DEBUG      = demo_state.debug ?? true
 ui.TUI        = demo_state.tui   ?? false
 SELECTED_DEMO = location.search.match('demo=([^&]+)')?.[1] ?? demo_state.demo ?? 'tabs'
+REMOTE_DEMO   = location.search.match('remote=([^&]+)')?.[1]
 
 </script>
 <body>
@@ -779,10 +779,13 @@ ui.end_stack()
 
 // screen sharing ------------------------------------------------------------
 
+let remote_offer_con, remote_answer_con
+
 ui.frame_changed = async function() {
-	if (!offer_con) return
+	let con = remote_offer_con ?? offer_con
+	if (!con) return
 	let cb = await ui.pack_frame()
-	offer_con.send(cb)
+	con.send(cb)
 }
 
 listen('rtc', function(c) {
@@ -791,17 +794,27 @@ listen('rtc', function(c) {
 
 let signal_server, offer_con
 
+window.demo_remote_source_init = function(signal_server) {
+	remote_offer_con = rtc.offer({signal_server: signal_server})
+	let p = ui.add_pointer()
+	remote_offer_con.recv = function(s) {
+		ui.process_shared_screen_input(p, json_arg(s))
+	}
+	remote_offer_con.connect('local')
+}
+
+window.demo_remote_viewer_init = function(signal_server) {
+	remote_answer_con = rtc.answer({signal_server: signal_server})
+	ui.animate()
+}
+
 function demo_share_screen_init() {
 	signal_server = signal_server || rtc.demo_signal_server()
 	if (!offer_con) {
 		offer_con = rtc.offer({signal_server: signal_server})
 		let p = ui.add_pointer()
-		offer_con.pointer = p
 		offer_con.recv = function(s) {
-			let t = json_arg(s)
-			assign(p, t)
-			p.activate()
-			ui.animate()
+			ui.process_shared_screen_input(p, json_arg(s))
 		}
 	}
 }
@@ -942,7 +955,7 @@ let ast = {
 	},
 }
 
-ui.ast_edit('ast_edit1', ast, 1, 's', 's')
+//ui.ast_edit('ast_edit1', ast, 1, 's', 's')
 
 `
 
@@ -1005,7 +1018,7 @@ demos_array = keys(demos)
 
 let a_length = 0
 let a_strlen = 0
-ui.main = function() {
+function demo_main() {
 
 	ui.v()
 
@@ -1089,6 +1102,17 @@ ui.main = function() {
 
 	a_length = ui.a.length
 }
+
+ui.main = demo_main
+
+if (REMOTE_DEMO == 'viewer')
+	ui.main = function() {
+		if (!remote_answer_con)
+			return
+		ui.shared_screen('remote_demo', remote_answer_con)
+		if (!remote_answer_con.open)
+			remote_answer_con.connect('local')
+	}
 
 </script>
 </body>

@@ -290,7 +290,7 @@ rtc.mock_signal_server = function() {
 					rc.signal_candidates(id)
 				}
 			} else if (k == 'candidate') {
-				let candidate = v
+				let candidate = v.toJSON()
 				c.candidates.add(candidate)
 				c.signal_candidates(id)
 			} else if (k == 'close') {
