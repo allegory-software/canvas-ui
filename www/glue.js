@@ -2173,6 +2173,7 @@ function decompress(byteArray, encoding) {
 		opt.slow_timeout (4)
 		opt.headers: {h->v}
 		opt.response_mime_type // needed for loading CSS files non-async in Firefox
+		opt.response_type ('' | 'text' | 'blob' | 'arraybuffer' | 'document' | 'json')
 		opt.user
 		opt.pass
 		opt.async (true)
@@ -2230,6 +2231,7 @@ function ajax(req) {
 	let method = req.method || (req.upload ? 'POST' : 'GET')
 	let async = req.async !== false // NOTE: this is deprecated but that's ok.
 	let url = url_format(req.url)
+	let file_url = new URL(url, location.href).protocol == 'file:'
 
 	xhr.open(method, url, async, req.user, req.pass)
 
@@ -2241,6 +2243,9 @@ function ajax(req) {
 
 	if (async)
 		xhr.timeout = (req.timeout || 0) * 1000
+
+	if (req.response_type)
+		xhr.responseType = req.response_type
 
 	if (req.headers)
 		for (let h in req.headers)
@@ -2346,9 +2351,15 @@ function ajax(req) {
 		if (xhr.readyState > 2 && req.onchunk)
 			if (req.onchunk(xhr.response, xhr.readyState == 4) === false)
 				req.abort()
-		if (xhr.readyState == 4)
-			if (xhr.status)
-				done(xhr.status)
+		if (xhr.readyState == 4) {
+			// a file: url reports status 0 when it succeeds. network errors and
+			// aborts also report 0, but they fire onerror/onabort and leave no
+			// response, so having a response is what separates them.
+			let status = xhr.status
+				|| (file_url && xhr.response != null && xhr.response !== '' ? 200 : 0)
+			if (status)
+				done(status)
+		}
 	}
 
 	req.abort = function() {

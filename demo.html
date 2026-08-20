@@ -777,6 +777,41 @@ ui.stack('', 0, 'c', 'c', 400)
 ui.end_stack()
 `
 
+// 240x160 so the fitted box is visibly wider than tall.
+img_data_src = 'data:image/svg+xml,'+encodeURIComponent(
+`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160">
+	<rect width="240" height="160" fill="#2d7ff9"/>
+	<circle cx="120" cy="80" r="60" fill="#ffd166"/>
+	<path d="M0 0 L240 160 M240 0 L0 160" stroke="#f4f1de" stroke-width="4"/>
+</svg>`)
+
+demos.img = `
+ui.m(ui.sp2())
+ui.h(1, ui.sp2(), 's', 's')
+
+	ui.v(1, ui.sp(), 's', 's')
+		ui.color('label')
+		ui.text('', 'data: src, height from aspect ratio', 0, 'l', 't')
+		ui.stack('', 1, 's', 's')
+			ui.bb('bg1', null, 1, 'intense')
+			ui.p(ui.sp())
+			ui.img(img_data_src, 1, 'c', 'c', -1)
+		ui.end_stack()
+	ui.end_v()
+
+	ui.v(1, ui.sp(), 's', 's')
+		ui.color('label')
+		ui.text('', 'fetched src, height capped at 120', 0, 'l', 't')
+		ui.stack('', 1, 's', 's')
+			ui.bb('bg1', null, 1, 'intense')
+			ui.p(ui.sp())
+			ui.img('../tests/sample.svg', 1, 'c', 'c', 120)
+		ui.end_stack()
+	ui.end_v()
+
+ui.end_h()
+`
+
 // screen sharing ------------------------------------------------------------
 
 let remote_offer_con, remote_answer_con

@@ -79,7 +79,7 @@ MOUSE STATE
 	wheel_dy        active pointer wheel delta
 	trackpad        active pointer is a trackpad
 
-	mouse           = default pointer that tracks the local mouse
+	local_pointer   = default pointer that tracks the local mouse and keyboard
 	mx0 my0         = mouse position when started dragging
 	update_mouse    ()   update mouse coords to current transform
 	hit_rect        (x, y, w, h) -> t|f
@@ -105,7 +105,7 @@ KEYBOARD STATE
 
 	keydown         (key) -> t|f     check if a key was just pressed
 	keyup           (key) -> t|f     check if a key was just depressed
-	keypressed      (key) -> t|f     check if a key is pressed
+	keypressed      (key) -> t|f     check if the active pointer's user holds a key
 	key_events      -> [['down'|'up', full_key, key, char, ctrl, alt, shift], ...]
 	capture_keys    ()    remove current keydown() and keyup() events
 	capture_keydown (key)   stop the browser from acting on a keydown
@@ -130,6 +130,8 @@ WIDGET STATE
 	state_init      (id, k, v)           set widget state var if widget is alive
 	on_free         (id, free_fn)        add a widget gc hook
 	render_state    (id) -> state        get renderer-local widget state
+	local_state     (id[, k]) -> state | v | nil   widget state in a draw callback,
+	                                     nil if the frame came from another machine
 
 FOCUS STATE
 
@@ -947,6 +949,7 @@ ui.add_pointer = function() {
 	p.mx = null
 	p.my = null
 	p.pressed = false
+	p.key_state = set() // keys held down by this pointer's user
 	reset_pointer_state(p)
 
 	ui.pointers.push(p)
@@ -957,12 +960,12 @@ ui.add_pointer = function() {
 
 	p.activate = function() {
 
-		if (ui.pointer && ui.pointer != p && ui.pointer.captured)
+		if (ui.pointer && ui.pointer != p && ui.pointer.pressed)
 			return
 
 		ui.pointer = p
 
-		if (!p.captured) {
+		if (!p.pressed) {
 			if (ui.mx == null && p.mx != null) ui.mouseenter = true
 			if (ui.mx != null && p.mx == null) ui.mouseleave = true
 		}
@@ -988,9 +991,9 @@ ui.mx0 = null
 ui.my0 = null
 ui.captured_id = null
 
-ui.mouse = ui.add_pointer()
+ui.local_pointer = ui.add_pointer()
 
-ui.mouse.activate()
+ui.local_pointer.activate()
 
 function reset_pointer_state(p) {
 	p.click = false
@@ -1004,74 +1007,72 @@ function reset_pointer_state(p) {
 }
 
 function update_mouse(ev) {
-	ui.mouse.mx = round(ev.clientX * dpr)
-	ui.mouse.my = round(ev.clientY * dpr)
-	ui.mouse.changed = true
+	ui.local_pointer.mx = round(ev.clientX * dpr)
+	ui.local_pointer.my = round(ev.clientY * dpr)
+	ui.local_pointer.changed = true
 }
 
 canvas.addEventListener('pointerdown', function(ev) {
 	update_mouse(ev)
 	if (ev.button == 0) {
-		ui.mouse.click = true
-		ui.mouse.pressed = true
+		ui.local_pointer.click = true
+		ui.local_pointer.pressed = true
 		this.setPointerCapture(ev.pointerId)
-		ui.mouse.captured = true
 	}
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	animate()
 })
 
 canvas.addEventListener('pointerup', function(ev) {
 	update_mouse(ev)
 	if (ev.button == 0) {
-		ui.mouse.pressed = false
-		ui.mouse.clickup = true
+		ui.local_pointer.pressed = false
+		ui.local_pointer.clickup = true
 		this.releasePointerCapture(ev.pointerId)
-		ui.mouse.captured = false
 	}
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	animate()
 })
 
 canvas.addEventListener('dblclick', function(ev) {
 	update_mouse(ev)
 	if (ev.button == 0) {
-		ui.mouse.dblclick = true
+		ui.local_pointer.dblclick = true
 	}
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	animate()
 })
 
 canvas.addEventListener('pointermove', function(ev) {
 	update_mouse(ev)
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	animate()
 })
 
 canvas.addEventListener('pointerenter', function(ev) {
 	update_mouse(ev)
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	animate()
 })
 
 canvas.addEventListener('pointerleave', function(ev) {
-	if (ui.pointer != ui.mouse || ui.captured_id == null) {
-		ui.mouse.mx = null
-		ui.mouse.my = null
+	if (ui.pointer != ui.local_pointer || ui.captured_id == null) {
+		ui.local_pointer.mx = null
+		ui.local_pointer.my = null
 	}
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	ui.set_cursor()
 	animate()
 })
 
 // NOTE: wheelDeltaY is 150 in chrome and 120 if FF. Browser developers...
 canvas.addEventListener('wheel', function(ev) {
-	ui.mouse.wheel_dy = ev.deltaY
-	if (!ui.mouse.wheel_dy)
+	ui.local_pointer.wheel_dy = ev.deltaY
+	if (!ui.local_pointer.wheel_dy)
 		return
-	ui.mouse.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
+	ui.local_pointer.trackpad = ev.wheelDeltaY === -ev.deltaY * 3
 	update_mouse(ev)
-	ui.mouse.activate()
+	ui.local_pointer.activate()
 	animate()
 })
 
@@ -1165,7 +1166,6 @@ ui.drag = function(id, axis) {
 
 let key_downs = set()
 let key_ups   = set()
-let key_state = set()
 
 ui.key_events = [] // [key_event1, ...]
 
@@ -1182,33 +1182,51 @@ ui.capture_keyup = function(key) {
 	captured_keyups[key] = true
 }
 
-function process_key(ev, ev_name, key) {
+// the modifiers come from the keys that p's user is holding, so the event must
+// be made on the machine where the key is typed. a forwarded event carries its
+// modifiers with it and is replayed with apply_key_event().
+function make_key_event(p, ev_name, key) {
 	let char = key
 	key = key.toLowerCase()
 	if (key == 'control')
 		key = 'ctrl'
-	let ctrl  = key_state.has('ctrl' ) && key != 'ctrl'
-	let alt   = key_state.has('alt'  ) && key != 'alt'
-	let shift = key_state.has('shift') && key != 'shift'
+	let ctrl  = p.key_state.has('ctrl' ) && key != 'ctrl'
+	let alt   = p.key_state.has('alt'  ) && key != 'alt'
+	let shift = p.key_state.has('shift') && key != 'shift'
 	char = char.length == 1 && !ctrl && !alt ? char : null
 	let prefix = ctrl || alt || shift
 		? (ctrl?'ctrl ':'')+(alt?'alt ':'')+(shift?'shift ':'')
 		: ''
-	let full_key = prefix + key
+	return [ev_name, prefix + key, key, char, ctrl, alt, shift]
+}
+
+function apply_key_event(p, e) {
+	let ev_name  = e[0]
+	let full_key = e[1]
+	let key      = e[2]
 	let key_set = ev_name == 'down' ? key_downs : key_ups
 	key_set.add(key)
 	key_set.add(full_key)
-	ui.key_events.push([ev_name, full_key, key, char, ctrl, alt, shift])
+	ui.key_events.push(e)
 	if (ev_name == 'down')
-		key_state.add(key)
+		p.key_state.add(key)
 	else
-		key_state.delete(key)
+		p.key_state.delete(key)
+	p.activate() // typing takes over from whoever was driving
+	animate()
+}
+
+function process_key(ev, ev_name, key) {
+	let p = ui.local_pointer
+	let e = make_key_event(p, ev_name, key)
+	apply_key_event(p, e)
+	let full_key = e[1]
+	let key_low  = e[2] // lowercased key
 	let captured = ev_name == 'down' ? captured_keydowns : captured_keyups
-	if (ev && (key == 'tab' || captured[full_key])) {
+	if (ev && (key_low == 'tab' || captured[full_key])) {
 		// this allows us to supress some (but not all) browser key events.
 		ev.preventDefault()
 	}
-	animate()
 }
 document.addEventListener('keydown', function(ev) {
 	process_key(ev, 'down', ev.key)
@@ -1221,7 +1239,8 @@ document.addEventListener('paste', async function(e) {
 	// getting the clipboard contents and setting keydown of pseudo-key 'paste'.
 	ui.clipboard_text = await navigator.clipboard.readText()
 	process_key(null, 'down', 'paste')
-	key_state.delete('paste') // because nobody is there to depress this key.
+	// because nobody is there to depress this key.
+	ui.local_pointer.key_state.delete('paste')
 	animate()
 })
 
@@ -1240,7 +1259,7 @@ ui.keyup = function(key) {
 }
 
 ui.keypressed = function(key) {
-	return key_state.has(key)
+	return ui.pointer.key_state.has(key)
 }
 
 ui.keys_down   = () => key_downs.size
@@ -1480,7 +1499,7 @@ ui.focusing = function(id) {
 window.addEventListener('blur', function(ev) {
 	ui.window_unfocusing = true
 	ui.window_focused = false
-	key_state.clear()
+	ui.local_pointer.key_state.clear()
 	key_downs.clear()
 	key_ups.clear()
 	ui.key_events.length = 0
@@ -1885,6 +1904,17 @@ ui.render_state = function(id, k) {
 	return k ? s[k] : s
 }
 
+// normally we don't allow ui.state() in the drawing phase because it's not
+// available remotely. this is an exception API for widgets that need access
+// to a native object (eg. Image) when drawing locally to avoid recreating it.
+ui.local_state = function(id, k) {
+	assert(render_state_map, 'local_state() called outside rendering')
+	if (render_state_map != root_render_state_map)
+		return
+	let s = state_map.get(id)
+	return k ? s?.[k] : s
+}
+
 let theme_stack = []
 
 function draw_cmd(a, i, recs) {
@@ -2037,11 +2067,7 @@ function hit_frame(recs, layers) {
 	hit_template_i0 = null
 
 	hit_template_i1 = null
-	let sm = prev_hit_state_map
-	prev_hit_state_map = hit_state_map
-	hit_state_map = sm
 	hit_state_map.clear()
-	ui._hit_state_map = hit_state_map
 
 	if (ui.mx == null)
 		return
@@ -2270,8 +2296,8 @@ async function pack_frame_json() {
 		v: ui.VERSION,
 		w: screen_w,
 		h: screen_h,
-		mx: ui.mouse.mx,
-		my: ui.mouse.my,
+		mx: ui.local_pointer.mx,
+		my: ui.local_pointer.my,
 		recs: recs,
 		layers: layers,
 	})
@@ -2398,6 +2424,14 @@ function draw_pointer(p, x0, y0) {
 
 function redraw_all() {
 
+	// hit_enter() and hit_leave() compare against the last frame that was drawn,
+	// so hit_state_map moves to prev_hit_state_map once per frame, outside the
+	// relayout loop below.
+	let sm = prev_hit_state_map
+	prev_hit_state_map = hit_state_map
+	hit_state_map = sm
+	ui._hit_state_map = hit_state_map
+
 	let relayout_count = 0
 	while (1) {
 		let t0, t1
@@ -2467,7 +2501,7 @@ function redraw_all() {
 			sync_dom_focus()
 
 			for (let p of ui.pointers)
-				if (p != ui.mouse)
+				if (p != ui.local_pointer)
 					draw_pointer(p, 0, 0)
 
 			t1 = clock_ms()
@@ -4957,14 +4991,7 @@ function input_input(ev) {
 }
 
 function remote_input_focus() {
-	// UI focus can change before the DOM blur event.
-	this._ui_con = ui.state(this._ui_ss_id, 'con')
 	remote_input_send(this, {input: this._ui_id, event: 'focus'})
-}
-
-function remote_input_blur() {
-	remote_input_send(this, {input: this._ui_id, event: 'blur'})
-	this._ui_con = null
 }
 
 function remote_input_input() {
@@ -4974,7 +5001,7 @@ function remote_input_input() {
 function remote_input_send(input, t) {
 	if (input._ui_ss_ids.length)
 		t.ss_ids = input._ui_ss_ids
-	input._ui_con.send(json(t))
+	ui.state(input._ui_ss_id, 'con').send(json(t))
 }
 
 function remote_input_keydown(ev) {
@@ -4993,23 +5020,17 @@ ui.process_shared_screen_input = function(p, t) {
 		p.activate()
 		animate()
 	} else if (t.event == 'key_state') {
-		key_state.clear()
+		p.key_state.clear()
 		for (let key of t.keys)
-			key_state.add(key)
+			p.key_state.add(key)
 		animate()
-	} else if (t.event == 'keydown') {
-		process_key(null, 'down', t.key)
-	} else if (t.event == 'keyup') {
-		process_key(null, 'up', t.key)
+	} else if (t.event == 'key') {
+		apply_key_event(p, t.key_event)
 	} else if (t.ss_ids?.length) {
 		let con = ui.state(t.ss_ids.shift(), 'con')
 		con.send(json(t))
 	} else if (t.event == 'focus') {
 		ui.focus(t.input)
-		animate()
-	} else if (t.event == 'blur') {
-		if (ui.focused_id == t.input)
-			ui.focused_id = null
 		animate()
 	} else if (t.event == 'input') {
 		ui.state(t.input).text = t.value
@@ -5050,7 +5071,6 @@ function remote_input_create(id, input_type) {
 			input.setAttribute('type', input_type)
 		input.classList.add('ui-input')
 		input.addEventListener('focus'  , remote_input_focus)
-		input.addEventListener('blur'   , remote_input_blur)
 		input.addEventListener('input'  , remote_input_input)
 		input.addEventListener('keydown', remote_input_keydown)
 		input.addEventListener('keyup'  , remote_input_keyup)
@@ -5284,6 +5304,10 @@ frame.translate = function(a, i, dx, dy) {
 
 	layout_rec(a1, x, y, w, h)
 
+	// callbacks are not serializable so we have to clean them up from the rec.
+	a[i+FRAME_ON_MEASURE] = null
+	a[i+FRAME_ON_FRAME] = null
+
 }
 
 frame.register = function(a, i) {
@@ -5355,7 +5379,7 @@ function ss_send_pointer(con, mx, my) {
 
 function ss_free(s) {
 	ss_send_pointer(s.con, null, null)
-	if (s.key_state?.size)
+	if (s.sent_keys?.size)
 		s.con.send(json({event: 'key_state', keys: []}))
 }
 
@@ -5370,7 +5394,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 		if (s.con)
 			ss_free(s)
 		s.con = answer_con
-		s.key_state = null
+		s.sent_keys = null
 		s.free = ss_free
 		answer_con.recv = async function(cb) {
 			answer_con.frame = await unpack_frame(cb)
@@ -5384,14 +5408,14 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 		ui.focus(id)
 		hs = ui.capture(id) || hs
 	}
-	let keys = ui.focused(id) ? key_state : empty_set
-	if (!s.key_state || !set_equals(s.key_state, keys)) {
-		s.key_state = set(keys)
+	let keys = ui.focused(id) ? ui.pointer.key_state : empty_set
+	if (!s.sent_keys || !set_equals(s.sent_keys, keys)) {
+		s.sent_keys = set(keys)
 		answer_con.send(json({event: 'key_state', keys: [...keys]}))
 	}
 	if (ui.focused(id)) {
-		for (let [event, full_key, key, char] of ui.key_events)
-			answer_con.send(json({event: 'key'+event, key: char ?? key}))
+		for (let e of ui.key_events)
+			answer_con.send(json({event: 'key', key_event: e}))
 		ui.capture_keys()
 	}
 	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - hs.x : null
@@ -7503,13 +7527,15 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 
 // image ---------------------------------------------------------------------
 
-function create_image(src, data) {
+function create_image(src, data) { // called from async callback!
 	let image = new Image()
 	image.src = data
 	image.onload = function() {
-		ui.state(src).image = image
-		ui.state(src).data = data
-		animate() // calling relayout() won't do anything as we're not in ui.main() here.
+		let s = ui.state(src)
+		s.image = image
+		s.data = data
+		s.loading = false
+		animate() // relayout() won't work as we're not in ui.main() here!
 	}
 }
 
@@ -7519,20 +7545,21 @@ ui.box_widget('img', {
 
 		// TODO: check expire time and refetch on a timer.
 		// TODO: check etag and refetch on a timer.
-		let data = ui.state(src, 'data')
-		if (!data) {
+		keepalive(src)
+		let s = ui.state(src)
+		let data = s.data
+		if (!data && !s.loading) {
+			s.loading = true
 			if (src.startsWith('data:')) {
 				create_image(src, src)
 			} else {
-				fetch(src)
-					.then(res => res.blob())
-					.then(blob => {
-						let reader = new FileReader()
-						reader.onloadend = () => {
-							create_image(src, reader.result)
-						}
-						reader.readAsDataURL(blob)
-				  })
+				get(src, function(blob) {
+					let reader = new FileReader()
+					reader.onloadend = function() {
+						create_image(src, reader.result)
+					}
+					reader.readAsDataURL(blob)
+				}, null, {response_type: 'blob'})
 			}
 		}
 
@@ -7613,15 +7640,18 @@ ui.box_widget('img', {
 		let src  = a[i+BOX_ARGS+0]
 		let data = a[i+BOX_ARGS+2]
 
-		let s = ui.render_state(src)
-		let image = s.image
-		if (data && !image) { // have data but no image (remote image)
-			image = new Image()
-			image.onload = function() {
-				animate()
+		let image = ui.local_state(src, 'image')
+		if (!image) { // frame came from another machine: decode the bytes here
+			let s = ui.render_state(src)
+			image = s.image
+			if (data && !image) { // have data but no image (remote image)
+				image = new Image()
+				image.onload = function() {
+					animate()
+				}
+				image.src = data
+				s.image = image
 			}
-			image.src = data
-			s.image = image
 		}
 		if (!image?.complete) return
 		if (!w || !h) return
