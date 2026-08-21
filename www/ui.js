@@ -2287,6 +2287,12 @@ translate[NOHIT] = function(a, i) {
 
 // frame packing -------------------------------------------------------------
 
+// id of this machine, sent with every frame; ss.draw() checks it for cycles.
+let screen_id = floor(random() * 1e15)
+
+// number of the last remote edit applied; sent back with every frame.
+let applied_edit_n = 0
+
 let tenc = new TextEncoder()
 async function pack_frame_json() {
 
@@ -2294,10 +2300,15 @@ async function pack_frame_json() {
 
 	let s = json({
 		v: ui.VERSION,
+		id: screen_id,
 		w: screen_w,
 		h: screen_h,
 		mx: ui.local_pointer.mx,
 		my: ui.local_pointer.my,
+		n: applied_edit_n,
+		// not ui.state(): it would run the widget's update callback here.
+		anchor: state_map.get(ui.focused_id)?.anchor,
+		caret: state_map.get(ui.focused_id)?.caret,
 		recs: recs,
 		layers: layers,
 	})
@@ -2496,6 +2507,7 @@ function redraw_all() {
 			cx.clearRect(0, 0, canvas.width, canvas.height)
 
 			drawn_focused_input = null
+			drawn_focused_by_key = false
 			draw_frame(recs, layers, root_render_state_map)
 
 			sync_dom_focus()
@@ -4607,11 +4619,12 @@ const TEXT_FLAGS      = BOX_ARGS+7
 const TEXT_INPUT_TYPE = BOX_ARGS+8
 
 // TEXT_FLAGS
-const TEXT_WRAP      = 3 // bits 0 and 1
-const TEXT_WRAP_LINE = 1 // bit 1
-const TEXT_WRAP_WORD = 2 // bit 2
-const TEXT_EDITABLE  = 4 // bit 3
-const TEXT_FOCUSED   = 8 // bit 4
+const TEXT_WRAP           =  3 // bits 0 and 1
+const TEXT_WRAP_LINE      =  1 // bit 1
+const TEXT_WRAP_WORD      =  2 // bit 2
+const TEXT_EDITABLE       =  4 // bit 3
+const TEXT_FOCUSED        =  8 // bit 4
+const TEXT_FOCUSED_BY_KEY = 16 // bit 5
 
 const CMD_TEXT = cmd('text')
 
@@ -4643,7 +4656,10 @@ ui.text = function(
 		0, // text_h
 		id,
 		s,
-		wrap | (editable ? TEXT_EDITABLE : 0) | (ui.focused(id) ? TEXT_FOCUSED : 0), // flags
+		wrap // flags
+			| (editable ? TEXT_EDITABLE : 0)
+			| (ui.focused(id) ? TEXT_FOCUSED : 0)
+			| (ui.focused(id) && ui.focused_by_key ? TEXT_FOCUSED_BY_KEY : 0),
 		input_type,
 	)
 
@@ -4944,17 +4960,19 @@ translate[CMD_TEXT] = function(a, i, dx, dy) {
 
 let prev_drawn_focused_input
 let drawn_focused_input
+let drawn_focused_by_key
 
 // sync input elements based on what current frame did:
 // 1) same input focused (do nothing)
-// 2) diff input focused (focus and select-all)
-// 3) no input focused (focus back the canvas).
+// 2) diff input focused by key (focus and select-all)
+// 3) diff input focused by click (do nothing: the click placed the caret)
+// 4) no input focused (focus back the canvas).
 function sync_dom_focus() {
 	let input = drawn_focused_input
 	if (input == prev_drawn_focused_input)
 		return
 	if (input) {
-		if (document.activeElement != input) { // select-all but not on click!
+		if (drawn_focused_by_key) {
 			input.focus()
 			input.select()
 		}
@@ -4966,6 +4984,8 @@ function sync_dom_focus() {
 
 function input_free(s, id) {
 	let input = s.input
+	// canvas.focus() below blurs the input: don't report that blur back.
+	input.removeEventListener('blur', remote_input_blur)
 	if (input == prev_drawn_focused_input) {
 		prev_drawn_focused_input = null
 		canvas.focus()
@@ -4974,48 +4994,88 @@ function input_free(s, id) {
 }
 
 function input_focus(ev) {
-	ui.focused_id = this._ui_id
+	ui.focus(this._ui_id)
 	animate()
 }
 
 function input_blur(ev) {
+	// deactivating the window blurs the input, but focus didn't move.
+	if (!document.hasFocus())
+		return
 	if (ui.focused_id == this._ui_id)
 		ui.focused_id = null
 	animate()
 }
 
-function input_input(ev) {
-	let id = this._ui_id
-	ui.state(id).text = this.value
+// anchor = selection start, caret = selection end; equal = no selection.
+function read_input_sel(t, input) {
+	let backward = input.selectionDirection == 'backward'
+	t.anchor = backward ? input.selectionEnd   : input.selectionStart
+	t.caret  = backward ? input.selectionStart : input.selectionEnd
+}
+
+// for input and selectionchange: typing and caret moves are one edit.
+function input_edit(ev) {
+	let s = ui.state(this._ui_id)
+	if (ev.type == 'input')
+		s.text = this.value
+	read_input_sel(s, this)
 	animate()
 }
 
 function remote_input_focus() {
+	// focus the shared screen that shows this input so that keys start being
+	// forwarded and the frame's focused flag is honored. clicking the input is
+	// what focuses the screen; the screen doesn't have to be focused first.
+	ui.focus(this._ui_ss_ids[0])
 	remote_input_send(this, {input: this._ui_id, event: 'focus'})
+	animate()
 }
 
-function remote_input_input() {
-	remote_input_send(this, {input: this._ui_id, event: 'input', value: this.value})
+function remote_input_blur() {
+	// deactivating the window blurs the input, but focus didn't move.
+	if (!document.hasFocus())
+		return
+	remote_input_send(this, {input: this._ui_id, event: 'blur'})
 }
 
+// numbers each edit sent out; frames echo the last one applied.
+let edit_n = 0
+
+function remote_input_edit(ev) {
+	let t = {input: this._ui_id, event: 'input', value: this.value}
+	read_input_sel(t, this)
+	// skip the selectionchange that applying a frame's selection fires.
+	// an input event always changed the text.
+	if (ev.type != 'input'
+			&& t.anchor == this._ui_anchor && t.caret == this._ui_caret)
+		return
+	t.n = this._ui_n = ++edit_n
+	remote_input_send(this, t)
+}
+
+// send on the outermost screen's connection; the other ids are the route.
 function remote_input_send(input, t) {
-	if (input._ui_ss_ids.length)
-		t.ss_ids = input._ui_ss_ids
-	ui.state(input._ui_ss_id, 'con').send(json(t))
-}
-
-function remote_input_keydown(ev) {
-	ev.stopPropagation()
-	process_key(ev, 'down', ev.key)
-}
-
-function remote_input_keyup(ev) {
-	ev.stopPropagation()
-	process_key(ev, 'up', ev.key)
+	let ids = input._ui_ss_ids
+	if (ids.length > 1)
+		t.ss_ids = ids.slice(1)
+	ui.state(ids[0], 'con').send(json(t))
 }
 
 ui.process_shared_screen_input = function(p, t) {
-	if (t.event == 'pointer_state') {
+	if (t.ss_ids?.length) {
+		// clicking a remote input never reaches a canvas, so focus and blur
+		// must apply to every screen on the route, not just to the input.
+		let id = t.ss_ids.shift()
+		if (t.event == 'focus') {
+			ui.focus(id)
+			animate()
+		} else if (t.event == 'blur' && ui.focused_id == id) {
+			ui.focused_id = null
+			animate()
+		}
+		ui.state(id, 'con').send(json(t))
+	} else if (t.event == 'pointer_state') {
 		assign(p, t)
 		p.activate()
 		animate()
@@ -5026,54 +5086,46 @@ ui.process_shared_screen_input = function(p, t) {
 		animate()
 	} else if (t.event == 'key') {
 		apply_key_event(p, t.key_event)
-	} else if (t.ss_ids?.length) {
-		let con = ui.state(t.ss_ids.shift(), 'con')
-		con.send(json(t))
 	} else if (t.event == 'focus') {
 		ui.focus(t.input)
 		animate()
+	} else if (t.event == 'blur') {
+		if (ui.focused_id == t.input) {
+			ui.focused_id = null
+			animate()
+		}
 	} else if (t.event == 'input') {
-		ui.state(t.input).text = t.value
+		let s = ui.state(t.input)
+		s.text = t.value
+		s.anchor = t.anchor
+		s.caret = t.caret
+		applied_edit_n = t.n
 		animate()
 	} else {
 		assert(false, 'invalid shared screen input event')
 	}
 }
 
+// a remote input is wired to send edits instead of applying them. keys need
+// no wiring: the document listeners catch them wherever they land.
 function input_create(id, input_type) {
 	let s = ui.render_state(id)
 	let input = s.input
 	if (!input) {
+		let remote = ss_ids.length > 0
 		input = document.createElement('input')
 		input._ui_id = id
+		input._ui_n = 0
+		if (remote)
+			input._ui_ss_ids = [...ss_ids]
 		if (input_type)
 			input.setAttribute('type', input_type)
 		input.classList.add('ui-input')
-		input.addEventListener('focus'  , input_focus)
-		input.addEventListener('blur'   , input_blur)
-		input.addEventListener('input'  , input_input)
-		screen.appendChild(input)
-		s.input = input
-		s.free = input_free
-	}
-	return input
-}
-
-function remote_input_create(id, input_type) {
-	let s = ui.render_state(id)
-	let input = s.input
-	if (!input) {
-		input = document.createElement('input')
-		input._ui_id = id
-		input._ui_ss_id = ss_ids[0]
-		input._ui_ss_ids = ss_ids.slice(1)
-		if (input_type)
-			input.setAttribute('type', input_type)
-		input.classList.add('ui-input')
-		input.addEventListener('focus'  , remote_input_focus)
-		input.addEventListener('input'  , remote_input_input)
-		input.addEventListener('keydown', remote_input_keydown)
-		input.addEventListener('keyup'  , remote_input_keyup)
+		let edit = remote ? remote_input_edit : input_edit
+		input.addEventListener('focus', remote ? remote_input_focus : input_focus)
+		input.addEventListener('blur' , remote ? remote_input_blur  : input_blur )
+		input.addEventListener('input', edit)
+		input.addEventListener('selectionchange', edit)
 		screen.appendChild(input)
 		s.input = input
 		s.free = input_free
@@ -5097,34 +5149,36 @@ draw[CMD_TEXT] = function(a, i) {
 	let wrap     = flags & TEXT_WRAP
 	let editable = flags & TEXT_EDITABLE
 	let focused  = flags & TEXT_FOCUSED
+	let by_key   = flags & TEXT_FOCUSED_BY_KEY
 	if (ss_ids.length)
 		focused = focused && ss_focused
 
 	let col = ui.fg_color(color, color_state)
 
 	if (editable) {
-		let input = ss_ids.length
-			? remote_input_create(id, input_type)
-			: input_create(id, input_type)
+		let input = input_create(id, input_type)
 
 		let css_x = x  / dpr
 		let css_y = y  / dpr
 		let css_w = sw / dpr
 		let css_font_size = font_size / dpr
 		let opacity = focused ? 1 : 0
-		if (ss_ids.length) {
-			// Let the canvas receive the first click so hit-testing can focus
-			// every shared screen between this input and its model.
-			let pointer_events = focused ? 'auto' : 'none'
-			if (input._ui_pointer_events != pointer_events) {
-				input.style.pointerEvents = pointer_events
-				input._ui_pointer_events = pointer_events
+		// the frame is a round trip behind what was typed here, so take its
+		// text only once it echoes back the last edit sent. a local input
+		// never sends, so _ui_n stays 0 and the frame always wins.
+		if (document.activeElement != input
+				|| (ss_frame?.n ?? 0) >= input._ui_n) {
+			if (input.value != s)
+				input.value = s
+			let anchor = ss_frame?.anchor
+			let caret  = ss_frame?.caret
+			if (focused && anchor != null
+					&& (anchor != input._ui_anchor || caret != input._ui_caret)) {
+				input.setSelectionRange(min(anchor, caret), max(anchor, caret),
+					anchor > caret ? 'backward' : 'forward')
+				input._ui_anchor = anchor
+				input._ui_caret = caret
 			}
-		}
-
-		if (input._ui_val != s) {
-			input.value = s
-			input._ui_val = s
 		}
 		if (input._ui_font != font
 				|| input._ui_font_weight != font_weight
@@ -5153,6 +5207,7 @@ draw[CMD_TEXT] = function(a, i) {
 
 		if (focused) {
 			drawn_focused_input = input
+			drawn_focused_by_key = by_key
 			if (input._ui_color != col) {
 				input.style.color = col
 				input._ui_color = col
@@ -5344,10 +5399,8 @@ let SS_FOCUSED = 1
 
 let ss = {}
 
-function ss_send_pointer(con, mx, my) {
-	let p = con.pointer
-	if (!p)
-		return
+function ss_send_pointer(s, mx, my) {
+	let p = s.sent_pointer
 	let inside   = mx != null
 	let pressed  = inside && ui.pressed
 	let click    = inside && ui.click
@@ -5374,11 +5427,11 @@ function ss_send_pointer(con, mx, my) {
 	p.dblclick = dblclick
 	p.wheel_dy = wheel_dy
 	p.trackpad = trackpad
-	con.send(json(p))
+	s.con.send(json(p))
 }
 
 function ss_free(s) {
-	ss_send_pointer(s.con, null, null)
+	ss_send_pointer(s, null, null)
 	if (s.sent_keys?.size)
 		s.con.send(json({event: 'key_state', keys: []}))
 }
@@ -5395,12 +5448,13 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 			ss_free(s)
 		s.con = answer_con
 		s.sent_keys = null
+		// sent as-is, so it carries the event tag along with the state.
+		s.sent_pointer = {event: 'pointer_state'}
 		s.free = ss_free
 		answer_con.recv = async function(cb) {
 			answer_con.frame = await unpack_frame(cb)
 			ui.animate()
 		}
-		answer_con.pointer = {event: 'pointer_state'}
 	}
 
 	let hs = captured(id) || hit(id)
@@ -5420,7 +5474,7 @@ ss.create = function(cmd, id, answer_con, fr, align, valign, min_w, min_h) {
 	}
 	let mx = answer_con.frame && hs && ui.mx != null ? ui.mx - hs.x : null
 	let my = answer_con.frame && hs && ui.my != null ? ui.my - hs.y : null
-	ss_send_pointer(answer_con, mx, my)
+	ss_send_pointer(s, mx, my)
 
 	return ui_cmd_box(cmd, fr, align, valign, min_w, min_h,
 		id,
@@ -5462,20 +5516,43 @@ ss.hit = function(a, i) {
 
 // Recorded on remote DOM inputs for routing through nested shared screens.
 let ss_ids = []
+// The frame being drawn, null for this machine's own; see draw[CMD_TEXT].
+let ss_frame
+// Ids of the machines whose frames are being drawn, this one's first.
+// A repeat means a cycle.
+let ss_screen_ids = [screen_id]
 // A remote input is active only if every shared screen containing it is focused.
-let ss_focused
+let ss_focused = true
 ss.draw = function(a, i) {
+	let t = a[i+SS_FRAME]
+	if (!t) return
 	let id = a[i+SS_ID]
-	if (ss_ids[ss_ids.length-1] == id)
+	if (ss_screen_ids.includes(t.id)) {
+		let err = 'shared screen cycle'
+		let m = measure_text(cx, err)
+		let asc = m.actualBoundingBoxAscent
+		let dsc = m.actualBoundingBoxDescent
+		cx.fillStyle = fg_color('button-danger')
+		cx.textAlign = 'center'
+		cx.fillText(err, a[i+0] + a[i+2] / 2, a[i+1] + (a[i+3] + asc - dsc) / 2)
 		return
-	let frame = a[i+SS_FRAME]
-	if (!frame) return
+	}
 	let x = a[i+0]
 	let y = a[i+1]
+	let w = a[i+2]
+	let h = a[i+3]
 	let ss_focused0 = ss_focused
+	let ss_frame0 = ss_frame
 	ss_ids.push(id)
-	ss_focused = (ss_focused0 ?? true) && (a[i+SS_STATE] & SS_FOCUSED)
+	ss_screen_ids.push(t.id)
+	ss_frame = t
+	ss_focused = ss_focused0 && (a[i+SS_STATE] & SS_FOCUSED)
+	// the frame can be bigger than the box the layout gave us, and only what's
+	// inside the box is hit-tested by ss.hit.
 	cx.save()
+	cx.beginPath()
+	cx.rect(x, y, w, h)
+	cx.clip()
 	cx.translate(x, y)
 	let s = ui.render_state(id)
 	if (!s.render_state_map) {
@@ -5486,10 +5563,12 @@ ss.draw = function(a, i) {
 					s1.free(s1, id)
 		}
 	}
-	draw_frame(frame.recs, frame.layers, s.render_state_map)
+	draw_frame(t.recs, t.layers, s.render_state_map)
+	draw_pointer(t, 0, 0)
 	cx.restore()
-	draw_pointer(frame, x, y)
 	ss_ids.pop()
+	ss_screen_ids.pop()
+	ss_frame = ss_frame0
 	ss_focused = ss_focused0
 
 }

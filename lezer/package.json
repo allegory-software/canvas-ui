@@ -1,6 +1,5 @@
 {
 	"devDependencies": {
-		"@codemirror/state": "^6.7.1",
 		"@lezer/common": "^1.5.2",
 		"@lezer/cpp": "^1.1.6",
 		"@lezer/css": "^1.3.6",

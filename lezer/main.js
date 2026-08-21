@@ -5,7 +5,6 @@ import {
 	styleTags,
 	tags,
 } from "@lezer/highlight";
-import {Text} from "@codemirror/state";
 import {parser as htmlParser} from "@lezer/html";
 import {parser as jsParser} from "@lezer/javascript";
 import {parser as cssParser} from "@lezer/css";
@@ -36,6 +35,5 @@ window.Lezer = {
 	TreeFragment,
 	classHighlighter,
 	highlightTree,
-	Text,
 	parsers,
 };
