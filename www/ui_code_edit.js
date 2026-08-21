@@ -1601,13 +1601,13 @@ function code_edit_view(id, opt) {
 										find_scan()
 									}
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_prev', 'fas', '\uf062', 0))
+									if (ui.bare_icon_button(id+'.find_prev', 'arrow-up', null, 0))
 										goto_match(-1)
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_next', 'fas', '\uf063', 0))
+									if (ui.bare_icon_button(id+'.find_next', 'arrow-down', null, 0))
 										goto_match(1)
 									ui.nofocus()
-									if (ui.bare_icon_button(id+'.find_close', 'fas', '\uf00d', 0)) {
+									if (ui.bare_icon_button(id+'.find_close', 'close', null, 0)) {
 										close_find()
 										ui.focus(id)
 										ui.relayout()

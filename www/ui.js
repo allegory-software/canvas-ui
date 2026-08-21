@@ -144,7 +144,9 @@ FOCUS STATE
 	capture_tab     (id, [back])            widget gets tab (shift-tab if back)
 	focus_group     ([trap], [order], [id]) begin a tab order group
 	end_focus_group ()                      end a tab order group
+	default_button  (id)                    enter in the group's inputs hits it
 	focus_inside    (group_id) -> t|f       focus is inside this focus group
+	focus_first     (group_id)              focus first widget unless focus is inside
 	tab_into        (id)                    next tab enters this focus group
 	window_focusing   = t                   window is focusing this frame
 	window_unfocusing = t                   window is unfocusing this frame
@@ -265,7 +267,10 @@ BORDER & BACKGROUND
 TEXT
 
 	color           (color, color_state)
-	font            (font)
+	font            (font|alias)
+	font_alias      (alias, font)
+	icon_alias      (name, font, codepoint|ligature)
+	icon            (name, fr, align, valign, max_w, w, h)
 	fs | font_size  (size)
 	font_weight     (weight)
 	bold            ()
@@ -2079,18 +2084,18 @@ function hit_frame(recs, layers) {
 
 // tab focusing --------------------------------------------------------------
 
-let FOCUSABLE_SLOTS = 4
+let FOCUSABLE_SLOTS = 5
 let FOCUSABLE_ID    = 0
 let FOCUSABLE_ORDER = 1
-let FOCUSABLE_END   = 2
-let FOCUSABLE_TRAP  = 3
+let FOCUSABLE_END   = 2 // groups only
+let FOCUSABLE_TRAP  = 3 // groups only
+let FOCUSABLE_DEFB  = 4 // groups only: default button id
 
 let focusables = []
 ui.focusables = focusables
 
 let open_focus_groups = []
 let focus_group_map = map() // {focus_group_id->focusables_i}
-
 let FOCUSABLE       = cmd('focusable')
 let FOCUS_GROUP     = cmd('focus_group')
 let END_FOCUS_GROUP = cmd('end_focus_group')
@@ -2125,7 +2130,7 @@ ui.end_focus_group = function() {
 // must happen on register phase because that's when secondary recordings
 // are already in the layout in the right order.
 register[FOCUSABLE] = function(a, i) {
-	focusables.push(a[i], a[i+1], 0, 0)
+	focusables.push(a[i], a[i+1], 0, 0, null)
 }
 
 register[FOCUS_GROUP] = function(a, i) {
@@ -2134,7 +2139,7 @@ register[FOCUS_GROUP] = function(a, i) {
 	let id = a[i+2]
 	if (id != null)
 		focus_group_map.set(id, g)
-	focusables.push(null, a[i], 0, a[i+1])
+	focusables.push(null, a[i], 0, a[i+1], null)
 }
 
 register[END_FOCUS_GROUP] = function() {
@@ -2226,6 +2231,55 @@ function next_focusable_after(g, k0, back) {
 		k0 = k
 	}
 }
+
+// focusables are from the last frame, so this lands one frame after the
+// group first shows up.
+ui.focus_first = function(group_id) {
+	if (ui.focus_inside(group_id))
+		return
+	let g = focus_group_map.get(group_id)
+	if (g == null)
+		return
+	let k = first_focusable_in(g)
+	if (k == null)
+		return
+	ui.focus(focusables[k+FOCUSABLE_ID])
+}
+
+// default button ------------------------------------------------------------
+
+// enter in a single-line input clicks its focus group's default button.
+// only ui.input() marks itself single-line, so a multi-line editable text
+// keeps enter for itself.
+
+let DEFAULT_BUTTON = cmd('default_button')
+
+ui.default_button = function(id) {
+	ui_cmd(DEFAULT_BUTTON, id)
+}
+
+register[DEFAULT_BUTTON] = function(a, i) {
+	let g = open_focus_groups.at(-1)
+	assert(g != null, 'default_button outside a focus group')
+	focusables[g+FOCUSABLE_DEFB] = a[i]
+}
+
+// called by ui.button_state()
+function submit_clicked(id) {
+	if (!ui.keydown('enter'))
+		return
+	if (!ui.state(ui.focused_id, 'single_line_input'))
+		return
+	let k = focus_find(ui.focused_id)
+	if (k == null)
+		return
+	let g = focus_group_of(k)
+	if (g == null)
+		return
+	return focusables[g+FOCUSABLE_DEFB] == id
+}
+
+// tab capture ----------------------------------------------------------------
 
 ui.capture_tab = function(id, back) {
 	ui.state(id)[back ? 'capture_shift_tab' : 'capture_tab'] = true
@@ -3816,7 +3870,7 @@ position[CMD_POPUP] = function(a, i, axis, sx, sw) {
 	if (target_i) target_i += i // make absolute
 	if (side && align == POPUP_ALIGN_STRETCH) {
 		if (!target_i) {
-			a[i+2+axis] = (axis ? screen_h : screen_w) - 2*screen_margin
+			a[i+2+axis] = axis ? screen_h : screen_w
 		} else {
 			// stretch to the target's border rect, which is the rect that
 			// the popup is placed against in the translate phase.
@@ -3850,11 +3904,10 @@ function get_popup_target_rect(a, i) {
 
 	if (!ct_i) {
 
-		let d = screen_margin
-		tx1 = d
-		ty1 = d
-		tx2 = screen_w - d
-		ty2 = screen_h - d
+		tx1 = 0
+		ty1 = 0
+		tx2 = screen_w
+		ty2 = screen_h
 
 	} else {
 
@@ -4496,9 +4549,33 @@ function end_font(ended_scope) {
 	ui_cmd(CMD_FONT, s)
 	font = s
 }
+// ui.font() looks this up first; a name that's not in here is used as-is.
+let font_aliases = obj()
+
+ui.font_alias = function(alias, font) {
+	font_aliases[alias] = font
+}
+
 ui.font = function(s) {
+	s = font_aliases[s] ?? s
 	if (font == s) return
 	force_font(s)
+}
+
+// text is a codepoint, or the icon's name for a font that ligates names:
+// material icons ligates, tabler and font awesome don't.
+let icons = obj() // {name -> [font, text]}
+
+ui.icon_alias = function(name, font, text) {
+	icons[name] = [font, text]
+}
+
+ui.icon = function(name, fr, align, valign, max_w, w, h) {
+	let [font, text] = assert(icons[name], 'unknown icon ', name)
+	ui.scope()
+	ui.font(font)
+	ui.text('', text, fr, align, valign, max_w, w, h)
+	ui.end_scope()
 }
 
 ui.xsmall  = function() { ui.font_size(.72   ) }
@@ -5892,6 +5969,10 @@ ui.button_stack = function(id, fr, align, valign, min_w, min_h) {
 ui.button_state = function(id) {
 	let cs = ui.capture(id)
 	let hs = hit(id) || (cs && hovers(id))
+	if (ui.focused(id) && (ui.keydown('enter') || ui.keydown(' ')))
+		return 'click'
+	if (submit_clicked(id))
+		return 'click'
 	return cs && hs ? ui.clickup ? 'click' : 'active'
 		: hs ? 'hover' : ui.focused(id) ? 'focused' : null
 }
@@ -5934,21 +6015,30 @@ ui.end_button_stack = function(state) {
 	return state == 'click'
 }
 
+// s is the label, or null for an icon-only button.
 ui.icon_button = function(
-	id, font, icon, fr, align, valign, min_w, min_h, style
+	id, icon, s, fr, align, valign, min_w, min_h, style
 ) {
 	min_w ??= ui.em(1.5) // force w
 	min_h ??= ui.em(1.5) // force h
 	ui.button_stack(id, fr, align, valign, min_w, min_h)
 	let state = ui.button_state(id)
 	ui.button_bb(style, state)
-	ui.button_icon(font, icon, state)
+	let [icon_font, icon_text] = assert(icons[icon], 'unknown icon ', icon)
+	if (s == null) {
+		ui.button_icon(icon_font, icon_text, state)
+	} else {
+		ui.h(0, 0, 'c', 'c')
+			ui.button_icon(icon_font, icon_text, state)
+			ui.button_text(s, state)
+		ui.end_h()
+	}
 	let clicked = ui.end_button_stack(state)
 	return clicked
 }
 
-ui.bare_icon_button = function(id, font, icon, fr, align, valign, min_w, min_h) {
-	return ui.icon_button(id, font, icon, fr, align, valign, min_w, min_h, '')
+ui.bare_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h) {
+	return ui.icon_button(id, icon, s, fr, align, valign, min_w, min_h, '')
 }
 
 ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
@@ -6102,6 +6192,7 @@ ui.input = function(id, s, fr, w, h) {
 		ui.p(ui.sp())
 		s = ui.text(id, s, 1, 'l', 'c', null, w ?? ui.em(12), h, null, true)
 	ui.end_stack()
+	ui.state(id).single_line_input = true
 	return s
 }
 
@@ -6327,7 +6418,7 @@ ui.tabs = function(id, all_tabs, selected_tab, tab_order, hidden_tabs) {
 		}
 	}
 	if (!mover) {
-		if (ui.bare_icon_button(id+'.plus', 'fas', '+', false)) {
+		if (ui.bare_icon_button(id+'.plus', 'plus', null, false)) {
 			all_tabs.push({id: 'newtab'+all_tabs.length, label: 'New Tab '+all_tabs.length})
 			tabs = visible_element_list(all_tabs, 'id', 'index', tab_order, hidden_tabs)
 			s.tabs = tabs
@@ -8060,8 +8151,8 @@ ui.color_picker = function(id, hue, sat, lum) {
 // background animation with randomly connected dots.
 
 {
-let dot_density = 2 // per 100px^2 surface
-let max_distance = 160 // between two dots
+let dot_density = 1 // per 100px^2 surface
+let max_distance = 320 // between two dots
 
 function point_distance(p1, p2) {
 	let dx = abs(p1.x - p2.x)
@@ -8132,9 +8223,9 @@ ui.widget('bg_dots', {
 		cx.rect(0, 0, w, h)
 		cx.clip()
 
+		cx.fillStyle = hsl_adjust(fg_color_hsl('label'), 1, 1, 0.5, 1)
 		for (let t of dots) {
 			if (t != dots.mouse_dot) {
-				cx.fillStyle = fg_color('label')
 				cx.beginPath()
 				cx.arc(t.x, t.y, 2, 0, Math.PI*2, true)
 				cx.closePath()
@@ -8142,23 +8233,24 @@ ui.widget('bg_dots', {
 			}
 		}
 
+		let c = fg_color_hsl('label')
+		cx.lineWidth = 0.8
 		for (let i = 0; i < dots.length; i++) {
 			for (let j = i+1; j < dots.length; j++) {
 				let t1 = dots[i]
 				let t2 = dots[j]
 				let dp = point_distance(t1, t2) / max_distance
 				if (dp < 1) {
-					let alpha = 1 - dp
-					cx.strokeStyle = hsl_adjust(fg_color_hsl('label'), 1, 1, 1, alpha)
-					cx.lineWidth = 0.8
+					let alpha = (1 - dp) / 2
+					cx.strokeStyle = hsl_adjust(c, 1, 1, 0.5, alpha)
 					cx.beginPath()
 					cx.moveTo(t1.x, t1.y)
 					cx.lineTo(t2.x, t2.y)
 					cx.stroke()
-					cx.lineWidth = 1
 				}
 			}
 		}
+		cx.lineWidth = 1
 
 		if (speed)
 			for (let t of dots) {
