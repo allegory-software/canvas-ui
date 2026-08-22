@@ -270,7 +270,7 @@ TEXT
 	font            (font|alias)
 	font_alias      (alias, font)
 	icon_alias      (name, font, codepoint|ligature)
-	icon            (name, fr, align, valign, max_w, w, h)
+	icon            (id, name, fr, align, valign, max_w, w, h)
 	fs | font_size  (size)
 	font_weight     (weight)
 	bold            ()
@@ -294,6 +294,7 @@ TEXT
 INPUT
 
 	button          (id, s, fr, align, valign, min_w, min_h, style)
+	icon_button     (id, icon, [s], fr, align, valign, min_w, min_h, style)
 	input           (id, s, fr, min_w, min_h)
 	label           (for_id, s, fr, align, valign)
 	radio_label     (for_id, for_group_id, s, fr, align, valign)
@@ -4570,13 +4571,26 @@ ui.icon_alias = function(name, font, text) {
 	icons[name] = [font, text]
 }
 
-ui.icon = function(name, fr, align, valign, max_w, w, h) {
+ui.icon = function(id, name, fr, align, valign, max_w, w, h) {
 	let [font, text] = assert(icons[name], 'unknown icon ', name)
 	ui.scope()
 	ui.font(font)
-	ui.text('', text, fr, align, valign, max_w, w, h)
+	ui.text(id, text, fr, align, valign, max_w, w, h)
 	ui.end_scope()
 }
+
+/* default font & icon aliases -----------------------------------------------
+
+Widgets never name a font or a codepoint directly, they go through these.
+Load a different icon font and redefine `icon` and the names below to keep
+every widget working.
+
+*/
+
+ui.font_alias('icon', 'fas')
+
+ui.icon_alias('plus'       , 'icon', '\uf067')
+ui.icon_alias('caret_right', 'icon', '\uf0da')
 
 ui.xsmall  = function() { ui.font_size(.72   ) }
 ui.small   = function() { ui.font_size(.8125 ) }
@@ -5996,18 +6010,17 @@ ui.button_text = function(s, state, w, h) {
 	h ??= ui.em(2.2) // force h
 	ui.bold()
 	ui.color('text', state)
-	ui.p(ui.sp2(), 0)
 	ui.text('', s, 0, 'c', 'c', null, w, h)
 }
 
 ui.button_icon = function(font, icon, state, w, h) {
 	state = repl(state, 'click', 'hover')
-	w ??= ui.em(2.3)
-	h ??= ui.em(2.2) // force h
-	ui.font(font)
-	ui.font_size(1)
-	ui.color('text', state)
-	ui.text('', icon, 0, 'c', 'c', w, w, h)
+	ui.scope()
+		ui.font(font)
+		ui.font_size(1.5)
+		ui.color('text', state)
+		ui.text('', icon)
+	ui.end_scope()
 }
 
 ui.end_button_stack = function(state) {
@@ -6028,7 +6041,8 @@ ui.icon_button = function(
 	if (s == null) {
 		ui.button_icon(icon_font, icon_text, state)
 	} else {
-		ui.h(0, 0, 'c', 'c')
+		ui.p(ui.sp1(), 0)
+		ui.h(0, ui.sp1(), 'c')
 			ui.button_icon(icon_font, icon_text, state)
 			ui.button_text(s, state)
 		ui.end_h()
@@ -6045,12 +6059,16 @@ ui.button = function(id, s, fr, align, valign, min_w, min_h, style) {
 	ui.button_stack(id, fr, align ?? 'l', valign ?? 'c', min_w, min_h)
 	let state = ui.button_state(id)
 	ui.button_bb(style, state)
+	ui.p(ui.sp2(), 0)
 	ui.button_text(s, state)
 	return ui.end_button_stack(state)
 }
 
-ui.button_primary = function(id, s, fr, align, valign, min_w, min_h) {
+ui.primary_button = function(id, s, fr, align, valign, min_w, min_h) {
 	return ui.button(id, s, fr, align, valign, min_w, min_h, 'button-primary')
+}
+ui.primary_icon_button = function(id, icon, s, fr, align, valign, min_w, min_h) {
+	return ui.icon_button(id, icon, s, fr, align, valign, min_w, min_h, 'button-primary')
 }
 
 ui.btn = ui.button
@@ -6477,9 +6495,8 @@ ui.menu = function(id, items, side, align) {
 						if (item.items?.length) {
 							ui.pl(ui.sp2())
 							ui.stack('', 0)
-								ui.font('fas')
 								ui.color('label')
-								ui.text('', '\uf0da')
+								ui.icon('', 'caret_right')
 							ui.end_stack()
 							if (hover || open_items[level] == item.id) {
 								ui.m(-ui.sp(), -1)

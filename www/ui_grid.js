@@ -14,6 +14,21 @@ const {
 	cx,
 } = ui
 
+/* icon aliases --------------------------------------------------------------
+
+The grid names its icons; the codepoints live here so that loading a
+different icon font only means redefining these and ui's `icon` font alias.
+
+*/
+
+ui.icon_alias('node_collapsed', 'icon', '\uf0fe')
+ui.icon_alias('node_expanded' , 'icon', '\uf146')
+ui.icon_alias('sort_asc'      , 'icon', '\uf176')
+ui.icon_alias('sort_desc'     , 'icon', '\uf175')
+ui.icon_alias('sort_none'     , 'icon', '\uf07d')
+ui.icon_alias('arrow_up'      , 'icon', '\uf062')
+ui.icon_alias('arrow_down'    , 'icon', '\uf063')
+
 ui.widget('treegrid_indent', {
 	create: function(cmd, indent, state) {
 		return ui.cmd(cmd, ui.ct_i(), indent, state)
@@ -206,14 +221,11 @@ function init(id, e) {
 			ui.color(fg)
 			if (has_children) {
 				ui.p(indent_x - sp2, 0, sp2, 0)
-				ui.scope()
-				ui.font('fas')
-				ui.text('', collapsed ? '\uf0fe' : '\uf146')
+				ui.icon('', collapsed ? 'node_collapsed' : 'node_expanded')
 				// ui.treegrid_indent(indent_x)
-				ui.end_scope()
 			}
 			ui.p(sp2 + indent_x, 0, sp2, 0)
-			e.draw_val(row, field, input_val, ui.cx, full_width)
+			e.draw_val(row, field, input_val, true, full_width)
 			ui.p(0)
 		ui.end_stack()
 
@@ -1162,14 +1174,14 @@ function init(id, e) {
 								let icon_id = id+'.sort_icon.'+col
 								if (field.sortable) {
 									ui.scope()
-									ui.font('fas')
-									ui.color(field.sort_dir ? 'label' : 'faint',
+									let dir = e.sort_dir(field)
+									ui.color(dir ? 'label' : 'faint',
 										(hit_zone == 'sort_icon' && hit_gcol == col) ? 'hover' : null)
-									let pri = field.sort_priority
-									ui.text(icon_id,
-										field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||
-										field.sort_dir          && (pri ? '\uf175' : '\uf175') ||
-										'\uf07d'
+									let pri = e.sort_priority(field)
+									ui.icon(icon_id,
+										dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
+										dir          && (pri ? 'sort_desc' : 'sort_desc') ||
+										'sort_none'
 									, 0)
 									ui.end_scope()
 								}
@@ -1207,32 +1219,33 @@ function init(id, e) {
 							- 2 * sp2
 							- (field.sortable ? 2 * sp2 : 0)
 					)
-					let pri = field.sort_priority
+					let dir = e.sort_dir(field)
+					let pri = e.sort_priority(field)
+					let align = e.field_align(field)
 
-					if (field.align != 'right')
-						ui.text('', field.label, 1, field.align, 'c', max_min_w)
+					if (align != 'right')
+						ui.text('', field.label, 1, align, 'c', max_min_w)
 
 					let icon_id = id+'.sort_icon.'+field.name
 
 					if (field.sortable) {
 						ui.scope()
 
-						ui.font('fas')
 						if (!col_group)
-							ui.color(field.sort_dir ? 'label' : 'faint',
+							ui.color(dir ? 'label' : 'faint',
 								(hit_zone == 'sort_icon' && hit_fi == field.index) ? 'hover' : null)
 
-						ui.text(icon_id,
-							field.sort_dir == 'asc' && (pri ? '\uf176' : '\uf176') ||
-							field.sort_dir          && (pri ? '\uf175' : '\uf175') ||
-							'\uf07d'
+						ui.icon(icon_id,
+							dir == 'asc' && (pri ? 'sort_asc'  : 'sort_asc' ) ||
+							dir          && (pri ? 'sort_desc' : 'sort_desc') ||
+							'sort_none'
 						, 0)
 
 						ui.end_scope()
 					}
 
-					if (field.align == 'right')
-						ui.text('', field.label, 1, field.align, 'c', max_min_w)
+					if (align == 'right')
+						ui.text('', field.label, 1, align, 'c', max_min_w)
 
 				ui.end_h()
 			}
@@ -1266,15 +1279,13 @@ function init(id, e) {
 							ui.popup('', 'overlay', null, 't', 'c')
 								ui.scope()
 								ui.color('marker')
-								ui.font('fas')
-								ui.text('', '\uf063') // arrow-down
+								ui.icon('', 'arrow_down')
 								ui.end_scope()
 							ui.end_popup()
 							ui.popup('', 'overlay', null, 'b', 'c')
 								ui.scope()
 								ui.color('marker')
-								ui.font('fas')
-								ui.text('', '\uf062') // arrow-up
+								ui.icon('', 'arrow_up')
 								ui.end_scope()
 							ui.end_popup()
 						ui.end_stack()
