@@ -269,7 +269,7 @@ TEXT
 	color           (color, color_state)
 	font            (font|alias)
 	font_alias      (alias, font)
-	icon_alias      (name, font, codepoint|ligature)
+	icon_def        (name, font, codepoint|ligature)
 	icon            (id, name, fr, align, valign, max_w, w, h)
 	fs | font_size  (size)
 	font_weight     (weight)
@@ -575,14 +575,21 @@ let theme
 ui.get_theme = () => theme
 ui.dark = () => theme.is_dark
 
+// default color to fall back to when a name isn't found in the theme, per
+// kind, so a missing/misspelled color name doesn't crash the whole frame.
+let default_color_name = {fg: 'text', bg: 'bg', border: 'light'}
+
 function lookup_color_hsl_func(k) {
+	let default_name = default_color_name[k]
 	return function(name, state, theme1) {
 		let state_i = parse_state(state)
 		theme1 = theme1 ? themes[theme1] : theme
 		let c = theme1[k][state_i][name] ?? theme1[k][0][name]
-		if (!c)
-			assert(false, 'no ', k, ' for (', name, ', ',
+		if (!c) {
+			warn('no ', k, ' for (', name, ', ',
 				repl(state, 0, 'normal'), ', ', theme1.name, ')')
+			c = theme1[k][0][default_name]
+		}
 		return c
 	}
 }
@@ -4567,7 +4574,7 @@ ui.font = function(s) {
 // material icons ligates, tabler and font awesome don't.
 let icons = obj() // {name -> [font, text]}
 
-ui.icon_alias = function(name, font, text) {
+ui.icon_def = function(name, font, text) {
 	icons[name] = [font, text]
 }
 
@@ -4582,15 +4589,15 @@ ui.icon = function(id, name, fr, align, valign, max_w, w, h) {
 /* default font & icon aliases -----------------------------------------------
 
 Widgets never name a font or a codepoint directly, they go through these.
-Load a different icon font and redefine `icon` and the names below to keep
-every widget working.
+Loading a different icon font means redefining the names below (each one
+names its own font, not the `icon` alias, so they don't follow it).
 
 */
 
-ui.font_alias('icon', 'fas')
+ui.font_alias('icon', 'tabler')
 
-ui.icon_alias('plus'       , 'icon', '\uf067')
-ui.icon_alias('caret_right', 'icon', '\uf0da')
+ui.icon_def('plus'       , 'tabler', '\ueb0b')
+ui.icon_def('caret_right', 'tabler', '\ueb5f')
 
 ui.xsmall  = function() { ui.font_size(.72   ) }
 ui.small   = function() { ui.font_size(.8125 ) }
@@ -7617,7 +7624,7 @@ ui.calendar = function(id, ranges, fr, align, valign, min_w, min_h) {
 			if (focused_range) {
 				if (!e.can_remove_range(focused_range))
 					return
-				ranges.remove_value(focused_range)
+				remove_value(ranges, focused_range)
 				focused_range = null
 				ranges_changed(ev)
 				sort_ranges()

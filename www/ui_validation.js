@@ -44,7 +44,7 @@ const {
 	wordset,
 	empty_array,
 	return_true,
-	words,
+	words, uniq_sorted, try_json_arg,
 	assign,
 	announce,
 	S,
@@ -528,8 +528,8 @@ add_validation_rule({
 	vprops   : 'input_value',
 	applies  : (e) => e.is_values,
 	parse    : (e, v) => {
-		v = isstr(v) ? (v.trim().starts('[') ? try_json_arg(v) : v.words()) : v
-		return v.sort().uniq_sorted()
+		v = isstr(v) ? (v.trim().startsWith('[') ? try_json_arg(v) : words(v)) : v
+		return uniq_sorted(v.sort())
 	},
 	validate : return_true,
 	error    : (e, v) => S('validation_values_error',

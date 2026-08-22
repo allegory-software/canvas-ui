@@ -19,8 +19,9 @@ the <body> element prevents the body from rendering white for a split second
 -->
 <script>
 
-ui.load_font('far'   , 'icons/fa-regular-400.woff2')
-ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
+ui.load_font('tabler', 'icons/tabler-icons.woff2')
+//ui.load_font('far'   , 'icons/fa-regular-400.woff2')
+//ui.load_font('fas'   , 'icons/fa-solid-900.woff2')
 //ui.load_font('fab'   , 'icons/fa-brands-400.woff2')
 //ui.load_font('lar'   , 'icons/la-regular-400.woff2')
 //ui.load_font('las'   , 'icons/la-solid-900.woff2')
@@ -317,6 +318,50 @@ ui.stack()
 		//enter_edit_on_click_focused: false,
 		//can_change_parent: false,
 	})
+ui.end_stack()
+`
+}
+
+{
+let fields = [
+	{name: 'id'       , w:  40, type: 'number', align: 'right', editable: false},
+	{name: 'num'      , w:  90, type: 'number', decimals: 2},
+	{name: 'size'     , w:  90, type: 'filesize', filesize_decimals: 1, filesize_min: 1024},
+	{name: 'count'    , w:  70, type: 'count'},
+	{name: 'date'     , w: 100, type: 'date'},
+	{name: 'datetime' , w: 140, type: 'datetime'},
+	{name: 'time'     , w: 100, type: 'time'},
+	{name: 'timeofday', w:  90, type: 'timeofday', precision: 's'},
+	{name: 'dur'      , w:  90, type: 'duration'},
+	{name: 'active'   , w:  50, type: 'bool'},
+	{name: 'status'   , w:  90, type: 'enum', enum_texts: {open: 'Open', closed: 'Closed', pending: 'Pending'}},
+	{name: 'tags'     , w: 130, type: 'tags'},
+	{name: 'color'    , w:  60, type: 'color'},
+	{name: 'progress' , w: 120, type: 'percent', decimals: 0},
+	{name: 'icon'     , w:  50, type: 'icon'},
+	{name: 'place'    , w: 220, type: 'place'},
+	{name: 'url'      , w: 160, type: 'url'},
+	{name: 'phone'    , w: 120, type: 'phone'},
+	{name: 'email'    , w: 170, type: 'email'},
+	{name: 'secret'   , w: 140, type: 'secret_key'},
+	{name: 'action'   , w:  90, type: 'button'},
+]
+let rows = [
+	[1, 1234.5  , 800        ,   1234, time(2024,1,15), time(2024,1,15,9,30), time(2031,6,1)     , 8*3600+30*60 , 3725  , true , 'open'   , ['red', 'urgent'], '#e03131'                , 0.25, 'plus'        , {place_id: 'p1', description: '1600 Amphitheatre Pkwy'}, 'https://example.com', '+1 555 0100', 'a@example.com', 'sk_live_abc123' , null],
+	[2, 42      , 5_000_000  ,  98765, time(2024,6,1) , time(2024,6,1,14,0) , time(2032,1,1)     , 13*3600+15*60, 90000 , false, 'pending', ['blue']         , 'seagreen'               , 0.6 , 'check'       , 'Just a description, no pin'                             , 'example.org'        , '555-0101'   , 'b@example.org', 'sk_live_def456' , null],
+	[3, 0       , 3_200_000_000, 2000000, time(2024,12,31), time(2024,12,31,23,59), time(2037,12,31), 0            , 0     , true , 'closed' , ['green', 'a', 'b'], 'rgb(30,144,255)'      , 1   , 'arrow_up'    , {place_id: 'p3', description: 'No pin greyed out below'}, 'http://sub.example.com/path', '555-0102', 'c@example.com', 'sk_live_ghi789' , null],
+	[4, -12.75  , 60         ,      7, time(2000,1,1) , time(2000,1,1,0,1)  , time(1970,1,2)     , 23*3600+59*60 , 61   , false, 'open'   , []               , '#111111'                , 0   , 'caret_right' , {description: 'Object without a place_id'}               , 'ftp://files.example.com', '555-0103', 'd@example.com', 'sk_live_jkl012' , null],
+	[5, null    , null       ,   null, null           , null                , null               , null          , null , null , null     , null             , null                     , null, null          , null                                                       , null                 , null         , null           , null             , null],
+]
+grid_fields_rowset = {
+	fields: fields,
+	rows: rows,
+	pk: 'id',
+}
+demos.grid_fields = `
+ui.m(ui.em(2))
+ui.stack()
+	ui.grid('grid_fields', {rowset: grid_fields_rowset})
 ui.end_stack()
 `
 }

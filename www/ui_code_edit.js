@@ -209,14 +209,14 @@ ui.widget('code_edit_sidebar', {
 				line+1, x,
 				y0 + (line + 1) * line_h - font_descent - 1)
 
-		cx.font = font_size+'px fas'
+		cx.font = font_size+'px tabler'
 		cx.textAlign = 'center'
 		cx.fillStyle = ui.fg_color('marker')
 
 		let bx = x0 + margin_l / 2
 		for (let line of bookmarks)
 			if (line >= vline1 && line <= vline2)
-				cx.fillText('\uf02e', bx,
+				cx.fillText('\uea3a', bx,
 					y0 + (line + 1) * line_h - font_descent - 1)
 
 		cx.restore()

@@ -7,7 +7,7 @@ const ui = G.ui
 const {
 	pr,
 	isobject,
-	round, min, max, floor,
+	round, min, max, floor, ceil,
 } = glue
 
 const {
@@ -17,17 +17,17 @@ const {
 /* icon aliases --------------------------------------------------------------
 
 The grid names its icons; the codepoints live here so that loading a
-different icon font only means redefining these and ui's `icon` font alias.
+different icon font only means redefining these.
 
 */
 
-ui.icon_alias('node_collapsed', 'icon', '\uf0fe')
-ui.icon_alias('node_expanded' , 'icon', '\uf146')
-ui.icon_alias('sort_asc'      , 'icon', '\uf176')
-ui.icon_alias('sort_desc'     , 'icon', '\uf175')
-ui.icon_alias('sort_none'     , 'icon', '\uf07d')
-ui.icon_alias('arrow_up'      , 'icon', '\uf062')
-ui.icon_alias('arrow_down'    , 'icon', '\uf063')
+ui.icon_def('node_collapsed', 'tabler', '\ueb2a')
+ui.icon_def('node_expanded' , 'tabler', '\ueb29')
+ui.icon_def('sort_asc'      , 'tabler', '\ueb26')
+ui.icon_def('sort_desc'     , 'tabler', '\ueb27')
+ui.icon_def('sort_none'     , 'tabler', '\ueb5a')
+ui.icon_def('arrow_up'      , 'tabler', '\uea25')
+ui.icon_def('arrow_down'    , 'tabler', '\uea16')
 
 ui.widget('treegrid_indent', {
 	create: function(cmd, indent, state) {
@@ -214,9 +214,25 @@ function init(id, e) {
 
 		// drawing
 		let sp2 = ui.sp2()
+		let pad_l = sp2 + indent_x
+		let pad_r = sp2
+		let cell_x = x
+		let cell_w = w
+		// because we don't have overflow direction as a concept in the layout
+		// system (only text overflows at all and always to the right, which is
+		// only good for left align), we need to employ this hack to align the
+		// overflown cell correctly for right and center align.
+		if (full_width && field.align != 'left') {
+			let s = e.cell_text_val(row, field)
+			if (s) {
+				cell_w = max(w, ceil(ui.measure_text(cx, s).width) + pad_l + pad_r)
+				let overflow = cell_w - w
+				cell_x = x - (field.align == 'center' ? round(overflow / 2) : overflow)
+			}
+		}
 
-		ui.m(x, y, 0, 0)
-		ui.stack('', 0, 'l', 't', w, h)
+		ui.m(cell_x, y, 0, 0)
+		ui.stack('', 0, 'l', 't', cell_w, h)
 			ui.bb(bg, bgs, draw_stage == 'col_move' ? 'lrb' : 'b', 'light')
 			ui.color(fg)
 			if (has_children) {
@@ -224,7 +240,7 @@ function init(id, e) {
 				ui.icon('', collapsed ? 'node_collapsed' : 'node_expanded')
 				// ui.treegrid_indent(indent_x)
 			}
-			ui.p(sp2 + indent_x, 0, sp2, 0)
+			ui.p(pad_l, 0, pad_r, 0)
 			e.draw_val(row, field, input_val, true, full_width)
 			ui.p(0)
 		ui.end_stack()
@@ -405,7 +421,7 @@ function init(id, e) {
 		let sp  = ui.sp1()
 		let sp2 = ui.sp2()
 		font_size = ui.get_font_size()
-		line_height = font_size * 1.5
+		line_height = font_size * 1
 		cell_h = round(line_height + 2 * sp + e.cell_border_h_width)
 		header_h = cell_h
 		gcol_w = 80 // group-bar column width
