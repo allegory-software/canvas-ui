@@ -367,7 +367,7 @@ add_validation_rule({
 	props    : 'min_len',
 	vprops   : 'input_value',
 	applies  : (e) => e.min_len != null,
-	validate : (e, v) => v.len >= e.min_len,
+	validate : (e, v) => v.length >= e.min_len,
 	error    : (e, v) => S('validation_min_len_error',
 		'{0} too short', e.label),
 	rule     : (e) => S('validation_min_len_rule' ,
@@ -379,11 +379,25 @@ add_validation_rule({
 	props    : 'max_len',
 	vprops   : 'input_value',
 	applies  : (e) => e.max_len != null,
-	validate : (e, v) => v.len <= e.max_len,
+	validate : (e, v) => v.length <= e.max_len,
 	error    : (e, v) => S('validation_max_len_error',
 		'{0} is too long', e.label),
-	rule     : (e) => S('validation_min_len_rule' ,
+	rule     : (e) => S('validation_max_len_rule' ,
 		'{0} must be at most {1} characters', e.label, e.max_len),
+})
+
+let utf8_encoder = new TextEncoder()
+
+add_validation_rule({
+	name     : 'maxlen',
+	props    : 'maxlen',
+	vprops   : 'input_value',
+	applies  : (e) => e.maxlen != null,
+	validate : (e, v) => !isstr(v) || utf8_encoder.encode(v).length <= e.maxlen,
+	error    : (e, v) => S('validation_maxlen_error',
+		'{0} is too long', e.label),
+	rule     : (e) => S('validation_maxlen_rule',
+		'{0} must be at most {1} UTF-8 bytes', e.label, e.maxlen),
 })
 
 add_validation_rule({

@@ -115,9 +115,9 @@ Field attributes:
 		null_text      : plain text display value for null
 		empty_text     : plain text display value for ''
 
-		filesize_magnitude : filesize type, see kbytes()
-		filesize_decimals  : filesize type, see kbytes()
-		filesize_min       : filesize type, see kbytes()
+		magnitude          : filesize, count types: unit to pin to ('K', 'M', ...)
+		magnitude_decimals : filesize, count types: decimals at that magnitude
+		gray_min           : filesize type: below this, the value draws gray
 
 		precision      : date, datetime, time, timeofday types
 
@@ -4855,13 +4855,8 @@ add_validation_rule({
 
 // icons drawn by field types, not by any one widget, so they live here
 // rather than in the grid's own icon aliases.
-ui.icon_def('check'  , 'tabler', '')
-ui.icon_def('map_pin', 'tabler', '')
-
-ui.field_prop_attrs = {
-	label : {slot: 'lang'},
-	w     : {slot: 'user'},
-}
+ui.icon_def('check'  , 'tabler', '\uea5e')
+ui.icon_def('map_pin', 'tabler', '\ueae8')
 
 assign(all_field_types, {
 	default: null,
@@ -4949,12 +4944,12 @@ number.to_text = function(s) {
 let filesize = assign({}, number)
 field_types.filesize = filesize
 
-// small means the value displays as 0 at this field's decimals and
-// magnitude, e.g. an 800-byte value forced to display in MB.
+// small means the value displays as 0 at this field's magnitude_decimals
+// and magnitude, e.g. an 800-byte value forced to display in MB.
 filesize.is_small = function(x) {
 	if (x == null)
 		return true
-	let min = this.filesize_min
+	let min = this.gray_min
 	if (min != null)
 		return x < min
 	return num(this.to_text(x)) === 0
@@ -4964,8 +4959,8 @@ filesize.to_text = function(s) {
 	let x = num(s)
 	if (x == null)
 		return s
-	let mag = this.filesize_magnitude
-	let dec = this.filesize_decimals || 0
+	let mag = this.magnitude
+	let dec = this.magnitude_decimals || 0
 	return format_kbytes(x, dec, mag)
 }
 
@@ -4992,7 +4987,7 @@ count.to_text = function(s) {
 	if (x == null)
 		return s
 	let mag = this.magnitude
-	let dec = this.decimals || 0
+	let dec = this.magnitude_decimals || 0
 	return format_kcount(x, dec, mag)
 }
 
@@ -5039,8 +5034,6 @@ field_types.time = ts
 
 ts.has_time = true
 ts.precision = 's'
-ts.min = parse_date('1970-01-01 00:00:01', 'SQL')
-ts.max = parse_date('2038-01-19 03:14:07', 'SQL') // range of MySQL TIMESTAMP type
 
 // timeofday (MySQL TIME type) -----------------------------------------------
 
@@ -5149,7 +5142,7 @@ percent.draw = function(p, mode, row, full_width) {
 				ui.bb('bg3')
 			ui.end_stack()
 			ui.stack('', 1 - f, 's', 's')
-				ui.bb('bg2')
+				ui.bb('bg0')
 			ui.end_stack()
 		ui.end_h()
 		this.draw_text(s, mode, row, full_width)
@@ -5184,9 +5177,10 @@ place.draw = function(v, mode, row, full_width) {
 	if (!mode)
 		return descr
 	ui.color(place_id ? 'text' : 'label')
-	ui.icon('', 'map_pin', 0, this.align, 'c')
-	ui.p(round(ui.em() * 1.25), 0, 0, 0)
-	this.draw_text(descr, mode, row, full_width)
+	ui.h(0, ui.sp05())
+		ui.icon('', 'map_pin', 0, this.align, 'c')
+		this.draw_text(descr, mode, row, full_width)
+	ui.end_h()
 }
 
 // URLs ----------------------------------------------------------------------

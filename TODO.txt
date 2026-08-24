@@ -4,57 +4,106 @@ LEGEND
 - means TODO
 
 
-REFACTORINGS FROM IMTUI
-------------------------------------------------------------------------------
-box_widget box_hit -> use hit_box
-
-
-BUGS UI
+BUGS
 ------------------------------------------------------------------------------
 - text hit clip (repro: hover to the right of the first grid gcol)
-- toolbox constrain bug
-- toolbox resize bug
-
-- set_cursor() must be set in draw? hittest? where?
-- bb on text
-- bb on scrollbox?
-- negative margins?
-
-- filter out available APIs and state for each phase
-	- draw phase should not be able to access state
-- make drawing phase stateless
-	- empty context in drawing phase!
+- set_cursor() must be set in draw? hittest? does it matter?
+- box_widget box_hit -> use hit_box
 
 
-TODO GRID
+GRID
 ------------------------------------------------------------------------------
+- lookup navs
+- vertical grid
+- quicksearch
+- filter bar
+- move rows: flat/tree/group
+- move rows outside grid
+	- to other grid
+- copy-to-clipboard (csv)
+- paste csv (+assistant)
+- context menu
+- master-detail (params)
+	- local filtering
 
 
-TODO UI
+GRID EDITING
 ------------------------------------------------------------------------------
+- nav validation
+- bound input widgets
+- grid edit state colors (new, modified, deleted)
+- grid action bar
+- rowset_mdbx load/save + changed pk stream
+- nav (partial) refresh from changed pk stream
+
+
+UI API
+------------------------------------------------------------------------------
+- drag & drop between windows
+- layer trees (solves modal piercing)
 - remove scopes and automatic container scopes and replace them with
 	begin_font() end_font()
 	begin_bold() end_bold()
 	- careful with begin_rec()
 	- careful with frames
+- bb on text?
+- bb on scrollbox?
+- negative margins?
 
+
+SCREEN SHARING
 ------------------------------------------------------------------------------
+- img etag/hash check
+- drag&drop protocol in and out of shared_screen
+- test/review remote input events routing (selection & cursor)
+	- send mouse cursor to remote view (or hide cursor and show it remotely?)
+- no color lookup before drawing
+- screen sharing UI
+	- share screen with -- list active users
+	- screen share window -- move/resize/dock
 
-GOALS
 
-* drag & drop UI designer
-	- templates with conditionals, repeats and sub-templates
-		- template-based widgets
-* IMGUI with popups and layouting
-* remote screen sharing
-	* with input routing
-	* with client-side themes
+TODO WIDGETS
+------------------------------------------------------------------------------
+- calendar range / multi-range
+- tablist add/close/move + drag & drop
+- menu with custom content for item
+- graphs
+- tags-input
+- date/time/period/range/multi-range inputs
 
-IMGUI
 
+TODO IDE vs CODE
+------------------------------------------------------------------------------
+- dock + tablist + custom buttons + floating windows +
+- form builder (free positioning + anchors)
+	- property editor
+- schema builder
+- query builder
+
+
+TODO FORM BUILDER
+------------------------------------------------------------------------------
+- forms list
+- widget bar
+- widget definitions
+	- property list
+		- rowset list for lookup rowset
+		- expr values (lookup values from open navs?)
+- form
+	- move/resize
+	- add/remove/move/resize widget
+	- set anchors
+	- snap-align to elements and snap to grid
+	- embed form
+
+
+IMGUI STATUS
+------------------------------------------------------------------------------
 - drawing
 	* global z-index
 	* local z-index
+	- layer stacking tree
 	* text
 	* bg-color
 	* border
@@ -88,7 +137,7 @@ IMGUI
 	* drag & drop
 - keyboard
 	* focused state
-	- tab focusing
+	* tab focusing
 	- event bubbling
 - text selection
 	- drag-select with mouse
@@ -98,8 +147,20 @@ IMGUI
 		* redraw it on canvas with offset and selection
 		- reuse a single global input object for all inputs
 
-CHALLENGES
 
+------------------------------------------------------------------------------
+
+GOALS
+* drag & drop UI designer
+	- templates with conditionals, repeats and sub-templates
+		- template-based widgets
+* IMGUI with popups and layouting and a virtual frame
+* remote screen sharing
+	* with input routing
+	* with client-side themes
+	* with drag & drop in and out of the shared screen
+
+CHALLENGES
 * input on a canvas
 - textarea on a canvas
 * webgl2 canvas on a 2d canvas
@@ -118,12 +179,12 @@ PROS vs WEB
 - streamable and replayable rendering, for sreen-sharing and remote interaction
 - fast and memory-efficient with low gc pressure between frames.
 - complex widgets built with a combination of box-stacking and custom-drawing.
+- stateless nav.
 
 CONS vs WEB
 - must reimplement:
 	* scrollbox
 	- text selection
-	- clipboard ops
 	* word-wrapping
 	- inline layouting with:
 		- u, b, i, strike, sub, sup, h1..6, p, br, hr, float
