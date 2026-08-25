@@ -100,6 +100,7 @@ Field attributes:
 		min            : min value (0).
 		max            : max value (inf).
 		decimals       : max number of decimals (0).
+		scale          : number type: value is stored times this (1).
 
 	formatting:
 
