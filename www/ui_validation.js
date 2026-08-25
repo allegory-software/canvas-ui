@@ -245,7 +245,7 @@ add_validation_rule({
 	props    : 'not_null required',
 	vprops   : 'input_value',
 	applies  : (e) => e.not_null || e.required,
-	validate : (e, v) => v != null || e.default != null,
+	validate : (e, v) => v != null || e.has_server_default,
 	error    : (e, v) => S('validation_empty_error', '{0} is required', e.label),
 	rule     : (e) => S('validation_empty_rule'    , '{0} cannot be empty', e.label),
 })

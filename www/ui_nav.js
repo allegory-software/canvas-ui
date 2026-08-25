@@ -83,12 +83,12 @@ Field attributes:
 	editing:
 
 		client_default : default value/generator that new rows are initialized with.
-		default        : default value that the server sets for new rows.
+		has_server_default: the server fills this in, so it can be left empty.
 		readonly       : prevent editing.
 		editor         : f({nav:, col:, embedded: t|f}) -> editor instance
 
 		enum_values    : enum type: 'v1 ...' | ['v1', ...]
-		enum_texts     : enum type: {v->text}
+		enum_labels    : enum type: {v->label}
 		enum_info      : enum type: {v->info}
 
 	validation:
@@ -2907,7 +2907,7 @@ ui.nav = function(opt) {
 
 		if (field.type == 'number' || field.is_time) {
 
-			let from_input = field.from_input
+			let from_input = s => field.from_input(s)
 
 			// range: n1..n2
 			{
@@ -3727,8 +3727,6 @@ ui.nav = function(opt) {
 							val = field.client_default
 							if (isfunc(val)) // name generator etc.
 								val = val()
-							if (val === undefined)
-								val = field.default
 							row[fi] = val
 						}
 						fi++
@@ -4371,7 +4369,8 @@ ui.nav = function(opt) {
 					if (field.nosave)
 						continue
 					let val = e.cell_input_val(row, field)
-					if (val !== field.default)
+					// an unset col takes the server default; a null is a null.
+					if (val !== undefined)
 						t.values[field.name] = val
 				}
 				packed_rows.push(t)
@@ -4592,7 +4591,7 @@ ui.nav = function(opt) {
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			let field = e.all_fields[fi]
 			let v = e.cell_input_val(row, field)
-			if (v !== field.default && !field.nosave)
+			if (v !== undefined && !field.nosave)
 				drow[fi] = v
 		}
 		return drow
@@ -4619,7 +4618,7 @@ ui.nav = function(opt) {
 		let vals = {}
 		for (let field of e.all_fields) {
 			let v = e.cell_input_val(row, field)
-			if (v !== field.default && !field.nosave)
+			if (v !== undefined && !field.nosave)
 				vals[field.name] = v
 		}
 		return vals
@@ -4629,8 +4628,7 @@ ui.nav = function(opt) {
 		let row = []
 		for (let fi = 0; fi < e.all_fields.length; fi++) {
 			let field = e.all_fields[fi]
-			let v = vals[field.name] ?? field.default
-			row[fi] = v
+			row[fi] = vals[field.name]
 		}
 		return row
 	}
@@ -4931,12 +4929,17 @@ field_types.password = {}
 
 // numbers -------------------------------------------------------------------
 
-let number = {align: 'right', decimals: 0, is_number: true, from_input: num}
+let number = {align: 'right', decimals: 0, scale: 1, is_number: true}
 field_types.number = number
+
+number.from_input = function(s) {
+	let x = num(s)
+	return x != null ? x * this.scale : x
+}
 
 number.to_text = function(s) {
 	let x = num(s)
-	return x != null ? dec(x, this.decimals) : s
+	return x != null ? dec(x / this.scale, this.decimals) : s
 }
 
 // file sizes ----------------------------------------------------------------
@@ -4994,7 +4997,7 @@ count.to_text = function(s) {
 // dates ---------------------------------------------------------------------
 
 let date = {
-	align: 'right',
+	align: 'center',
 	is_time: true,
 	w: 80,
 	precision: 'd',
@@ -5034,6 +5037,7 @@ field_types.time = ts
 
 ts.has_time = true
 ts.precision = 's'
+ts.w = 160
 
 // timeofday (MySQL TIME type) -----------------------------------------------
 
@@ -5062,7 +5066,7 @@ d.to_text = function(v) {
 
 // booleans ------------------------------------------------------------------
 
-let bool = {align: 'center', min_w: 28, w: 40, is_bool: true}
+let bool = {align: 'center', min_w: 20, w: 20, is_bool: true}
 field_types.bool = bool
 
 bool.draw_null = function(mode) {
@@ -5092,7 +5096,7 @@ let enm = {}
 field_types.enum = enm
 
 enm.to_text = function(v) {
-	let s = this.enum_texts ? this.enum_texts[v] : undefined
+	let s = this.enum_labels ? this.enum_labels[v] : undefined
 	return s !== undefined ? s : v
 }
 
@@ -5123,18 +5127,19 @@ color.draw = function(v, mode) {
 
 // percents ------------------------------------------------------------------
 
-let percent = {is_number: true, align: 'center'}
+// 50% at the default scale of 100 is stored as 5000.
+let percent = assign({}, number, {scale: 100, decimals: 2})
 field_types.percent = percent
 
 percent.to_text = function(p) {
-	return isnum(p) ? dec(p * 100, this.decimals) + '%' : p
+	return isnum(p) ? dec(p / this.scale, this.decimals) + '%' : p
 }
 
 percent.draw = function(p, mode, row, full_width) {
 	let s = this.to_text(p)
 	if (!mode)
 		return s
-	let f = clamp(p, 0, 1)
+	let f = clamp(p / this.scale / 100, 0, 1)
 	ui.m(ui.sp1(), 0)
 	ui.stack('', 0, 's', 'c', 0, ui.em(1))
 		ui.h(0, 0, 's', 's')
